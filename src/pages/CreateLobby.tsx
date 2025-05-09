@@ -8,6 +8,8 @@ import {
     IonPage,
     IonTitle,
     IonToolbar,
+    IonBackButton,
+    IonButtons,
   } from '@ionic/react';
   
   const CreateLobby: React.FC = () => {
@@ -16,6 +18,9 @@ import {
       <IonPage id="CreateLobby-page">
         <IonHeader>
           <IonToolbar>
+            <IonButtons slot="start">
+              <IonBackButton defaultHref="/home" />
+            </IonButtons>
             <IonTitle> CreateLobby </IonTitle>
           </IonToolbar>
         </IonHeader>

@@ -39,6 +39,9 @@ import './theme/variables.css';
 import CreateLobby from './pages/CreateLobby';
 import JoinLobby from './pages/JoinLobby';
 import Lobby from './pages/Lobby';
+import Agent from './pages/Agent';
+import Rogue from './pages/Rogue';
+import EndGame from './pages/EndGame';
 setupIonicReact();
 
 const App: React.FC = () => {
@@ -72,6 +75,9 @@ const App: React.FC = () => {
               <Route exact path="/create-lobby" render={() => <CreateLobby />} />
               <Route exact path="/join-lobby" render={() => <JoinLobby />} />
               <Route exact path="/lobby" render={() => <Lobby />} />
+              <Route exact path="/agent" render={() => <Agent />} />
+              <Route exact path="/rogue" render={() => <Rogue />} />
+              <Route exact path="/end-game" render={() => <EndGame />} />
               <Route path="*" component={NotFound} />
             </Switch>
           )}
