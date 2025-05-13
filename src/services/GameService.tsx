@@ -47,6 +47,15 @@ class GameService {
         return data;
       }
 
+      async getGameByCode(code: string) {
+        const { data, error } = await supabaseClient
+          .from('game')
+          .select(`*`)
+          .eq('code', code);
+        if (error) throw error;
+        return data;
+      }
+
       async updateGameByCode(code: string, gameData: Record<string, any>) {
         const { data, error } = await supabaseClient
           .from('game')

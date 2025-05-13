@@ -19,6 +19,8 @@ import {
     IonToast,
 } from '@ionic/react';
 import { useState } from 'react';
+import { useHistory } from 'react-router-dom';
+import GameService from '../services/GameService';
 
 interface GameFormData {
   objectif_number: number;
@@ -31,6 +33,7 @@ interface GameFormData {
 }
 
 const CreateLobby: React.FC = () => {
+  const history = useHistory();
   const [formData, setFormData] = useState<GameFormData>({
     objectif_number: 3,
     duration: 15,
@@ -41,8 +44,7 @@ const CreateLobby: React.FC = () => {
     agent_range: 50,
   });
 
-  const [showToast, setShowToast] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleInputChange = (field: keyof GameFormData, value: string | number) => {
     setFormData(prev => ({
@@ -51,9 +53,33 @@ const CreateLobby: React.FC = () => {
     }));
   };
 
-  const handleSubmit = () => {
-    // TODO: Add API call to create game
-    console.log('Form submitted:', formData);
+  const handleSubmit = async () => {
+    try {
+      setIsLoading(true);
+      const gameService = new GameService();
+      
+      // Generate a random 8-letter code
+      const code = Array.from({ length: 8 }, () => 
+        String.fromCharCode(65 + Math.floor(Math.random() * 26))
+      ).join('');
+
+      const gameData = {
+        ...formData,
+        code,
+        created_at: new Date().toISOString(),
+      };
+
+      const createdGame = await gameService.createGame(gameData);
+      
+      if (createdGame && createdGame[0]) {
+        // Navigate to the lobby with the game code
+        history.push(`/lobby?code=${code}`);
+      }
+    } catch (error) {
+      console.error('Error creating game:', error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -139,19 +165,16 @@ const CreateLobby: React.FC = () => {
               </IonItem>
             </IonList>
 
-            <IonButton expand="block" onClick={handleSubmit} className="ion-margin-top">
-              Créer la partie
+            <IonButton 
+              expand="block" 
+              onClick={handleSubmit} 
+              className="ion-margin-top"
+              disabled={isLoading}
+            >
+              {isLoading ? 'Création en cours...' : 'Créer la partie'}
             </IonButton>
           </IonCardContent>
         </IonCard>
-
-        <IonToast
-          isOpen={showToast}
-          onDidDismiss={() => setShowToast(false)}
-          message={toastMessage}
-          duration={2000}
-          position="top"
-        />
       </IonContent>
     </IonPage>
   );
