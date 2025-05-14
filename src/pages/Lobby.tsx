@@ -26,6 +26,9 @@ interface GameDetails {
   objectiv_zone_radius: number;
   rogue_range: number;
   agent_range: number;
+  map_radius: number;
+  map_center_latitude: string;
+  map_center_longitude: string;
 }
 
 const Lobby: React.FC = () => {
@@ -130,6 +133,19 @@ const Lobby: React.FC = () => {
                   <IonLabel>
                     <h2>Portée des Agents</h2>
                     <p>{gameDetails.agent_range} mètres</p>
+                  </IonLabel>
+                </IonItem>
+                <IonItem>
+                  <IonLabel>
+                    <h2>Rayon de la zone de jeu</h2>
+                    <p>{gameDetails.map_radius} mètres</p>
+                  </IonLabel>
+                </IonItem>
+                <IonItem>
+                  <IonLabel>
+                    <h2>Centre de la zone de jeu</h2>
+                    <p>Latitude: {gameDetails.map_center_latitude}</p>
+                    <p>Longitude: {gameDetails.map_center_longitude}</p>
                   </IonLabel>
                 </IonItem>
               </IonList>

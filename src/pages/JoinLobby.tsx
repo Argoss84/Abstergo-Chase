@@ -11,11 +11,22 @@ import {
     IonBackButton,
     IonButtons,
     IonButton,
+    IonItem,
+    IonInput,
+    IonLabel,
   } from '@ionic/react';
   import { useHistory } from 'react-router-dom';
+  import { useState } from 'react';
   
   const JoinLobby: React.FC = () => {
     const history = useHistory();
+    const [gameCode, setGameCode] = useState('');
+  
+    const handleJoinGame = () => {
+      if (gameCode.trim()) {
+        history.push(`/lobby?code=${gameCode}`);
+      }
+    };
   
     return (
       <IonPage id="JoinLobby-page">
@@ -36,12 +47,32 @@ import {
               </IonCardTitle>
             </IonCardHeader>
             <IonCardContent>
-              <IonButton expand="block" onClick={() => history.push('/rogue')}>
-                Rogue
+              <IonItem>
+                <IonLabel position="stacked">Code de la partie</IonLabel>
+                <IonInput
+                  value={gameCode}
+                  onIonChange={e => setGameCode(e.detail.value!)}
+                  placeholder="Entrez le code de la partie"
+                />
+              </IonItem>
+              
+              <IonButton 
+                expand="block" 
+                onClick={handleJoinGame}
+                disabled={!gameCode.trim()}
+                className="ion-margin-top"
+              >
+                Rejoindre la partie
               </IonButton>
-              <IonButton expand="block" onClick={() => history.push('/agent')}>
-                Agent
-              </IonButton>
+
+              <div className="ion-margin-top">
+                <IonButton expand="block" onClick={() => history.push('/rogue')}>
+                  Rogue
+                </IonButton>
+                <IonButton expand="block" onClick={() => history.push('/agent')}>
+                  Agent
+                </IonButton>
+              </div>
             </IonCardContent>
           </IonCard>
   

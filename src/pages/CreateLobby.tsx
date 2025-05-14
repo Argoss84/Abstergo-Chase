@@ -17,10 +17,14 @@ import {
     IonList,
     IonText,
     IonToast,
+    IonModal,
 } from '@ionic/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import GameService from '../services/GameService';
+import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Circle } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
 
 interface GameFormData {
   objectif_number: number;
@@ -30,10 +34,31 @@ interface GameFormData {
   objectiv_zone_radius: number;
   rogue_range: number;
   agent_range: number;
+  map_center_latitude: string;
+  map_center_longitude: string;
+  map_radius: number;
 }
+
+interface Objective {
+  position: [number, number];
+  id: number;
+}
+
+const ResizeMap = () => {
+  const map = useMap();
+  useEffect(() => {
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 0);
+  }, [map]);
+  return null;
+};
 
 const CreateLobby: React.FC = () => {
   const history = useHistory();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedPosition, setSelectedPosition] = useState<[number, number] | null>(null);
+  const [objectives, setObjectives] = useState<Objective[]>([]);
   const [formData, setFormData] = useState<GameFormData>({
     objectif_number: 3,
     duration: 15,
@@ -42,6 +67,9 @@ const CreateLobby: React.FC = () => {
     objectiv_zone_radius: 300,
     rogue_range: 50,
     agent_range: 50,
+    map_center_latitude: '',
+    map_center_longitude: '',
+    map_radius: 500,
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -51,6 +79,38 @@ const CreateLobby: React.FC = () => {
       ...prev,
       [field]: value
     }));
+  };
+
+  const generateRandomPosition = (center: [number, number], radius: number): [number, number] => {
+    // Convert radius from meters to degrees (approximate)
+    const radiusInDegrees = radius / 111000;
+    
+    // Generate random angle
+    const angle = Math.random() * 2 * Math.PI;
+    
+    // Generate random distance within radius
+    const distance = Math.sqrt(Math.random()) * radiusInDegrees;
+    
+    // Calculate new position
+    const lat = center[0] + distance * Math.cos(angle);
+    const lng = center[1] + distance * Math.sin(angle);
+    
+    return [lat, lng];
+  };
+
+  const handleGenerateObjectives = () => {
+    if (!selectedPosition) {
+      return;
+    }
+
+    const newObjectives: Objective[] = [];
+    for (let i = 0; i < formData.objectif_number; i++) {
+      newObjectives.push({
+        position: generateRandomPosition(selectedPosition, formData.map_radius),
+        id: i + 1
+      });
+    }
+    setObjectives(newObjectives);
   };
 
   const handleSubmit = async () => {
@@ -67,11 +127,24 @@ const CreateLobby: React.FC = () => {
         ...formData,
         code,
         created_at: new Date().toISOString(),
+        map_center_latitude: selectedPosition ? selectedPosition[0].toString() : '',
+        map_center_longitude: selectedPosition ? selectedPosition[1].toString() : ''
       };
 
       const createdGame = await gameService.createGame(gameData);
       
       if (createdGame && createdGame[0]) {
+        // Create props for each objective
+        const propsData = objectives.map(obj => ({
+          id_game: createdGame[0].id_game,
+          latitude: obj.position[0].toString(),
+          longitude: obj.position[1].toString(),
+          type: 'OBJECTIV',
+          created_at: new Date().toISOString()
+        }));
+
+        await gameService.createProps(propsData);
+
         // Navigate to the lobby with the game code
         history.push(`/lobby?code=${code}`);
       }
@@ -80,6 +153,17 @@ const CreateLobby: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Component to handle map clicks
+  const MapEvents = () => {
+    useMapEvents({
+      click: (e) => {
+        setSelectedPosition([e.latlng.lat, e.latlng.lng]);
+        setObjectives([]); // Clear objectives when center changes
+      },
+    });
+    return null;
   };
 
   return (
@@ -96,10 +180,84 @@ const CreateLobby: React.FC = () => {
         <IonCard>
           <IonCardHeader>
             <IonCardTitle>
-              Paramètres de la partie
+              Créer une nouvelle partie
             </IonCardTitle>
           </IonCardHeader>
           <IonCardContent>
+            <div style={{ height: '300px', width: '100%', marginBottom: '1rem' }}>
+              <MapContainer
+                center={[48.8566, 2.3522]} // Paris coordinates
+                zoom={13}
+                style={{ height: '100%', width: '100%' }}
+              >
+                <ResizeMap />
+                <TileLayer
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                />
+                <MapEvents />
+                {selectedPosition && (
+                  <>
+                    <Marker position={selectedPosition} />
+                    <Circle
+                      center={selectedPosition}
+                      radius={formData.map_radius}
+                      pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
+                    />
+                  </>
+                )}
+                {objectives.map((objective) => (
+                  <Marker
+                    key={objective.id}
+                    position={objective.position}
+                    icon={L.divIcon({
+                      className: 'custom-div-icon',
+                      html: `<div style="background-color: red; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
+                      iconSize: [20, 20],
+                      iconAnchor: [10, 10],
+                    })}
+                  />
+                ))}
+              </MapContainer>
+            </div>
+
+            <IonButton 
+              expand="block" 
+              onClick={() => setIsModalOpen(true)}
+              className="ion-margin-bottom"
+            >
+              Détails Partie
+            </IonButton>
+
+            <IonButton 
+              expand="block" 
+              className="ion-margin-bottom"
+              onClick={handleGenerateObjectives}
+              disabled={!selectedPosition}
+            >
+              Générer les objectifs
+            </IonButton>
+
+            <IonButton 
+              expand="block" 
+              onClick={handleSubmit} 
+              disabled={isLoading || !selectedPosition || objectives.length === 0}
+            >
+              {isLoading ? 'Création en cours...' : 'Créer la partie'}
+            </IonButton>
+          </IonCardContent>
+        </IonCard>
+
+        <IonModal isOpen={isModalOpen} onDidDismiss={() => setIsModalOpen(false)}>
+          <IonHeader>
+            <IonToolbar>
+              <IonTitle>Paramètres de la partie</IonTitle>
+              <IonButtons slot="end">
+                <IonButton onClick={() => setIsModalOpen(false)}>Fermer</IonButton>
+              </IonButtons>
+            </IonToolbar>
+          </IonHeader>
+          <IonContent className="ion-padding">
             <IonList>
               <IonItem>
                 <IonLabel position="stacked">Nombre d'objectifs</IonLabel>
@@ -163,18 +321,18 @@ const CreateLobby: React.FC = () => {
                   onIonChange={e => handleInputChange('agent_range', parseInt(e.detail.value || '0'))}
                 />
               </IonItem>
-            </IonList>
 
-            <IonButton 
-              expand="block" 
-              onClick={handleSubmit} 
-              className="ion-margin-top"
-              disabled={isLoading}
-            >
-              {isLoading ? 'Création en cours...' : 'Créer la partie'}
-            </IonButton>
-          </IonCardContent>
-        </IonCard>
+              <IonItem>
+                <IonLabel position="stacked">Rayon de la zone de jeu (en mètres)</IonLabel>
+                <IonInput
+                  type="number"
+                  value={formData.map_radius}
+                  onIonChange={e => handleInputChange('map_radius', parseInt(e.detail.value || '0'))}
+                />
+              </IonItem>
+            </IonList>
+          </IonContent>
+        </IonModal>
       </IonContent>
     </IonPage>
   );

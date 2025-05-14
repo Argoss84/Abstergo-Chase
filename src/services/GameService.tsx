@@ -68,7 +68,7 @@ class GameService {
 
       async createProps(propsData: Record<string, any>[]) {
         const { data, error } = await supabaseClient
-          .from('game_props')
+          .from('props')
           .insert(propsData)
           .select();
         if (error) throw error;
@@ -77,7 +77,7 @@ class GameService {
 
       async getProps() {
         const { data, error } = await supabaseClient
-          .from('game_props')
+          .from('props')
           .select('*');
         if (error) throw error;
         return data;
@@ -85,7 +85,7 @@ class GameService {
 
       async updateProp(id_prop: string, propData: Record<string, any>) {
         const { data, error } = await supabaseClient
-          .from('game_props')
+          .from('props')
           .update(propData)
           .eq('id_prop', id_prop)
           .select();
@@ -95,7 +95,7 @@ class GameService {
 
       async deleteProp(id_prop: string) {
         const { error } = await supabaseClient
-          .from('game_props')
+          .from('props')
           .delete()
           .eq('id_prop', id_prop);
         if (error) throw error;
