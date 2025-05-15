@@ -22,9 +22,10 @@ import {
 import { useEffect, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import GameService from '../services/GameService';
-import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Circle } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Circle, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import { generateRandomPoints, generateStartZone, generateStartZoneRogue } from '../utils/utils';
 
 interface GameFormData {
   objectif_number: number;
@@ -44,6 +45,11 @@ interface Objective {
   id: number;
 }
 
+interface StartZones {
+  agent: [number, number] | null;
+  rogue: [number, number] | null;
+}
+
 const ResizeMap = () => {
   const map = useMap();
   useEffect(() => {
@@ -58,7 +64,11 @@ const CreateLobby: React.FC = () => {
   const history = useHistory();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<[number, number] | null>(null);
+  const [userPosition, setUserPosition] = useState<[number, number] | null>(null);
+  const [streets, setStreets] = useState<L.LatLngTuple[][]>([]);
+  const [mapKey, setMapKey] = useState(0);
   const [objectives, setObjectives] = useState<Objective[]>([]);
+  const [startZones, setStartZones] = useState<StartZones>({ agent: null, rogue: null });
   const [formData, setFormData] = useState<GameFormData>({
     objectif_number: 3,
     duration: 15,
@@ -81,21 +91,27 @@ const CreateLobby: React.FC = () => {
     }));
   };
 
-  const generateRandomPosition = (center: [number, number], radius: number): [number, number] => {
-    // Convert radius from meters to degrees (approximate)
-    const radiusInDegrees = radius / 111000;
-    
-    // Generate random angle
-    const angle = Math.random() * 2 * Math.PI;
-    
-    // Generate random distance within radius
-    const distance = Math.sqrt(Math.random()) * radiusInDegrees;
-    
-    // Calculate new position
-    const lat = center[0] + distance * Math.cos(angle);
-    const lng = center[1] + distance * Math.sin(angle);
-    
-    return [lat, lng];
+  const fetchStreets = async (lat: number, lng: number) => {
+    const overpassUrl = `https://overpass-api.de/api/interpreter?data=
+                          [out:json];
+                          (
+                            way(around:${formData.map_radius},${lat},${lng})["highway"]["foot"!~"no"];
+                            way(around:${formData.map_radius},${lat},${lng})["amenity"="square"]["foot"!~"no"];
+                          );
+                          (._;>;);
+                          out;`;
+
+    const response = await fetch(overpassUrl);
+    const data = await response.json();
+    const ways = data.elements.filter((el: any) => el.type === "way");
+    const nodes = data.elements.filter((el: any) => el.type === "node");
+    const nodeMap = new Map(
+      nodes.map((node: any) => [node.id, [node.lat, node.lon]])
+    );
+    const streetLines = ways.map((way: any) =>
+      way.nodes.map((nodeId: any) => nodeMap.get(nodeId))
+    );
+    setStreets(streetLines);
   };
 
   const handleGenerateObjectives = () => {
@@ -103,14 +119,44 @@ const CreateLobby: React.FC = () => {
       return;
     }
 
-    const newObjectives: Objective[] = [];
-    for (let i = 0; i < formData.objectif_number; i++) {
-      newObjectives.push({
-        position: generateRandomPosition(selectedPosition, formData.map_radius),
-        id: i + 1
+    try {
+      const randomPoints = generateRandomPoints(
+        selectedPosition,
+        formData.map_radius,
+        formData.objectif_number,
+        streets
+      );
+
+      const newObjectives = randomPoints.map((position, index) => ({
+        position,
+        id: index + 1
+      }));
+
+      // Generate start zones
+      const agentStartZone = generateStartZone(
+        selectedPosition,
+        formData.map_radius,
+        randomPoints,
+        streets
+      );
+
+      const rogueStartZone = generateStartZoneRogue(
+        selectedPosition,
+        formData.map_radius,
+        agentStartZone,
+        randomPoints,
+        streets
+      );
+
+      setObjectives(newObjectives);
+      setStartZones({
+        agent: agentStartZone,
+        rogue: rogueStartZone
       });
+    } catch (error) {
+      console.error('Error generating objectives:', error);
+      // You might want to show a toast or some user feedback here
     }
-    setObjectives(newObjectives);
   };
 
   const handleSubmit = async () => {
@@ -128,7 +174,11 @@ const CreateLobby: React.FC = () => {
         code,
         created_at: new Date().toISOString(),
         map_center_latitude: selectedPosition ? selectedPosition[0].toString() : '',
-        map_center_longitude: selectedPosition ? selectedPosition[1].toString() : ''
+        map_center_longitude: selectedPosition ? selectedPosition[1].toString() : '',
+        start_zone_latitude: startZones.agent ? startZones.agent[0].toString() : null,
+        start_zone_longitude: startZones.agent ? startZones.agent[1].toString() : null,
+        start_zone_rogue_latitude: startZones.rogue ? startZones.rogue[0].toString() : null,
+        start_zone_rogue_longitude: startZones.rogue ? startZones.rogue[1].toString() : null
       };
 
       const createdGame = await gameService.createGame(gameData);
@@ -166,6 +216,61 @@ const CreateLobby: React.FC = () => {
     return null;
   };
 
+  useEffect(() => {
+    console.log('Attempting to get user location...');
+    // Get user's current position
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          console.log('Got user position:', position.coords.latitude, position.coords.longitude);
+          const newPosition: [number, number] = [position.coords.latitude, position.coords.longitude];
+          setUserPosition(newPosition);
+          setMapKey(prev => prev + 1); // Force map re-render
+          // Also update the form data with the initial position
+          setFormData(prev => ({
+            ...prev,
+            map_center_latitude: newPosition[0].toString(),
+            map_center_longitude: newPosition[1].toString()
+          }));
+        },
+        (error) => {
+          console.error('Error getting location:', error);
+          // Fallback to Paris coordinates if geolocation fails
+          const fallbackPosition: [number, number] = [48.8566, 2.3522];
+          setUserPosition(fallbackPosition);
+          setMapKey(prev => prev + 1);
+          setFormData(prev => ({
+            ...prev,
+            map_center_latitude: fallbackPosition[0].toString(),
+            map_center_longitude: fallbackPosition[1].toString()
+          }));
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 5000,
+          maximumAge: 0
+        }
+      );
+    } else {
+      console.log('Geolocation not supported');
+      // Fallback to Paris coordinates if geolocation is not supported
+      const fallbackPosition: [number, number] = [48.8566, 2.3522];
+      setUserPosition(fallbackPosition);
+      setMapKey(prev => prev + 1);
+      setFormData(prev => ({
+        ...prev,
+        map_center_latitude: fallbackPosition[0].toString(),
+        map_center_longitude: fallbackPosition[1].toString()
+      }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedPosition) {
+      fetchStreets(selectedPosition[0], selectedPosition[1]);
+    }
+  }, [selectedPosition]);
+
   return (
     <IonPage id="CreateLobby-page">
       <IonHeader>
@@ -185,40 +290,86 @@ const CreateLobby: React.FC = () => {
           </IonCardHeader>
           <IonCardContent>
             <div style={{ height: '300px', width: '100%', marginBottom: '1rem' }}>
-              <MapContainer
-                center={[48.8566, 2.3522]} // Paris coordinates
-                zoom={13}
-                style={{ height: '100%', width: '100%' }}
-              >
-                <ResizeMap />
-                <TileLayer
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                />
-                <MapEvents />
-                {selectedPosition && (
-                  <>
-                    <Marker position={selectedPosition} />
-                    <Circle
-                      center={selectedPosition}
-                      radius={formData.map_radius}
-                      pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
-                    />
-                  </>
-                )}
-                {objectives.map((objective) => (
-                  <Marker
-                    key={objective.id}
-                    position={objective.position}
-                    icon={L.divIcon({
-                      className: 'custom-div-icon',
-                      html: `<div style="background-color: red; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-                      iconSize: [20, 20],
-                      iconAnchor: [10, 10],
-                    })}
+              {userPosition && (
+                <MapContainer
+                  key={mapKey}
+                  center={userPosition}
+                  zoom={13}
+                  style={{ height: '100%', width: '100%' }}
+                >
+                  <ResizeMap />
+                  <TileLayer
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                   />
-                ))}
-              </MapContainer>
+                  <MapEvents />
+                  {selectedPosition && (
+                    <>
+                      <Marker position={selectedPosition} />
+                      <Circle
+                        center={selectedPosition}
+                        radius={formData.map_radius}
+                        pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
+                      />
+                    </>
+                  )}
+                  {objectives.map((objective) => (
+                    <Marker
+                      key={objective.id}
+                      position={objective.position}
+                      icon={L.divIcon({
+                        className: 'custom-div-icon',
+                        html: `<div style="background-color: red; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
+                        iconSize: [20, 20],
+                        iconAnchor: [10, 10],
+                      })}
+                    />
+                  ))}
+                  {startZones.agent && (
+                    <>
+                      <Marker
+                        position={startZones.agent}
+                        icon={L.divIcon({
+                          className: 'custom-div-icon',
+                          html: `<div style="background-color: blue; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
+                          iconSize: [20, 20],
+                          iconAnchor: [10, 10],
+                        })}
+                      />
+                      <Circle
+                        center={startZones.agent}
+                        radius={50}
+                        pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
+                      />
+                    </>
+                  )}
+                  {startZones.rogue && (
+                    <>
+                      <Marker
+                        position={startZones.rogue}
+                        icon={L.divIcon({
+                          className: 'custom-div-icon',
+                          html: `<div style="background-color: green; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
+                          iconSize: [20, 20],
+                          iconAnchor: [10, 10],
+                        })}
+                      />
+                      <Circle
+                        center={startZones.rogue}
+                        radius={50}
+                        pathOptions={{ color: 'green', fillColor: 'green', fillOpacity: 0.1 }}
+                      />
+                    </>
+                  )}
+                  {streets.map((street, index) => (
+                    <Polyline
+                      key={index}
+                      positions={street}
+                      pathOptions={{ color: 'gray', weight: 2 }}
+                    />
+                  ))}
+                </MapContainer>
+              )}
             </div>
 
             <IonButton 
