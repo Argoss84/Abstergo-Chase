@@ -2,7 +2,7 @@ import React, { createContext, useState, useContext, ReactNode, useEffect } from
 import { createClient } from '@supabase/supabase-js';
 import { Auth } from '@supabase/auth-ui-react';
 import { ThemeSupa } from '@supabase/auth-ui-shared';
-import { getUserWithAccessRights } from '../services/UserServices';
+import { getUserByAuthId, createUser } from '../services/UserServices';
 import { listParameters } from '../services/AdminService'; // Importer la fonction listParameters
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
@@ -27,6 +27,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [loading, setLoading] = useState(true);
   
 
+  const handleUserAuth = async (session: any) => {
+    if (session?.user) {
+      // Vérifier si l'utilisateur existe déjà
+      const existingUser = await getUserByAuthId(session.user.id);
+      
+      if (!existingUser) {
+        // Créer un nouvel utilisateur s'il n'existe pas
+        await createUser({
+          auth_user_id: session.user.id,
+          email: session.user.email
+        });
+      }
+    }
+  };
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -34,7 +49,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setLoading(false);
 
       if (session?.user) {
- 
+        handleUserAuth(session);
       }
     });
 
@@ -43,7 +58,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setUserEmail(session?.user?.email || null);
 
       if (session?.user) {
-
+        handleUserAuth(session);
       }
     });
 

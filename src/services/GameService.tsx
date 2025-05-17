@@ -24,7 +24,7 @@ class GameService {
           .from('game')
           .select(`
             *,
-            game_props (
+            props (
               *
             )
           `)
@@ -38,7 +38,7 @@ class GameService {
           .from('game')
           .select(`
             *,
-            game_props (
+            props (
               *
             )
           `)
@@ -197,6 +197,22 @@ class GameService {
         )
         .subscribe();
       return channel;
+      }
+
+      async createPlayerWithEmail(playerData: { id_game: number; email: string; role: string; created_at: string }) {
+        // Create the player directly with the email as user_id
+        const { data, error } = await supabaseClient
+          .from('players')
+          .insert([{
+            id_game: playerData.id_game,
+            user_id: playerData.email, // Use email as user_id
+            role: playerData.role,
+            created_at: playerData.created_at
+          }])
+          .select();
+        
+        if (error) throw error;
+        return data;
       }
 }
 
