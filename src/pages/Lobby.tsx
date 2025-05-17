@@ -15,6 +15,8 @@ import {
     IonButton,
     IonModal,
     IonButtons,
+    IonAvatar,
+    IonToggle,
 } from '@ionic/react';
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
@@ -22,6 +24,8 @@ import GameService from '../services/GameService';
 import { MapContainer, TileLayer, Circle, Marker, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import { useAuth } from '../contexts/AuthenticationContext';
+import { getUserByAuthId } from '../services/UserServices';
 
 interface GameDetails {
   code: string;
@@ -41,6 +45,8 @@ interface GameDetails {
   start_zone_rogue_longitude?: string;
   id_game: number;
   props?: GameProp[];
+  max_agents: number;
+  max_rogue: number;
 }
 
 interface GameProp {
@@ -50,14 +56,27 @@ interface GameProp {
   type: string;
 }
 
+interface Player {
+  id_player: number;
+  id_game: number;
+  user_id: string;
+  role: string;
+  created_at: string;
+  users: {
+    email: string;
+  };
+}
+
 const Lobby: React.FC = () => {
   const location = useLocation();
+  const { userEmail, session } = useAuth();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [objectives, setObjectives] = useState<GameProp[]>([]);
   const [streets, setStreets] = useState<L.LatLngTuple[][]>([]);
   const [mapKey, setMapKey] = useState(0);
+  const [players, setPlayers] = useState<Player[]>([]);
 
   useEffect(() => {
     const fetchGameDetails = async () => {
@@ -77,6 +96,61 @@ const Lobby: React.FC = () => {
           setGameDetails(game[0]);
           setObjectives(game[0].props || []);
           
+          // Fetch initial players
+          const initialPlayers = await gameService.getPlayersByGameId(game[0].id_game.toString());
+          setPlayers(initialPlayers || []);
+
+          // Vérifier si l'utilisateur est déjà dans la partie
+          const isUserInGame = initialPlayers?.some(player => player.users.email === userEmail);
+          
+          // Si l'utilisateur n'est pas dans la partie, l'ajouter
+          if (!isUserInGame && userEmail && session?.user?.id) {
+            // Récupérer l'ID de l'utilisateur
+            const user = await getUserByAuthId(session.user.id);
+            console.log('User from getUserByAuthId:', user);
+            
+            if (!user) {
+              setError('Utilisateur non trouvé');
+              return;
+            }
+
+            // Déterminer le rôle en fonction du nombre de joueurs
+            const role = initialPlayers?.length === 0 ? 'AGENT' : 'ROGUE';
+            
+            const playerData = {
+              id_game: game[0].id_game,
+              user_id: user.id,
+              role: role,
+              created_at: new Date().toISOString()
+            };
+            
+            console.log('Creating player with data:', playerData);
+            
+            await gameService.createPlayer(playerData);
+          }
+
+          // Subscribe to player changes
+          const playerChangesChannel = gameService.subscribeToPlayerChanges(
+            game[0].id_game.toString(),
+            (payload) => {
+              if (payload.eventType === 'INSERT') {
+                setPlayers(prev => [...prev, payload.new]);
+              } else if (payload.eventType === 'UPDATE') {
+                setPlayers(prev => prev.map(p => 
+                  p.id_player === payload.new.id_player ? payload.new : p
+                ));
+              }
+            }
+          );
+
+          // Subscribe to player deletions
+          const playerDeleteChannel = gameService.subscribeToPlayerDelete(
+            game[0].id_game.toString(),
+            (payload) => {
+              setPlayers(prev => prev.filter(p => p.id_player !== payload.old.id_player));
+            }
+          );
+
           // Fetch streets
           if (game[0].map_center_latitude && game[0].map_center_longitude) {
             const overpassUrl = `https://overpass-api.de/api/interpreter?data=
@@ -100,6 +174,12 @@ const Lobby: React.FC = () => {
             );
             setStreets(streetLines);
           }
+
+          // Cleanup subscriptions
+          return () => {
+            playerChangesChannel.unsubscribe();
+            playerDeleteChannel.unsubscribe();
+          };
         } else {
           setError('Partie non trouvée');
         }
@@ -110,7 +190,34 @@ const Lobby: React.FC = () => {
     };
 
     fetchGameDetails();
-  }, [location.search]);
+  }, [location.search, userEmail, session]);
+
+  const handleRoleChange = async (playerId: number, newRole: string) => {
+    try {
+      const gameService = new GameService();
+      
+      // Compter le nombre actuel de joueurs par rôle
+      const currentAgents = players.filter(p => p.role === 'AGENT').length;
+      const currentRogues = players.filter(p => p.role === 'ROGUE').length;
+      
+      // Vérifier si le changement est possible
+      if (newRole === 'AGENT' && currentAgents >= (gameDetails?.max_agents || 1)) {
+        setError('Nombre maximum d\'agents atteint');
+        return;
+      }
+      if (newRole === 'ROGUE' && currentRogues >= (gameDetails?.max_rogue || 1)) {
+        setError('Nombre maximum de rogues atteint');
+        return;
+      }
+
+      // Mettre à jour le rôle
+      await gameService.updatePlayer(playerId.toString(), { role: newRole });
+      console.log(`Rôle mis à jour avec succès sur le serveur: ${playerId} -> ${newRole}`);
+    } catch (err) {
+      console.error('Error updating player role:', err);
+      setError('Erreur lors du changement de rôle');
+    }
+  };
 
   return (
     <IonPage id="Lobby-page">
@@ -199,6 +306,64 @@ const Lobby: React.FC = () => {
                 ))}
               </MapContainer>
             </div>
+
+            <IonCard>
+              <IonCardHeader>
+                <IonCardTitle>Joueurs ({players.length})</IonCardTitle>
+              </IonCardHeader>
+              <IonCardContent>
+                <IonList>
+                  {players.map((player) => (
+                    <IonItem key={player.id_player}>
+                      <IonAvatar slot="start">
+                        <div style={{
+                          width: '100%',
+                          height: '100%',
+                          backgroundColor: player.role === 'AGENT' ? '#3880ff' : '#ff4961',
+                          borderRadius: '50%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'white',
+                          fontWeight: 'bold'
+                        }}>
+                          {player.role === 'AGENT' ? 'A' : 'R'}
+                        </div>
+                      </IonAvatar>
+                      <IonLabel>
+                        <h2>{player.users.email}</h2>
+                        <p>{player.role}</p>
+                      </IonLabel>
+                      {player.users.email === userEmail && (
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}>
+                          <span style={{ color: '#3880ff' }}>Agent</span>
+                          <IonToggle
+                            checked={player.role === 'ROGUE'}
+                            onIonChange={(e) => {
+                              const newRole = e.detail.checked ? 'ROGUE' : 'AGENT';
+                              console.log(`Mise à jour locale du rôle: ${player.users.email} -> ${newRole}`);
+                              // Mise à jour immédiate de l'état local
+                              setPlayers(prev => prev.map(p => 
+                                p.id_player === player.id_player 
+                                  ? { ...p, role: newRole }
+                                  : p
+                              ));
+                              handleRoleChange(player.id_player, newRole);
+                            }}
+                            color="danger"
+                          />
+                          <span style={{ color: '#ff4961' }}>Rogue</span>
+                        </div>
+                      )}
+                    </IonItem>
+                  ))}
+                </IonList>
+              </IonCardContent>
+            </IonCard>
 
             <IonButton 
               expand="block" 
