@@ -198,6 +198,17 @@ class GameService {
         .subscribe();
       return channel;
       }
+      
+      subscribeToGameChanges(code: string, callback: (payload: any) => void) {
+        const channel = supabaseClient.channel(`game-changes-${code}`)
+          .on(
+            'postgres_changes',
+            { event: 'UPDATE', schema: 'public', table: 'game', filter: `code=eq.${code}` },
+            callback
+          )
+          .subscribe();
+        return channel;
+      }
 
       async createPlayerWithEmail(playerData: { id_game: number; email: string; role: string; created_at: string }) {
         // Create the player directly with the email as user_id

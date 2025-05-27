@@ -18,8 +18,8 @@ import {
     IonAvatar,
     IonToggle,
 } from '@ionic/react';
-import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useEffect, useState, useRef } from 'react';
+import { useLocation, useHistory } from 'react-router-dom';
 import GameService from '../services/GameService';
 import { MapContainer, TileLayer, Circle, Marker, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -47,6 +47,7 @@ interface GameDetails {
   props?: GameProp[];
   max_agents: number;
   max_rogue: number;
+  started_date?: string;
 }
 
 interface GameProp {
@@ -69,6 +70,7 @@ interface Player {
 
 const Lobby: React.FC = () => {
   const location = useLocation();
+  const history = useHistory();
   const { userEmail, session } = useAuth();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +79,12 @@ const Lobby: React.FC = () => {
   const [streets, setStreets] = useState<L.LatLngTuple[][]>([]);
   const [mapKey, setMapKey] = useState(0);
   const [players, setPlayers] = useState<Player[]>([]);
+  const playersRef = useRef<Player[]>([]);
+
+  // Update the ref whenever players changes
+  useEffect(() => {
+    playersRef.current = players;
+  }, [players]);
 
   useEffect(() => {
     const fetchGameDetails = async () => {
@@ -99,7 +107,6 @@ const Lobby: React.FC = () => {
           // Fetch initial players
           const initialPlayers = await gameService.getPlayersByGameId(game[0].id_game.toString());
           setPlayers(initialPlayers || []);
-
           // Vérifier si l'utilisateur est déjà dans la partie
           const isUserInGame = initialPlayers?.some(player => player.users.email === userEmail);
           
@@ -107,7 +114,6 @@ const Lobby: React.FC = () => {
           if (!isUserInGame && userEmail && session?.user?.id) {
             // Récupérer l'ID de l'utilisateur
             const user = await getUserByAuthId(session.user.id);
-            console.log('User from getUserByAuthId:', user);
             
             if (!user) {
               setError('Utilisateur non trouvé');
@@ -123,9 +129,7 @@ const Lobby: React.FC = () => {
               role: role,
               created_at: new Date().toISOString()
             };
-            
-            console.log('Creating player with data:', playerData);
-            
+                        
             await gameService.createPlayer(playerData);
           }
 
@@ -148,6 +152,35 @@ const Lobby: React.FC = () => {
             game[0].id_game.toString(),
             (payload) => {
               setPlayers(prev => prev.filter(p => p.id_player !== payload.old.id_player));
+            }
+          );
+
+          // Subscribe to game changes
+          const gameChangesChannel = gameService.subscribeToGameChanges(
+            game[0].code,
+            (payload) => {
+              if (payload.eventType === 'UPDATE') {
+                setGameDetails(prev => {
+                  const newGameDetails = prev ? { ...prev, ...payload.new } : null;
+                  
+                  // Check if the game has started (started_date is not null)
+                  if (payload.new.started_date !== null) {
+                    // Find the current player's role using the ref
+                    const currentPlayer = playersRef.current.find(p => p.users.email === userEmail);
+                    if (currentPlayer) {
+                      // Redirect based on role
+                      const gameCode = payload.new.code;
+                      if (currentPlayer.role === 'AGENT') {
+                        history.push(`/agent?code=${gameCode}`);
+                      } else if (currentPlayer.role === 'ROGUE') {
+                        history.push(`/rogue?code=${gameCode}`);
+                      }
+                    }
+                  }
+                  
+                  return newGameDetails;
+                });
+              }
             }
           );
 
@@ -179,6 +212,7 @@ const Lobby: React.FC = () => {
           return () => {
             playerChangesChannel.unsubscribe();
             playerDeleteChannel.unsubscribe();
+            gameChangesChannel.unsubscribe();
           };
         } else {
           setError('Partie non trouvée');
@@ -190,7 +224,7 @@ const Lobby: React.FC = () => {
     };
 
     fetchGameDetails();
-  }, [location.search, userEmail, session]);
+  }, [location.search, userEmail, session, history]);
 
   const handleRoleChange = async (playerId: number, newRole: string) => {
     try {
@@ -212,7 +246,6 @@ const Lobby: React.FC = () => {
 
       // Mettre à jour le rôle
       await gameService.updatePlayer(playerId.toString(), { role: newRole });
-      console.log(`Rôle mis à jour avec succès sur le serveur: ${playerId} -> ${newRole}`);
     } catch (err) {
       console.error('Error updating player role:', err);
       setError('Erreur lors du changement de rôle');
@@ -345,7 +378,6 @@ const Lobby: React.FC = () => {
                             checked={player.role === 'ROGUE'}
                             onIonChange={(e) => {
                               const newRole = e.detail.checked ? 'ROGUE' : 'AGENT';
-                              console.log(`Mise à jour locale du rôle: ${player.users.email} -> ${newRole}`);
                               // Mise à jour immédiate de l'état local
                               setPlayers(prev => prev.map(p => 
                                 p.id_player === player.id_player 
