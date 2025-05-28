@@ -177,3 +177,20 @@ export const clipPolyline = (
   }
   return clippedPolyline;
 };
+
+export const generateRandomPointInCircle = (center: [number, number], radius: number): [number, number] => {
+  // Convertir le rayon en degrés (approximation)
+  const radiusInDegrees = radius / 111000; // 111000 mètres par degré
+
+  // Générer un angle aléatoire
+  const angle = Math.random() * 2 * Math.PI;
+  
+  // Générer une distance aléatoire (racine carrée pour une distribution uniforme)
+  const distance = Math.sqrt(Math.random()) * radiusInDegrees;
+  
+  // Calculer les nouvelles coordonnées
+  const lat = center[0] + distance * Math.cos(angle);
+  const lng = center[1] + distance * Math.sin(angle);
+  
+  return [lat, lng];
+};

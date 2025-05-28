@@ -21,7 +21,7 @@ import {
 import { useEffect, useState, useRef } from 'react';
 import { useLocation, useHistory } from 'react-router-dom';
 import GameService from '../services/GameService';
-import { MapContainer, TileLayer, Circle, Marker, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Circle, Marker, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { useAuth } from '../contexts/AuthenticationContext';
@@ -48,6 +48,7 @@ interface GameDetails {
   max_agents: number;
   max_rogue: number;
   started_date?: string;
+  is_converging_phase?: boolean;
 }
 
 interface GameProp {
@@ -68,6 +69,16 @@ interface Player {
   };
 }
 
+const ResizeMap = () => {
+  const map = useMap();
+  useEffect(() => {
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 0);
+  }, [map]);
+  return null;
+};
+
 const Lobby: React.FC = () => {
   const location = useLocation();
   const history = useHistory();
@@ -83,7 +94,9 @@ const Lobby: React.FC = () => {
 
   // Update the ref whenever players changes
   useEffect(() => {
-    playersRef.current = players;
+    if (players.length > 0) {
+      playersRef.current = [...players];
+    }
   }, [players]);
 
   useEffect(() => {
@@ -106,7 +119,11 @@ const Lobby: React.FC = () => {
           
           // Fetch initial players
           const initialPlayers = await gameService.getPlayersByGameId(game[0].id_game.toString());
-          setPlayers(initialPlayers || []);
+          if (initialPlayers) {
+            setPlayers(initialPlayers);
+            playersRef.current = initialPlayers;
+          }
+          
           // Vérifier si l'utilisateur est déjà dans la partie
           const isUserInGame = initialPlayers?.some(player => player.users.email === userEmail);
           
@@ -138,11 +155,19 @@ const Lobby: React.FC = () => {
             game[0].id_game.toString(),
             (payload) => {
               if (payload.eventType === 'INSERT') {
-                setPlayers(prev => [...prev, payload.new]);
+                setPlayers(prev => {
+                  const newPlayers = [...prev, payload.new];
+                  playersRef.current = newPlayers;
+                  return newPlayers;
+                });
               } else if (payload.eventType === 'UPDATE') {
-                setPlayers(prev => prev.map(p => 
-                  p.id_player === payload.new.id_player ? payload.new : p
-                ));
+                setPlayers(prev => {
+                  const newPlayers = prev.map(p => 
+                    p.id_player === payload.new.id_player ? payload.new : p
+                  );
+                  playersRef.current = newPlayers;
+                  return newPlayers;
+                });
               }
             }
           );
@@ -151,7 +176,11 @@ const Lobby: React.FC = () => {
           const playerDeleteChannel = gameService.subscribeToPlayerDelete(
             game[0].id_game.toString(),
             (payload) => {
-              setPlayers(prev => prev.filter(p => p.id_player !== payload.old.id_player));
+              setPlayers(prev => {
+                const newPlayers = prev.filter(p => p.id_player !== payload.old.id_player);
+                playersRef.current = newPlayers;
+                return newPlayers;
+              });
             }
           );
 
@@ -163,8 +192,8 @@ const Lobby: React.FC = () => {
                 setGameDetails(prev => {
                   const newGameDetails = prev ? { ...prev, ...payload.new } : null;
                   
-                  // Check if the game has started (started_date is not null)
-                  if (payload.new.started_date !== null) {
+                  // Check if the game has started (is_converging_phase is true)
+                  if (payload.new.is_converging_phase === true) {
                     // Find the current player's role using the ref
                     const currentPlayer = playersRef.current.find(p => p.users.email === userEmail);
                     if (currentPlayer) {
@@ -273,6 +302,7 @@ const Lobby: React.FC = () => {
                 zoom={13}
                 style={{ height: '100%', width: '100%' }}
               >
+                <ResizeMap />
                 <TileLayer
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
