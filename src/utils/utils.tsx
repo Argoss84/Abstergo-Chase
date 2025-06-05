@@ -1,4 +1,6 @@
 import L from "leaflet";
+import { useEffect } from "react";
+import { useMap } from "react-leaflet";
 
 export const generateStartZone = (
   center: [number, number],
@@ -194,3 +196,44 @@ export const generateRandomPointInCircle = (center: [number, number], radius: nu
   
   return [lat, lng];
 };
+
+export const ResizeMap: React.FC = () => {
+  const map = useMap();
+  useEffect(() => {
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 0);
+  }, [map]);
+  return null;
+};
+
+export const createColoredIcon = (color: string) =>
+  L.divIcon({
+    className: 'custom-div-icon',
+    html: `<div style="background-color: ${color}; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+  });
+
+export const fetchStreets = async (
+  lat: number,
+  lng: number,
+  radius: number
+): Promise<L.LatLngTuple[][]> => {
+  const overpassUrl = `https://overpass-api.de/api/interpreter?data=
+      [out:json];
+      (
+        way(around:${radius},${lat},${lng})["highway"]["foot"!~"no"];
+        way(around:${radius},${lat},${lng})["amenity"="square"]["foot"!~"no"];
+      );
+      (._;>;);
+      out;`;
+
+  const response = await fetch(overpassUrl);
+  const data = await response.json();
+  const ways = data.elements.filter((el: any) => el.type === 'way');
+  const nodes = data.elements.filter((el: any) => el.type === 'node');
+  const nodeMap = new Map(nodes.map((node: any) => [node.id, [node.lat, node.lon]]));
+  return ways.map((way: any) => way.nodes.map((nodeId: any) => nodeMap.get(nodeId)));
+};
+

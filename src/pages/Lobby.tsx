@@ -21,11 +21,12 @@ import {
 import { useEffect, useState, useRef } from 'react';
 import { useLocation, useHistory } from 'react-router-dom';
 import GameService from '../services/GameService';
-import { MapContainer, TileLayer, Circle, Marker, Polyline, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Circle, Marker, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
+import { LatLngTuple } from 'leaflet';
 import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
+import { ResizeMap, createColoredIcon, fetchStreets } from '../utils/utils';
 
 interface GameDetails {
   code: string;
@@ -69,16 +70,6 @@ interface Player {
   };
 }
 
-const ResizeMap = () => {
-  const map = useMap();
-  useEffect(() => {
-    setTimeout(() => {
-      map.invalidateSize();
-    }, 0);
-  }, [map]);
-  return null;
-};
-
 const Lobby: React.FC = () => {
   const location = useLocation();
   const history = useHistory();
@@ -87,7 +78,7 @@ const Lobby: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [objectives, setObjectives] = useState<GameProp[]>([]);
-  const [streets, setStreets] = useState<L.LatLngTuple[][]>([]);
+  const [streets, setStreets] = useState<LatLngTuple[][]>([]);
   const [mapKey, setMapKey] = useState(0);
   const [players, setPlayers] = useState<Player[]>([]);
   const playersRef = useRef<Player[]>([]);
@@ -215,26 +206,13 @@ const Lobby: React.FC = () => {
 
           // Fetch streets
           if (game[0].map_center_latitude && game[0].map_center_longitude) {
-            const overpassUrl = `https://overpass-api.de/api/interpreter?data=
-              [out:json];
-              (
-                way(around:${game[0].map_radius},${game[0].map_center_latitude},${game[0].map_center_longitude})["highway"]["foot"!~"no"];
-                way(around:${game[0].map_radius},${game[0].map_center_latitude},${game[0].map_center_longitude})["amenity"="square"]["foot"!~"no"];
-              );
-              (._;>;);
-              out;`;
-
-            const response = await fetch(overpassUrl);
-            const data = await response.json();
-            const ways = data.elements.filter((el: any) => el.type === "way");
-            const nodes = data.elements.filter((el: any) => el.type === "node");
-            const nodeMap = new Map(
-              nodes.map((node: any) => [node.id, [node.lat, node.lon]])
-            );
-            const streetLines = ways.map((way: any) =>
-              way.nodes.map((nodeId: any) => nodeMap.get(nodeId))
-            );
-            setStreets(streetLines);
+            fetchStreets(
+              parseFloat(game[0].map_center_latitude),
+              parseFloat(game[0].map_center_longitude),
+              game[0].map_radius
+            )
+              .then(setStreets)
+              .catch((err) => console.error(err));
           }
 
           // Cleanup subscriptions
@@ -316,24 +294,14 @@ const Lobby: React.FC = () => {
                   <Marker
                     key={objective.id_prop}
                     position={[parseFloat(objective.latitude), parseFloat(objective.longitude)]}
-                    icon={L.divIcon({
-                      className: 'custom-div-icon',
-                      html: `<div style="background-color: red; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-                      iconSize: [20, 20],
-                      iconAnchor: [10, 10],
-                    })}
+                    icon={createColoredIcon('red')}
                   />
                 ))}
                 {gameDetails.start_zone_latitude && gameDetails.start_zone_longitude && (
                   <>
                     <Marker
                       position={[parseFloat(gameDetails.start_zone_latitude), parseFloat(gameDetails.start_zone_longitude)]}
-                      icon={L.divIcon({
-                        className: 'custom-div-icon',
-                        html: `<div style="background-color: blue; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-                        iconSize: [20, 20],
-                        iconAnchor: [10, 10],
-                      })}
+                      icon={createColoredIcon('blue')}
                     />
                     <Circle
                       center={[parseFloat(gameDetails.start_zone_latitude), parseFloat(gameDetails.start_zone_longitude)]}
@@ -346,12 +314,7 @@ const Lobby: React.FC = () => {
                   <>
                     <Marker
                       position={[parseFloat(gameDetails.start_zone_rogue_latitude), parseFloat(gameDetails.start_zone_rogue_longitude)]}
-                      icon={L.divIcon({
-                        className: 'custom-div-icon',
-                        html: `<div style="background-color: green; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-                        iconSize: [20, 20],
-                        iconAnchor: [10, 10],
-                      })}
+                      icon={createColoredIcon('green')}
                     />
                     <Circle
                       center={[parseFloat(gameDetails.start_zone_rogue_latitude), parseFloat(gameDetails.start_zone_rogue_longitude)]}
