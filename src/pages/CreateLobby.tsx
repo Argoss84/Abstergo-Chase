@@ -22,10 +22,17 @@ import {
 import { useEffect, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import GameService from '../services/GameService';
-import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Circle, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMapEvents, Circle, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
-import { generateRandomPoints, generateStartZone, generateStartZoneRogue } from '../utils/utils';
+import { LatLngTuple } from 'leaflet';
+import {
+  generateRandomPoints,
+  generateStartZone,
+  generateStartZoneRogue,
+  ResizeMap,
+  createColoredIcon,
+  fetchStreets
+} from '../utils/utils';
 
 interface GameFormData {
   objectif_number: number;
@@ -50,22 +57,12 @@ interface StartZones {
   rogue: [number, number] | null;
 }
 
-const ResizeMap = () => {
-  const map = useMap();
-  useEffect(() => {
-    setTimeout(() => {
-      map.invalidateSize();
-    }, 0);
-  }, [map]);
-  return null;
-};
-
 const CreateLobby: React.FC = () => {
   const history = useHistory();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<[number, number] | null>(null);
   const [userPosition, setUserPosition] = useState<[number, number] | null>(null);
-  const [streets, setStreets] = useState<L.LatLngTuple[][]>([]);
+  const [streets, setStreets] = useState<LatLngTuple[][]>([]);
   const [mapKey, setMapKey] = useState(0);
   const [objectives, setObjectives] = useState<Objective[]>([]);
   const [startZones, setStartZones] = useState<StartZones>({ agent: null, rogue: null });
@@ -91,28 +88,6 @@ const CreateLobby: React.FC = () => {
     }));
   };
 
-  const fetchStreets = async (lat: number, lng: number) => {
-    const overpassUrl = `https://overpass-api.de/api/interpreter?data=
-                          [out:json];
-                          (
-                            way(around:${formData.map_radius},${lat},${lng})["highway"]["foot"!~"no"];
-                            way(around:${formData.map_radius},${lat},${lng})["amenity"="square"]["foot"!~"no"];
-                          );
-                          (._;>;);
-                          out;`;
-
-    const response = await fetch(overpassUrl);
-    const data = await response.json();
-    const ways = data.elements.filter((el: any) => el.type === "way");
-    const nodes = data.elements.filter((el: any) => el.type === "node");
-    const nodeMap = new Map(
-      nodes.map((node: any) => [node.id, [node.lat, node.lon]])
-    );
-    const streetLines = ways.map((way: any) =>
-      way.nodes.map((nodeId: any) => nodeMap.get(nodeId))
-    );
-    setStreets(streetLines);
-  };
 
   const handleGenerateObjectives = () => {
     if (!selectedPosition) {
@@ -267,7 +242,9 @@ const CreateLobby: React.FC = () => {
 
   useEffect(() => {
     if (selectedPosition) {
-      fetchStreets(selectedPosition[0], selectedPosition[1]);
+      fetchStreets(selectedPosition[0], selectedPosition[1], formData.map_radius)
+        .then(setStreets)
+        .catch((err) => console.error(err));
     }
   }, [selectedPosition]);
 
@@ -317,24 +294,14 @@ const CreateLobby: React.FC = () => {
                     <Marker
                       key={objective.id}
                       position={objective.position}
-                      icon={L.divIcon({
-                        className: 'custom-div-icon',
-                        html: `<div style="background-color: red; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-                        iconSize: [20, 20],
-                        iconAnchor: [10, 10],
-                      })}
+                      icon={createColoredIcon('red')}
                     />
                   ))}
                   {startZones.agent && (
                     <>
                       <Marker
                         position={startZones.agent}
-                        icon={L.divIcon({
-                          className: 'custom-div-icon',
-                          html: `<div style="background-color: blue; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-                          iconSize: [20, 20],
-                          iconAnchor: [10, 10],
-                        })}
+                        icon={createColoredIcon('blue')}
                       />
                       <Circle
                         center={startZones.agent}
@@ -347,12 +314,7 @@ const CreateLobby: React.FC = () => {
                     <>
                       <Marker
                         position={startZones.rogue}
-                        icon={L.divIcon({
-                          className: 'custom-div-icon',
-                          html: `<div style="background-color: green; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-                          iconSize: [20, 20],
-                          iconAnchor: [10, 10],
-                        })}
+                        icon={createColoredIcon('green')}
                       />
                       <Circle
                         center={startZones.rogue}

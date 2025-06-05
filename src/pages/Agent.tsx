@@ -1,11 +1,14 @@
 import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Circle, Marker, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Circle, Marker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
 import GameService from '../services/GameService';
-import { generateRandomPointInCircle } from '../utils/utils';
+import {
+  generateRandomPointInCircle,
+  ResizeMap,
+  createColoredIcon
+} from '../utils/utils';
 
 interface GameProp {
   id_prop: number;
@@ -32,16 +35,6 @@ interface ObjectiveCircle {
   center: [number, number];
   radius: number;
 }
-
-const ResizeMap = () => {
-  const map = useMap();
-  useEffect(() => {
-    setTimeout(() => {
-      map.invalidateSize();
-    }, 0);
-  }, [map]);
-  return null;
-};
 
 const Agent: React.FC = () => {
   const history = useHistory();
@@ -166,12 +159,7 @@ const Agent: React.FC = () => {
                 <>
                   <Marker
                     position={[parseFloat(gameDetails.start_zone_latitude), parseFloat(gameDetails.start_zone_longitude)]}
-                    icon={L.divIcon({
-                      className: 'custom-div-icon',
-                      html: `<div style="background-color: blue; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-                      iconSize: [20, 20],
-                      iconAnchor: [10, 10],
-                    })}
+                    icon={createColoredIcon('blue')}
                   />
                   <Circle
                     center={[parseFloat(gameDetails.start_zone_latitude), parseFloat(gameDetails.start_zone_longitude)]}
@@ -184,12 +172,7 @@ const Agent: React.FC = () => {
                 <>
                   <Marker
                     position={[parseFloat(gameDetails.start_zone_rogue_latitude), parseFloat(gameDetails.start_zone_rogue_longitude)]}
-                    icon={L.divIcon({
-                      className: 'custom-div-icon',
-                      html: `<div style="background-color: green; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-                      iconSize: [20, 20],
-                      iconAnchor: [10, 10],
-                    })}
+                    icon={createColoredIcon('green')}
                   />
                   <Circle
                     center={[parseFloat(gameDetails.start_zone_rogue_latitude), parseFloat(gameDetails.start_zone_rogue_longitude)]}
@@ -209,12 +192,7 @@ const Agent: React.FC = () => {
               {currentPosition && (
                 <Marker
                   position={currentPosition}
-                  icon={L.divIcon({
-                    className: 'custom-div-icon',
-                    html: `<div style="background-color: red; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-                    iconSize: [20, 20],
-                    iconAnchor: [10, 10],
-                  })}
+                  icon={createColoredIcon('red')}
                 />
               )}
             </MapContainer>
