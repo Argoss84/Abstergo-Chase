@@ -1,4 +1,4 @@
-import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle } from '@ionic/react';
+import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Circle, Marker, useMap } from 'react-leaflet';
@@ -6,6 +6,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import GameService from '../services/GameService';
 import { generateRandomPointInCircle } from '../utils/utils';
+import { add, camera, locationOutline, navigate, settings } from 'ionicons/icons';
 
 interface GameProp {
   id_prop: number;
@@ -225,6 +226,36 @@ const Agent: React.FC = () => {
         <IonButton expand="block" onClick={() => history.push('/end-game')}>
           EndGame
         </IonButton>
+
+        <IonFab vertical="bottom" horizontal="center" slot="fixed">
+          <IonFabButton>
+            <IonIcon icon={add} />
+          </IonFabButton>
+          <IonFabList side="top">
+            <IonFabButton color="light">
+              <IonIcon icon={camera} />
+            </IonFabButton>
+            <IonFabButton color="light">
+              <IonIcon icon={locationOutline} />
+            </IonFabButton>
+          </IonFabList>
+          <IonFabList side="start">
+            <IonFabButton color="light">
+              <IonIcon icon={camera} />
+            </IonFabButton>
+            <IonFabButton color="light">
+              <IonIcon icon={navigate} />
+            </IonFabButton>
+          </IonFabList>
+          <IonFabList side="end">
+            <IonFabButton color="light">
+              <IonIcon icon={camera} />
+            </IonFabButton>
+            <IonFabButton color="light">
+              <IonIcon icon={navigate} />
+            </IonFabButton>
+          </IonFabList>
+        </IonFab>
       </IonContent>
     </IonPage>
   );
