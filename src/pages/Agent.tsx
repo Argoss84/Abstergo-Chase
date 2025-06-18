@@ -7,6 +7,7 @@ import L from 'leaflet';
 import GameService from '../services/GameService';
 import { generateRandomPointInCircle } from '../utils/utils';
 import { add, camera, locationOutline, navigate, settings } from 'ionicons/icons';
+import './Agent.css';
 
 interface GameProp {
   id_prop: number;
@@ -51,6 +52,7 @@ const Agent: React.FC = () => {
   const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [objectiveCircles, setObjectiveCircles] = useState<ObjectiveCircle[]>([]);
+  const [isFabOpen, setIsFabOpen] = useState(false);
 
   useEffect(() => {
     const fetchGameDetails = async () => {
@@ -227,35 +229,51 @@ const Agent: React.FC = () => {
           EndGame
         </IonButton>
 
-        <IonFab vertical="bottom" horizontal="center" slot="fixed">
-          <IonFabButton>
+        <div className="fab-container">
+          <IonFabButton onClick={() => setIsFabOpen(!isFabOpen)}>
             <IonIcon icon={add} />
           </IonFabButton>
-          <IonFabList side="top">
-            <IonFabButton color="light">
-              <IonIcon icon={camera} />
-            </IonFabButton>
-            <IonFabButton color="light">
+          
+          <div className={`fab-list fab-list-top ${!isFabOpen ? 'fab-list-hidden' : ''}`}>
+            
+            <IonFabButton color="light" onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}>
               <IonIcon icon={locationOutline} />
             </IonFabButton>
-          </IonFabList>
-          <IonFabList side="start">
-            <IonFabButton color="light">
+          </div>
+
+          <div className={`fab-list fab-list-start ${!isFabOpen ? 'fab-list-hidden' : ''}`}>
+            <IonFabButton color="light" onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}>
               <IonIcon icon={camera} />
             </IonFabButton>
-            <IonFabButton color="light">
+            <IonFabButton color="light" onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}>
               <IonIcon icon={navigate} />
             </IonFabButton>
-          </IonFabList>
-          <IonFabList side="end">
-            <IonFabButton color="light">
+          </div>
+
+          <div className={`fab-list fab-list-end ${!isFabOpen ? 'fab-list-hidden' : ''}`}>
+            <IonFabButton color="light" onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}>
               <IonIcon icon={camera} />
             </IonFabButton>
-            <IonFabButton color="light">
+            <IonFabButton color="light" onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}>
               <IonIcon icon={navigate} />
             </IonFabButton>
-          </IonFabList>
-        </IonFab>
+          </div>
+        </div>
       </IonContent>
     </IonPage>
   );

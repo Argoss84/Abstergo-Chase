@@ -1,0 +1,39 @@
+.fab-container {
+  position: fixed;
+  bottom: 5%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+}
+
+.fab-list {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fab-list-top {
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 10px;
+}
+
+.fab-list-start {
+  bottom: 50%;
+  right: 100%;
+  transform: translateY(50%);
+  margin-right: 10px;
+}
+
+.fab-list-end {
+  bottom: 50%;
+  left: 100%;
+  transform: translateY(50%);
+  margin-left: 10px;
+}
+
+.fab-list-hidden {
+  display: none;
+} 
