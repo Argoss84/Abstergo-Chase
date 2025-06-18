@@ -6,7 +6,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import GameService from '../services/GameService';
 import { generateRandomPointInCircle } from '../utils/utils';
-import { add, camera, locationOutline, navigate, settings } from 'ionicons/icons';
+import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, settings, skullOutline } from 'ionicons/icons';
 import './Agent.css';
 
 interface GameProp {
@@ -231,7 +231,7 @@ const Agent: React.FC = () => {
 
         <div className="fab-container">
           <IonFabButton onClick={() => setIsFabOpen(!isFabOpen)}>
-            <IonIcon icon={add} />
+            <IonIcon icon={apertureOutline} />
           </IonFabButton>
           
           <div className={`fab-list fab-list-top ${!isFabOpen ? 'fab-list-hidden' : ''}`}>
@@ -240,7 +240,7 @@ const Agent: React.FC = () => {
               e.preventDefault();
               e.stopPropagation();
             }}>
-              <IonIcon icon={locationOutline} />
+              <IonIcon icon={cellularOutline} />
             </IonFabButton>
           </div>
 
@@ -249,13 +249,13 @@ const Agent: React.FC = () => {
               e.preventDefault();
               e.stopPropagation();
             }}>
-              <IonIcon icon={camera} />
+              <IonIcon icon={colorFilterOutline} />
             </IonFabButton>
             <IonFabButton color="light" onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
             }}>
-              <IonIcon icon={navigate} />
+              <IonIcon icon={fitnessOutline} />
             </IonFabButton>
           </div>
 
@@ -264,13 +264,13 @@ const Agent: React.FC = () => {
               e.preventDefault();
               e.stopPropagation();
             }}>
-              <IonIcon icon={camera} />
+              <IonIcon icon={locateOutline} />
             </IonFabButton>
             <IonFabButton color="light" onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
             }}>
-              <IonIcon icon={navigate} />
+              <IonIcon icon={skullOutline} />
             </IonFabButton>
           </div>
         </div>
