@@ -10,6 +10,8 @@ import { generateRandomPointInCircle } from '../utils/utils';
 import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, settings, skullOutline } from 'ionicons/icons';
 import './Agent.css';
 import { GameProp, GameDetails, ObjectiveCircle } from '../components/Interfaces';
+import { useAuth } from '../contexts/AuthenticationContext';
+import { getUserByAuthId } from '../services/UserServices';
 
 const ResizeMap = () => {
   const map = useMap();
@@ -24,6 +26,7 @@ const ResizeMap = () => {
 const Agent: React.FC = () => {
   const history = useHistory();
   const location = useLocation();
+  const { session, userEmail } = useAuth();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
   const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +42,9 @@ const Agent: React.FC = () => {
   const [isRoutineActive, setIsRoutineActive] = useState<boolean>(true);
   const [routineExecutionCount, setRoutineExecutionCount] = useState<number>(0);
   const routineIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [currentPlayerId, setCurrentPlayerId] = useState<number | null>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [objectiveCirclesInitialized, setObjectiveCirclesInitialized] = useState<boolean>(false);
 
   // Fonctions pour les boutons FAB
   const handleNetworkScan = () => {
@@ -141,14 +147,22 @@ const Agent: React.FC = () => {
     // 1. Vérifier la position actuelle
     if (currentPosition) {
       console.log(`Position actuelle: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
+      
+      // Mettre à jour la position du joueur en base de données
+      if (currentPlayerId) {
+        updatePlayerPosition(currentPlayerId, currentPosition[0], currentPosition[1]);
+      }
     }
     
-    // 2. Vérifier l'état de la partie
+    // 2. Mettre à jour les données de la partie
+    updateGameData();
+    
+    // 3. Vérifier l'état de la partie
     if (gameDetails) {
       console.log(`État de la partie: ${gameDetails.is_converging_phase ? 'Phase de convergence' : 'Phase normale'}`);
     }
     
-    // 3. Vérifier la distance vers les objectifs
+    // 4. Vérifier la distance vers les objectifs
     if (currentPosition && objectiveCircles.length > 0) {
       objectiveCircles.forEach((circle, index) => {
         const distance = Math.sqrt(
@@ -159,7 +173,7 @@ const Agent: React.FC = () => {
       });
     }
     
-    // 4. Mettre à jour le trajet si nécessaire (en phase de convergence)
+    // 5. Mettre à jour le trajet si nécessaire (en phase de convergence)
     if (gameDetails?.is_converging_phase && 
         currentPosition && 
         gameDetails.start_zone_latitude && 
@@ -171,8 +185,49 @@ const Agent: React.FC = () => {
       fetchRoute(currentPosition, startZone);
     }
     
-    
-  }, [currentPosition, gameDetails, objectiveCircles, routineExecutionCount]);
+  }, [currentPosition, gameDetails, objectiveCircles, routineExecutionCount, currentPlayerId, location.search]);
+
+  // Fonction pour mettre à jour la position du joueur en base de données
+  const updatePlayerPosition = async (playerId: number, latitude: number, longitude: number) => {
+    try {
+      const gameService = new GameService();
+      await gameService.updatePlayer(playerId.toString(), {
+        latitude: latitude.toString(),
+        longitude: longitude.toString(),
+        updated_at: new Date().toISOString()
+      });
+      console.log(`Position du joueur ${playerId} mise à jour en BDD: ${latitude}, ${longitude}`);
+    } catch (error) {
+      console.error('Erreur lors de la mise à jour de la position:', error);
+    }
+  };
+
+  // Fonction pour mettre à jour les données de la partie
+  const updateGameData = async () => {
+    try {
+      const params = new URLSearchParams(location.search);
+      const code = params.get('code');
+      
+      if (!code) {
+        console.warn('Code de partie non disponible pour la mise à jour');
+        return;
+      }
+
+      const gameService = new GameService();
+      const game = await gameService.getGameDatasByCode(code);
+      
+      if (game && game[0]) {
+        setGameDetails(game[0]);
+        
+        // Ne pas régénérer les cercles d'objectifs - ils sont déjà initialisés
+        // Les cercles aléatoires ne sont calculés qu'une seule fois au chargement initial
+        
+        console.log(`Données de la partie mises à jour: ${game[0].code} - Phase: ${game[0].is_converging_phase ? 'Convergence' : 'Normale'}`);
+      }
+    } catch (error) {
+      console.error('Erreur lors de la mise à jour des données de la partie:', error);
+    }
+  };
 
   // Gestionnaire pour démarrer/arrêter la routine
   const toggleRoutine = () => {
@@ -227,11 +282,37 @@ const Agent: React.FC = () => {
           return;
         }
 
+        // Récupérer l'utilisateur connecté
+        if (session?.user) {
+          const user = await getUserByAuthId(session.user.id);
+          if (user) {
+            setCurrentUser(user);
+            console.log(`Utilisateur connecté: ${user.email} (ID: ${user.id})`);
+          } else {
+            setError('Utilisateur non trouvé');
+            return;
+          }
+        } else {
+          setError('Utilisateur non connecté');
+          return;
+        }
+
         const gameService = new GameService();
         const game = await gameService.getGameDatasByCode(code);
         
         if (game && game[0]) {
           setGameDetails(game[0]);
+          
+          // Récupérer l'ID du joueur actuel en utilisant l'utilisateur connecté
+          if (game[0].players && game[0].players.length > 0 && currentUser) {
+            const currentPlayer = game[0].players.find((player: any) => player.user_id === currentUser.id);
+            if (currentPlayer) {
+              setCurrentPlayerId(currentPlayer.id_player);
+              console.log(`Joueur actuel identifié: ${currentPlayer.id_player} (${currentPlayer.role}) - Utilisateur: ${currentUser.email}`);
+            } else {
+              console.warn(`Aucun joueur trouvé pour l'utilisateur ${currentUser.email} dans cette partie`);
+            }
+          }
           
           // Générer les cercles d'objectifs
           if (game[0].props) {
@@ -244,6 +325,8 @@ const Agent: React.FC = () => {
               radius: prop.detection_radius || 0
             }));
             setObjectiveCircles(circles);
+            setObjectiveCirclesInitialized(true);
+            console.log(`${circles.length} cercles d'objectifs initialisés`);
           }
         } else {
           setError('Partie non trouvée');
@@ -254,8 +337,10 @@ const Agent: React.FC = () => {
       }
     };
 
-    fetchGameDetails();
-  }, [location.search]);
+    if (session?.user) {
+      fetchGameDetails();
+    }
+  }, [location.search, session]);
 
   useEffect(() => {
     // Get initial position
@@ -478,6 +563,25 @@ const Agent: React.FC = () => {
             <div style={{ fontSize: '0.9em', color: '#666' }}>
               Exécutions: {routineExecutionCount} | 
               Dernière exécution: {routineExecutionCount > 0 ? new Date().toLocaleTimeString() : 'Aucune'}
+            </div>
+            
+            <div style={{ fontSize: '0.9em', color: '#666', marginTop: '10px' }}>
+              <div>Joueur ID: {currentPlayerId || 'Non identifié'}</div>
+              <div>Mise à jour BDD: {currentPlayerId ? '🟢 Activée' : '🔴 Désactivée'}</div>
+            </div>
+            
+            <div style={{ fontSize: '0.9em', color: '#666', marginTop: '10px' }}>
+              <div>Utilisateur: {currentUser?.email || 'Non connecté'}</div>
+              <div>User ID: {currentUser?.id || 'N/A'}</div>
+              <div>Statut: {currentPlayerId ? '🟢 Joueur identifié' : '🔴 Joueur non trouvé'}</div>
+            </div>
+            
+            <div style={{ fontSize: '0.9em', color: '#666', marginTop: '10px', padding: '8px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
+              <div><strong>Mises à jour automatiques :</strong></div>
+              <div>📍 Position joueur: {currentPlayerId ? '🟢' : '🔴'}</div>
+              <div>🎮 Données partie: 🟢</div>
+              <div>🎯 Objectifs: {objectiveCirclesInitialized ? '🟢 (fixes)' : '⚪'}</div>
+              <div>🗺️ Trajet (convergence): {gameDetails?.is_converging_phase ? '🟢' : '⚪'}</div>
             </div>
           </IonContent>
         </IonCard>
