@@ -171,8 +171,7 @@ const Agent: React.FC = () => {
       fetchRoute(currentPosition, startZone);
     }
     
-    // Ici vous pouvez ajouter d'autres tâches spécifiques à votre jeu
-    // Par exemple : vérifier les communications, synchroniser avec le serveur, etc.
+    
   }, [currentPosition, gameDetails, objectiveCircles, routineExecutionCount]);
 
   // Gestionnaire pour démarrer/arrêter la routine
@@ -229,7 +228,7 @@ const Agent: React.FC = () => {
         }
 
         const gameService = new GameService();
-        const game = await gameService.getGameWithPropsByCode(code);
+        const game = await gameService.getGameDatasByCode(code);
         
         if (game && game[0]) {
           setGameDetails(game[0]);

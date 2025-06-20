@@ -111,7 +111,7 @@ const Lobby: React.FC = () => {
         }
 
         const gameService = new GameService();
-        const game = await gameService.getGameWithPropsByCode(code);
+        const game = await gameService.getGameDatasByCode(code);
         
         if (game && game[0]) {
           setGameDetails(game[0]);

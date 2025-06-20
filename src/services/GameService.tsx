@@ -33,12 +33,15 @@ class GameService {
         return data;
       }
 
-      async getGameWithPropsByCode(code: string) {
+      async getGameDatasByCode(code: string) {
         const { data, error } = await supabaseClient
           .from('game')
           .select(`
             *,
             props (
+              *
+            ),
+            players (
               *
             )
           `)

@@ -39,6 +39,7 @@ export interface GameDetails {
   agent_range: number | null;
   is_converging_phase: boolean | null;
   props?: GameProp[];
+  players?: Player[];
 }
 
 export interface ObjectiveCircle {
