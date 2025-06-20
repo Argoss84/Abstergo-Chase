@@ -1,6 +1,6 @@
 import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonModal, IonButtons } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Circle, Marker, useMap, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -33,6 +33,12 @@ const Agent: React.FC = () => {
   const [scannedQRCode, setScannedQRCode] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [routePath, setRoutePath] = useState<[number, number][]>([]);
+  
+  // États pour la routine périodique
+  const [routineInterval, setRoutineInterval] = useState<number>(2000); // 5 secondes par défaut
+  const [isRoutineActive, setIsRoutineActive] = useState<boolean>(true);
+  const [routineExecutionCount, setRoutineExecutionCount] = useState<number>(0);
+  const routineIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fonctions pour les boutons FAB
   const handleNetworkScan = () => {
@@ -124,6 +130,93 @@ const Agent: React.FC = () => {
     }
   };
 
+  // Fonction de routine périodique
+  const executeRoutine = useCallback(() => {
+    console.log(`Routine exécutée #${routineExecutionCount + 1} à ${new Date().toLocaleTimeString()}`);
+    
+    // Incrémenter le compteur d'exécutions
+    setRoutineExecutionCount(prev => prev + 1);
+    
+    // Exemple de tâches que la routine peut effectuer :
+    // 1. Vérifier la position actuelle
+    if (currentPosition) {
+      console.log(`Position actuelle: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
+    }
+    
+    // 2. Vérifier l'état de la partie
+    if (gameDetails) {
+      console.log(`État de la partie: ${gameDetails.is_converging_phase ? 'Phase de convergence' : 'Phase normale'}`);
+    }
+    
+    // 3. Vérifier la distance vers les objectifs
+    if (currentPosition && objectiveCircles.length > 0) {
+      objectiveCircles.forEach((circle, index) => {
+        const distance = Math.sqrt(
+          Math.pow(currentPosition[0] - circle.center[0], 2) + 
+          Math.pow(currentPosition[1] - circle.center[1], 2)
+        ) * 111000; // Conversion approximative en mètres
+        console.log(`Distance vers objectif ${index + 1}: ${distance.toFixed(0)}m`);
+      });
+    }
+    
+    // 4. Mettre à jour le trajet si nécessaire (en phase de convergence)
+    if (gameDetails?.is_converging_phase && 
+        currentPosition && 
+        gameDetails.start_zone_latitude && 
+        gameDetails.start_zone_longitude) {
+      const startZone: [number, number] = [
+        parseFloat(gameDetails.start_zone_latitude),
+        parseFloat(gameDetails.start_zone_longitude)
+      ];
+      fetchRoute(currentPosition, startZone);
+    }
+    
+    // Ici vous pouvez ajouter d'autres tâches spécifiques à votre jeu
+    // Par exemple : vérifier les communications, synchroniser avec le serveur, etc.
+  }, [currentPosition, gameDetails, objectiveCircles, routineExecutionCount]);
+
+  // Gestionnaire pour démarrer/arrêter la routine
+  const toggleRoutine = () => {
+    setIsRoutineActive(prev => !prev);
+  };
+
+  // Gestionnaire pour changer l'intervalle
+  const changeRoutineInterval = (newInterval: number) => {
+    setRoutineInterval(newInterval);
+  };
+
+  // Effet pour gérer la routine périodique
+  useEffect(() => {
+    if (isRoutineActive && routineInterval > 0) {
+      // Nettoyer l'intervalle précédent s'il existe
+      if (routineIntervalRef.current) {
+        clearInterval(routineIntervalRef.current);
+      }
+      
+      // Créer un nouvel intervalle
+      routineIntervalRef.current = setInterval(() => {
+        executeRoutine();
+      }, routineInterval);
+      
+      console.log(`Routine démarrée avec un intervalle de ${routineInterval}ms`);
+    } else {
+      // Arrêter la routine
+      if (routineIntervalRef.current) {
+        clearInterval(routineIntervalRef.current);
+        routineIntervalRef.current = null;
+        console.log('Routine arrêtée');
+      }
+    }
+    
+    // Cleanup lors du démontage du composant
+    return () => {
+      if (routineIntervalRef.current) {
+        clearInterval(routineIntervalRef.current);
+        routineIntervalRef.current = null;
+      }
+    };
+  }, [isRoutineActive, routineInterval, executeRoutine]);
+
   useEffect(() => {
     const fetchGameDetails = async () => {
       try {
@@ -146,10 +239,10 @@ const Agent: React.FC = () => {
             const circles = game[0].props.map((prop: GameProp) => ({
               id_prop: prop.id_prop,
               center: generateRandomPointInCircle(
-                [parseFloat(prop.latitude), parseFloat(prop.longitude)],
-                prop.detection_radius
+                [parseFloat(prop.latitude || '0'), parseFloat(prop.longitude || '0')],
+                prop.detection_radius || 0
               ),
-              radius: prop.detection_radius
+              radius: prop.detection_radius || 0
             }));
             setObjectiveCircles(circles);
           }
@@ -340,6 +433,55 @@ const Agent: React.FC = () => {
         <IonButton expand="block" onClick={() => history.push('/end-game')}>
           EndGame
         </IonButton>
+
+        {/* Contrôles de la routine périodique */}
+        <IonCard>
+          <IonCardHeader>
+            <IonCardTitle>Routine Périodique</IonCardTitle>
+          </IonCardHeader>
+          <IonContent className="ion-padding">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+              <span>Intervalle: {routineInterval}ms</span>
+              <IonButton 
+                size="small" 
+                onClick={() => changeRoutineInterval(1000)}
+                color={routineInterval === 1000 ? 'primary' : 'medium'}
+              >
+                1s
+              </IonButton>
+              <IonButton 
+                size="small" 
+                onClick={() => changeRoutineInterval(5000)}
+                color={routineInterval === 5000 ? 'primary' : 'medium'}
+              >
+                5s
+              </IonButton>
+              <IonButton 
+                size="small" 
+                onClick={() => changeRoutineInterval(10000)}
+                color={routineInterval === 10000 ? 'primary' : 'medium'}
+              >
+                10s
+              </IonButton>
+            </div>
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+              <span>Statut: {isRoutineActive ? '🟢 Actif' : '🔴 Inactif'}</span>
+              <IonButton 
+                size="small" 
+                onClick={toggleRoutine}
+                color={isRoutineActive ? 'danger' : 'success'}
+              >
+                {isRoutineActive ? 'Arrêter' : 'Démarrer'}
+              </IonButton>
+            </div>
+            
+            <div style={{ fontSize: '0.9em', color: '#666' }}>
+              Exécutions: {routineExecutionCount} | 
+              Dernière exécution: {routineExecutionCount > 0 ? new Date().toLocaleTimeString() : 'Aucune'}
+            </div>
+          </IonContent>
+        </IonCard>
 
         <div className="fab-container">
           <IonFabButton onClick={() => setIsFabOpen(!isFabOpen)}>

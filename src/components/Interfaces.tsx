@@ -1,9 +1,17 @@
 export interface GameProp {
   id_prop: number;
-  latitude: string;
-  longitude: string;
-  type: string;
-  detection_radius: number;
+  created_at: string;
+  id_game: number;
+  latitude: string | null;
+  longitude: string | null;
+  type: string | null;
+  name: string | null;
+  description: string | null;
+  color: string | null;
+  visible: boolean | null;
+  detection_radius: number | null;
+  visibility_last_change_date: string | null;
+  state: string | null;
 }
 
 export interface GameDetails {
@@ -37,4 +45,19 @@ export interface ObjectiveCircle {
   id_prop: number;
   center: [number, number];
   radius: number;
+}
+
+export interface Player {
+  id_player: number;
+  created_at: string;
+  user_id: number;
+  id_game: number;
+  latitude: string | null;
+  longitude: string | null;
+  color: string | null;
+  role: string | null;
+  isInStartZone: boolean | null;
+  IsReady: boolean | null;
+  status: string | null;
+  updated_at: string | null;
 } 
