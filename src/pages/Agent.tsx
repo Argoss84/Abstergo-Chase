@@ -1,7 +1,7 @@
 import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonModal, IonButtons } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Circle, Marker, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Circle, Marker, useMap, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { QrReader } from 'react-qr-reader';
@@ -32,6 +32,7 @@ const Agent: React.FC = () => {
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
   const [scannedQRCode, setScannedQRCode] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [routePath, setRoutePath] = useState<[number, number][]>([]);
 
   // Fonctions pour les boutons FAB
   const handleNetworkScan = () => {
@@ -101,6 +102,26 @@ const Agent: React.FC = () => {
     setIsQRModalOpen(false);
     setScannedQRCode(null);
     setCameraError(null);
+  };
+
+  // Fonction pour récupérer le trajet routier
+  const fetchRoute = async (start: [number, number], end: [number, number]) => {
+    try {
+      const url = `https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`;
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      if (data.routes && data.routes[0]) {
+        const coordinates = data.routes[0].geometry.coordinates;
+        // Convertir les coordonnées [lng, lat] en [lat, lng] pour Leaflet
+        const routePath = coordinates.map((coord: [number, number]) => [coord[1], coord[0]]);
+        setRoutePath(routePath);
+      }
+    } catch (error) {
+      console.error('Erreur lors de la récupération du trajet:', error);
+      // En cas d'erreur, utiliser une ligne droite
+      setRoutePath([start, end]);
+    }
   };
 
   useEffect(() => {
@@ -177,6 +198,24 @@ const Agent: React.FC = () => {
     }
   }, []);
 
+  // Effet pour récupérer le trajet routier en phase de convergence
+  useEffect(() => {
+    if (gameDetails?.is_converging_phase && 
+        currentPosition && 
+        gameDetails.start_zone_latitude && 
+        gameDetails.start_zone_longitude) {
+      
+      const startZone: [number, number] = [
+        parseFloat(gameDetails.start_zone_latitude),
+        parseFloat(gameDetails.start_zone_longitude)
+      ];
+      
+      fetchRoute(currentPosition, startZone);
+    } else {
+      setRoutePath([]);
+    }
+  }, [gameDetails?.is_converging_phase, currentPosition, gameDetails?.start_zone_latitude, gameDetails?.start_zone_longitude]);
+
   return (
     <IonPage>
       <IonHeader>
@@ -191,7 +230,10 @@ const Agent: React.FC = () => {
           <div className="map-container">
             <MapContainer
               key={`map-${gameDetails.code}`}
-              center={[parseFloat(gameDetails.map_center_latitude), parseFloat(gameDetails.map_center_longitude)]}
+              center={[
+                parseFloat(gameDetails.map_center_latitude || '0'), 
+                parseFloat(gameDetails.map_center_longitude || '0')
+              ]}
               zoom={15}
               style={{ height: '100%', width: '100%' }}
               whenReady={() => {
@@ -210,8 +252,11 @@ const Agent: React.FC = () => {
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               />
               <Circle
-                center={[parseFloat(gameDetails.map_center_latitude), parseFloat(gameDetails.map_center_longitude)]}
-                radius={gameDetails.map_radius}
+                center={[
+                  parseFloat(gameDetails.map_center_latitude || '0'), 
+                  parseFloat(gameDetails.map_center_longitude || '0')
+                ]}
+                radius={gameDetails.map_radius || 750}
                 pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
               />
               {gameDetails.start_zone_latitude && gameDetails.start_zone_longitude && (
@@ -267,6 +312,24 @@ const Agent: React.FC = () => {
                     iconSize: [20, 20],
                     iconAnchor: [10, 10],
                   })}
+                />
+              )}
+              
+              {/* Affichage du trajet vers la zone de départ en phase de convergence */}
+              {gameDetails.is_converging_phase && 
+               currentPosition && 
+               gameDetails.start_zone_latitude && 
+               gameDetails.start_zone_longitude && 
+               routePath.length > 0 && (
+                <Polyline
+                  positions={routePath}
+                  pathOptions={{
+                    color: '#00ff41',
+                    weight: 4,
+                    opacity: 0.9,
+                    dashArray: '10, 5',
+                    className: 'neon-pulse-route'
+                  }}
                 />
               )}
             </MapContainer>

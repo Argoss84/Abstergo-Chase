@@ -95,4 +95,31 @@
 
 .qr-modal-button {
   margin-top: 20px;
+}
+
+/* Animation pour l'effet néon pulsant sur la route */
+@keyframes neonPulse {
+  0% {
+    opacity: 0.3;
+    filter: drop-shadow(0 0 5px #00ff41) drop-shadow(0 0 10px #00ff41);
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 10px #00ff41) drop-shadow(0 0 20px #00ff41) drop-shadow(0 0 30px #00ff41);
+  }
+  100% {
+    opacity: 0.3;
+    filter: drop-shadow(0 0 5px #00ff41) drop-shadow(0 0 10px #00ff41);
+  }
+}
+
+.neon-pulse-route {
+  animation: neonPulse 2s ease-in-out infinite;
+}
+
+/* Style spécifique pour la ligne de route avec effet néon */
+.leaflet-interactive.neon-pulse-route {
+  stroke: #00ff41 !important;
+  stroke-width: 2px !important;
+  filter: drop-shadow(0 0 3px #00ff41);
 } 
