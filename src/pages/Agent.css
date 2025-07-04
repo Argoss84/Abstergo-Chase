@@ -45,6 +45,52 @@
   position: relative;
 }
 
+.map-container .leaflet-container {
+  height: 100%;
+  width: 100%;
+}
+
+/* Routine controls styles */
+.routine-interval-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.routine-status-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.routine-info {
+  font-size: 0.9em;
+  color: #666;
+}
+
+.routine-player-info {
+  font-size: 0.9em;
+  color: #666;
+  margin-top: 10px;
+}
+
+.routine-user-info {
+  font-size: 0.9em;
+  color: #666;
+  margin-top: 10px;
+}
+
+.routine-updates-info {
+  font-size: 0.9em;
+  color: #666;
+  margin-top: 10px;
+  padding: 8px;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+}
+
 /* QR Modal styles */
 .qr-modal-content {
   display: flex;
@@ -101,15 +147,15 @@
 @keyframes neonPulse {
   0% {
     opacity: 0.3;
-    filter: drop-shadow(0 0 5px #00ff41) drop-shadow(0 0 10px #00ff41);
+    filter: drop-shadow(0 0 5px #0004ff) drop-shadow(0 0 10px #0004ff);
   }
   50% {
     opacity: 1;
-    filter: drop-shadow(0 0 10px #00ff41) drop-shadow(0 0 20px #00ff41) drop-shadow(0 0 30px #00ff41);
+    filter: drop-shadow(0 0 10px #0004ff) drop-shadow(0 0 20px #0004ff) drop-shadow(0 0 30px #0004ff);
   }
   100% {
     opacity: 0.3;
-    filter: drop-shadow(0 0 5px #00ff41) drop-shadow(0 0 10px #00ff41);
+    filter: drop-shadow(0 0 5px #0004ff) drop-shadow(0 0 10px #0004ff);
   }
 }
 
@@ -119,7 +165,7 @@
 
 /* Style spécifique pour la ligne de route avec effet néon */
 .leaflet-interactive.neon-pulse-route {
-  stroke: #00ff41 !important;
+  stroke: #0004ff !important;
   stroke-width: 2px !important;
-  filter: drop-shadow(0 0 3px #00ff41);
+  filter: drop-shadow(0 0 3px #0004ff);
 } 

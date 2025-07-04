@@ -412,7 +412,6 @@ const Agent: React.FC = () => {
                 parseFloat(gameDetails.map_center_longitude || '0')
               ]}
               zoom={15}
-              style={{ height: '100%', width: '100%' }}
               whenReady={() => {
                 // Force a resize after the map is ready
                 setTimeout(() => {
@@ -524,7 +523,7 @@ const Agent: React.FC = () => {
             <IonCardTitle>Routine Périodique</IonCardTitle>
           </IonCardHeader>
           <IonContent className="ion-padding">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+            <div className="routine-interval-controls">
               <span>Intervalle: {routineInterval}ms</span>
               <IonButton 
                 size="small" 
@@ -549,7 +548,7 @@ const Agent: React.FC = () => {
               </IonButton>
             </div>
             
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+            <div className="routine-status-controls">
               <span>Statut: {isRoutineActive ? '🟢 Actif' : '🔴 Inactif'}</span>
               <IonButton 
                 size="small" 
@@ -560,23 +559,23 @@ const Agent: React.FC = () => {
               </IonButton>
             </div>
             
-            <div style={{ fontSize: '0.9em', color: '#666' }}>
+            <div className="routine-info">
               Exécutions: {routineExecutionCount} | 
               Dernière exécution: {routineExecutionCount > 0 ? new Date().toLocaleTimeString() : 'Aucune'}
             </div>
             
-            <div style={{ fontSize: '0.9em', color: '#666', marginTop: '10px' }}>
+            <div className="routine-player-info">
               <div>Joueur ID: {currentPlayerId || 'Non identifié'}</div>
               <div>Mise à jour BDD: {currentPlayerId ? '🟢 Activée' : '🔴 Désactivée'}</div>
             </div>
             
-            <div style={{ fontSize: '0.9em', color: '#666', marginTop: '10px' }}>
+            <div className="routine-user-info">
               <div>Utilisateur: {currentUser?.email || 'Non connecté'}</div>
               <div>User ID: {currentUser?.id || 'N/A'}</div>
               <div>Statut: {currentPlayerId ? '🟢 Joueur identifié' : '🔴 Joueur non trouvé'}</div>
             </div>
             
-            <div style={{ fontSize: '0.9em', color: '#666', marginTop: '10px', padding: '8px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
+            <div className="routine-updates-info">
               <div><strong>Mises à jour automatiques :</strong></div>
               <div>📍 Position joueur: {currentPlayerId ? '🟢' : '🔴'}</div>
               <div>🎮 Données partie: 🟢</div>
