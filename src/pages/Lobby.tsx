@@ -26,44 +26,10 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
+import { GameDetails, GameProp, Player } from '../components/Interfaces';
 
-interface GameDetails {
-  code: string;
-  objectif_number: number;
-  duration: number;
-  victory_condition_nb_objectivs: number;
-  hack_duration_ms: number;
-  objectiv_zone_radius: number;
-  rogue_range: number;
-  agent_range: number;
-  map_radius: number;
-  map_center_latitude: string;
-  map_center_longitude: string;
-  start_zone_latitude?: string;
-  start_zone_longitude?: string;
-  start_zone_rogue_latitude?: string;
-  start_zone_rogue_longitude?: string;
-  id_game: number;
-  props?: GameProp[];
-  max_agents: number;
-  max_rogue: number;
-  started_date?: string;
-  is_converging_phase?: boolean;
-}
-
-interface GameProp {
-  id_prop: number;
-  latitude: string;
-  longitude: string;
-  type: string;
-}
-
-interface Player {
-  id_player: number;
-  id_game: number;
-  user_id: string;
-  role: string;
-  created_at: string;
+// Interface étendue pour Player avec les informations utilisateur
+interface PlayerWithUser extends Player {
   users: {
     email: string;
   };
@@ -89,8 +55,9 @@ const Lobby: React.FC = () => {
   const [objectives, setObjectives] = useState<GameProp[]>([]);
   const [streets, setStreets] = useState<L.LatLngTuple[][]>([]);
   const [mapKey, setMapKey] = useState(0);
-  const [players, setPlayers] = useState<Player[]>([]);
-  const playersRef = useRef<Player[]>([]);
+  const [players, setPlayers] = useState<PlayerWithUser[]>([]);
+  const playersRef = useRef<PlayerWithUser[]>([]);
+  const isJoiningRef = useRef(false);
 
   // Update the ref whenever players changes
   useEffect(() => {
@@ -127,40 +94,70 @@ const Lobby: React.FC = () => {
           // Vérifier si l'utilisateur est déjà dans la partie
           const isUserInGame = initialPlayers?.some(player => player.users.email === userEmail);
           
+          // Vérifier aussi dans les joueurs actuels pour éviter les doublons
+          const isUserAlreadyInCurrentPlayers = players.some(player => player.users.email === userEmail);
+          
           // Si l'utilisateur n'est pas dans la partie, l'ajouter
-          if (!isUserInGame && userEmail && session?.user?.id) {
-            // Récupérer l'ID de l'utilisateur
-            const user = await getUserByAuthId(session.user.id);
+          if (!isUserInGame && !isUserAlreadyInCurrentPlayers && userEmail && session?.user?.id && !isJoiningRef.current) {
+            isJoiningRef.current = true; // Marquer que nous sommes en train de rejoindre
             
-            if (!user) {
-              setError('Utilisateur non trouvé');
-              return;
-            }
+            try {
+              // Récupérer l'ID de l'utilisateur
+              const user = await getUserByAuthId(session.user.id);
+              
+              if (!user) {
+                setError('Utilisateur non trouvé');
+                return;
+              }
 
-            // Déterminer le rôle en fonction du nombre de joueurs
-            const role = initialPlayers?.length === 0 ? 'AGENT' : 'ROGUE';
-            
-            const playerData = {
-              id_game: game[0].id_game,
-              user_id: user.id,
-              role: role,
-              created_at: new Date().toISOString()
-            };
-                        
-            await gameService.createPlayer(playerData);
+              // Déterminer le rôle en fonction du nombre de joueurs
+              const role = initialPlayers?.length === 0 ? 'AGENT' : 'ROGUE';
+              
+              // Le premier joueur devient automatiquement admin
+              const isAdmin = initialPlayers?.length === 0;
+              
+              const playerData = {
+                id_game: game[0].id_game,
+                user_id: user.id,
+                role: role,
+                is_admin: isAdmin,
+                created_at: new Date().toISOString()
+              };
+                          
+              await gameService.createPlayer(playerData);
+              
+              // Attendre un peu pour s'assurer que la base de données a bien enregistré les changements
+              await new Promise(resolve => setTimeout(resolve, 500));
+              
+              // Rafraîchir la liste des joueurs après la création
+              const updatedPlayers = await gameService.getPlayersByGameId(game[0].id_game.toString());
+              if (updatedPlayers) {
+                console.log('Refreshed players list:', updatedPlayers);
+                setPlayers(updatedPlayers);
+                playersRef.current = updatedPlayers;
+              }
+            } catch (error) {
+              console.error('Error creating player:', error);
+              setError('Erreur lors de l\'ajout du joueur');
+            } finally {
+              isJoiningRef.current = false; // Réinitialiser le flag
+            }
           }
 
           // Subscribe to player changes
           const playerChangesChannel = gameService.subscribeToPlayerChanges(
             game[0].id_game.toString(),
             (payload) => {
+              console.log('Player change event received:', payload);
               if (payload.eventType === 'INSERT') {
+                console.log('INSERT event - adding new player:', payload.new);
                 setPlayers(prev => {
                   const newPlayers = [...prev, payload.new];
                   playersRef.current = newPlayers;
                   return newPlayers;
                 });
               } else if (payload.eventType === 'UPDATE') {
+                console.log('UPDATE event - updating player:', payload.new);
                 setPlayers(prev => {
                   const newPlayers = prev.map(p => 
                     p.id_player === payload.new.id_player ? payload.new : p
@@ -253,7 +250,7 @@ const Lobby: React.FC = () => {
     };
 
     fetchGameDetails();
-  }, [location.search, userEmail, session, history]);
+  }, [location.search, userEmail, session?.user?.id]);
 
   const handleRoleChange = async (playerId: number, newRole: string) => {
     try {
@@ -298,7 +295,10 @@ const Lobby: React.FC = () => {
             <div style={{ height: '300px', width: '100%', marginBottom: '1rem' }}>
               <MapContainer
                 key={mapKey}
-                center={[parseFloat(gameDetails.map_center_latitude), parseFloat(gameDetails.map_center_longitude)]}
+                center={[
+                  parseFloat(gameDetails.map_center_latitude || '0'), 
+                  parseFloat(gameDetails.map_center_longitude || '0')
+                ]}
                 zoom={13}
                 style={{ height: '100%', width: '100%' }}
               >
@@ -308,14 +308,20 @@ const Lobby: React.FC = () => {
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 />
                 <Circle
-                  center={[parseFloat(gameDetails.map_center_latitude), parseFloat(gameDetails.map_center_longitude)]}
-                  radius={gameDetails.map_radius}
+                  center={[
+                    parseFloat(gameDetails.map_center_latitude || '0'), 
+                    parseFloat(gameDetails.map_center_longitude || '0')
+                  ]}
+                  radius={gameDetails.map_radius || 1000}
                   pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
                 />
                 {objectives.map((objective) => (
                   <Marker
                     key={objective.id_prop}
-                    position={[parseFloat(objective.latitude), parseFloat(objective.longitude)]}
+                    position={[
+                      parseFloat(objective.latitude || '0'), 
+                      parseFloat(objective.longitude || '0')
+                    ]}
                     icon={L.divIcon({
                       className: 'custom-div-icon',
                       html: `<div style="background-color: red; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
@@ -394,7 +400,19 @@ const Lobby: React.FC = () => {
                         </div>
                       </IonAvatar>
                       <IonLabel>
-                        <h2>{player.users.email}</h2>
+                        <h2>
+                          {player.users.email}
+                          {player.is_admin && (
+                            <span style={{ 
+                              color: '#ff6b35', 
+                              fontSize: '0.8em', 
+                              marginLeft: '8px',
+                              fontWeight: 'bold'
+                            }}>
+                              👑 Admin
+                            </span>
+                          )}
+                        </h2>
                         <p>{player.role}</p>
                       </IonLabel>
                       {player.users.email === userEmail && (
@@ -475,7 +493,7 @@ const Lobby: React.FC = () => {
                   <IonItem>
                     <IonLabel>
                       <h2>Durée du hack</h2>
-                      <p>{gameDetails.hack_duration_ms / 1000} secondes</p>
+                      <p>{(gameDetails.hack_duration_ms || 0) / 1000} secondes</p>
                     </IonLabel>
                   </IonItem>
                   <IonItem>

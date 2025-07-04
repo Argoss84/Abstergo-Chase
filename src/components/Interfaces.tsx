@@ -61,4 +61,5 @@ export interface Player {
   IsReady: boolean | null;
   status: string | null;
   updated_at: string | null;
+  is_admin: boolean | null;
 } 
