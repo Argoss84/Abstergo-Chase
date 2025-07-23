@@ -194,3 +194,30 @@ export const generateRandomPointInCircle = (center: [number, number], radius: nu
   
   return [lat, lng];
 };
+
+// Fonction pour calculer la distance entre deux points géographiques
+export const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const R = 6371e3; // Rayon de la Terre en mètres
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+};
+
+// Fonction pour vérifier si le joueur est dans la zone de départ
+export const checkIfInStartZone = (position: [number, number], startZoneLat: string, startZoneLon: string, radius: number = 50): boolean => {
+  const distance = calculateDistance(
+    position[0], 
+    position[1], 
+    parseFloat(startZoneLat), 
+    parseFloat(startZoneLon)
+  );
+  return distance <= radius;
+};

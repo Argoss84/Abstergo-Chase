@@ -1,39 +1,17 @@
-import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon } from '@ionic/react';
+import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonModal, IonButtons } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
-import { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Circle, Marker, useMap } from 'react-leaflet';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { MapContainer, TileLayer, Circle, Marker, useMap, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import { QrReader } from 'react-qr-reader';
 import GameService from '../services/GameService';
 import { generateRandomPointInCircle } from '../utils/utils';
 import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, settings, skullOutline } from 'ionicons/icons';
 import './Agent.css';
-
-interface GameProp {
-  id_prop: number;
-  latitude: string;
-  longitude: string;
-  type: string;
-  detection_radius: number;
-}
-
-interface GameDetails {
-  code: string;
-  map_radius: number;
-  map_center_latitude: string;
-  map_center_longitude: string;
-  start_zone_latitude?: string;
-  start_zone_longitude?: string;
-  start_zone_rogue_latitude?: string;
-  start_zone_rogue_longitude?: string;
-  props?: GameProp[];
-}
-
-interface ObjectiveCircle {
-  id_prop: number;
-  center: [number, number];
-  radius: number;
-}
+import { GameProp, GameDetails, ObjectiveCircle } from '../components/Interfaces';
+import { useAuth } from '../contexts/AuthenticationContext';
+import { getUserByAuthId } from '../services/UserServices';
 
 const ResizeMap = () => {
   const map = useMap();
@@ -48,11 +26,250 @@ const ResizeMap = () => {
 const Agent: React.FC = () => {
   const history = useHistory();
   const location = useLocation();
+  const { session, userEmail } = useAuth();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
   const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [objectiveCircles, setObjectiveCircles] = useState<ObjectiveCircle[]>([]);
   const [isFabOpen, setIsFabOpen] = useState(false);
+  const [isQRModalOpen, setIsQRModalOpen] = useState(false);
+  const [scannedQRCode, setScannedQRCode] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [routePath, setRoutePath] = useState<[number, number][]>([]);
+  
+  // États pour la routine périodique
+  const [routineInterval, setRoutineInterval] = useState<number>(2000); // 5 secondes par défaut
+  const [isRoutineActive, setIsRoutineActive] = useState<boolean>(true);
+  const [routineExecutionCount, setRoutineExecutionCount] = useState<number>(0);
+  const routineIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [currentPlayerId, setCurrentPlayerId] = useState<number | null>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [objectiveCirclesInitialized, setObjectiveCirclesInitialized] = useState<boolean>(false);
+
+  // Fonctions pour les boutons FAB
+  const handleNetworkScan = () => {
+    console.log('Scan réseau activé');
+    // Ici vous pouvez ajouter la logique pour scanner le réseau
+    alert('Scan réseau en cours...');
+  };
+
+  const handleVisionMode = () => {
+    console.log('Mode vision activé');
+    // Ici vous pouvez ajouter la logique pour changer le mode de vision
+    alert('Mode vision activé');
+  };
+
+  const handleHealthCheck = () => {
+    console.log('Vérification de santé activée');
+    // Ici vous pouvez ajouter la logique pour vérifier la santé
+    alert('Vérification de santé en cours...');
+  };
+
+  const handleLocationTracker = () => {
+    console.log('Traceur de localisation activé');
+    // Ici vous pouvez ajouter la logique pour tracer la localisation
+    if (currentPosition) {
+      alert(`Position actuelle: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
+    } else {
+      alert('Position non disponible');
+    }
+  };
+
+  const handleThreatDetection = async () => {
+    console.log('Scanner QR Code activé');
+    
+    // Vérifier si la caméra est disponible
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(device => device.kind === 'videoinput');
+      
+      if (videoDevices.length === 0) {
+        setCameraError('Aucune caméra détectée sur cet appareil');
+        setIsQRModalOpen(true);
+        return;
+      }
+      
+      // Vérifier les permissions de caméra
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      stream.getTracks().forEach(track => track.stop()); // Arrêter le stream de test
+      
+      setCameraError(null);
+      setIsQRModalOpen(true);
+    } catch (error) {
+      console.error('Erreur d\'accès à la caméra:', error);
+      setCameraError('Impossible d\'accéder à la caméra. Vérifiez les permissions.');
+      setIsQRModalOpen(true);
+    }
+  };
+
+  const handleQRCodeScanned = (result: string) => {
+    setScannedQRCode(result);
+    console.log('QR Code scanné:', result);
+    // Ici vous pouvez ajouter la logique pour traiter le QR code scanné
+    alert(`QR Code détecté: ${result}`);
+    setIsQRModalOpen(false);
+  };
+
+  const closeQRModal = () => {
+    setIsQRModalOpen(false);
+    setScannedQRCode(null);
+    setCameraError(null);
+  };
+
+  // Fonction pour récupérer le trajet routier
+  const fetchRoute = async (start: [number, number], end: [number, number]) => {
+    try {
+      const url = `https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`;
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      if (data.routes && data.routes[0]) {
+        const coordinates = data.routes[0].geometry.coordinates;
+        // Convertir les coordonnées [lng, lat] en [lat, lng] pour Leaflet
+        const routePath = coordinates.map((coord: [number, number]) => [coord[1], coord[0]]);
+        setRoutePath(routePath);
+      }
+    } catch (error) {
+      console.error('Erreur lors de la récupération du trajet:', error);
+      // En cas d'erreur, utiliser une ligne droite
+      setRoutePath([start, end]);
+    }
+  };
+
+  // Fonction de routine périodique
+  const executeRoutine = useCallback(() => {
+    console.log(`Routine exécutée #${routineExecutionCount + 1} à ${new Date().toLocaleTimeString()}`);
+    
+    // Incrémenter le compteur d'exécutions
+    setRoutineExecutionCount(prev => prev + 1);
+    
+    // Exemple de tâches que la routine peut effectuer :
+    // 1. Vérifier la position actuelle
+    if (currentPosition) {
+      console.log(`Position actuelle: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
+      
+      // Mettre à jour la position du joueur en base de données
+      if (currentPlayerId) {
+        updatePlayerPosition(currentPlayerId, currentPosition[0], currentPosition[1]);
+      }
+    }
+    
+    // 2. Mettre à jour les données de la partie
+    updateGameData();
+    
+    // 3. Vérifier l'état de la partie
+    if (gameDetails) {
+      console.log(`État de la partie: ${gameDetails.is_converging_phase ? 'Phase de convergence' : 'Phase normale'}`);
+    }
+    
+    // 4. Vérifier la distance vers les objectifs
+    if (currentPosition && objectiveCircles.length > 0) {
+      objectiveCircles.forEach((circle, index) => {
+        const distance = Math.sqrt(
+          Math.pow(currentPosition[0] - circle.center[0], 2) + 
+          Math.pow(currentPosition[1] - circle.center[1], 2)
+        ) * 111000; // Conversion approximative en mètres
+        console.log(`Distance vers objectif ${index + 1}: ${distance.toFixed(0)}m`);
+      });
+    }
+    
+    // 5. Mettre à jour le trajet si nécessaire (en phase de convergence)
+    if (gameDetails?.is_converging_phase && 
+        currentPosition && 
+        gameDetails.start_zone_latitude && 
+        gameDetails.start_zone_longitude) {
+      const startZone: [number, number] = [
+        parseFloat(gameDetails.start_zone_latitude),
+        parseFloat(gameDetails.start_zone_longitude)
+      ];
+      fetchRoute(currentPosition, startZone);
+    }
+    
+  }, [currentPosition, gameDetails, objectiveCircles, routineExecutionCount, currentPlayerId, location.search]);
+
+  // Fonction pour mettre à jour la position du joueur en base de données
+  const updatePlayerPosition = async (playerId: number, latitude: number, longitude: number) => {
+    try {
+      const gameService = new GameService();
+      await gameService.updatePlayer(playerId.toString(), {
+        latitude: latitude.toString(),
+        longitude: longitude.toString(),
+        updated_at: new Date().toISOString()
+      });
+      console.log(`Position du joueur ${playerId} mise à jour en BDD: ${latitude}, ${longitude}`);
+    } catch (error) {
+      console.error('Erreur lors de la mise à jour de la position:', error);
+    }
+  };
+
+  // Fonction pour mettre à jour les données de la partie
+  const updateGameData = async () => {
+    try {
+      const params = new URLSearchParams(location.search);
+      const code = params.get('code');
+      
+      if (!code) {
+        console.warn('Code de partie non disponible pour la mise à jour');
+        return;
+      }
+
+      const gameService = new GameService();
+      const game = await gameService.getGameDatasByCode(code);
+      
+      if (game && game[0]) {
+        setGameDetails(game[0]);
+        
+        // Ne pas régénérer les cercles d'objectifs - ils sont déjà initialisés
+        // Les cercles aléatoires ne sont calculés qu'une seule fois au chargement initial
+        
+        console.log(`Données de la partie mises à jour: ${game[0].code} - Phase: ${game[0].is_converging_phase ? 'Convergence' : 'Normale'}`);
+      }
+    } catch (error) {
+      console.error('Erreur lors de la mise à jour des données de la partie:', error);
+    }
+  };
+
+  // Gestionnaire pour démarrer/arrêter la routine
+  const toggleRoutine = () => {
+    setIsRoutineActive(prev => !prev);
+  };
+
+  // Gestionnaire pour changer l'intervalle
+  const changeRoutineInterval = (newInterval: number) => {
+    setRoutineInterval(newInterval);
+  };
+
+  // Effet pour gérer la routine périodique
+  useEffect(() => {
+    if (isRoutineActive && routineInterval > 0) {
+      // Nettoyer l'intervalle précédent s'il existe
+      if (routineIntervalRef.current) {
+        clearInterval(routineIntervalRef.current);
+      }
+      
+      // Créer un nouvel intervalle
+      routineIntervalRef.current = setInterval(() => {
+        executeRoutine();
+      }, routineInterval);
+      
+      console.log(`Routine démarrée avec un intervalle de ${routineInterval}ms`);
+    } else {
+      // Arrêter la routine
+      if (routineIntervalRef.current) {
+        clearInterval(routineIntervalRef.current);
+        routineIntervalRef.current = null;
+        console.log('Routine arrêtée');
+      }
+    }
+    
+    // Cleanup lors du démontage du composant
+    return () => {
+      if (routineIntervalRef.current) {
+        clearInterval(routineIntervalRef.current);
+        routineIntervalRef.current = null;
+      }
+    };
+  }, [isRoutineActive, routineInterval, executeRoutine]);
 
   useEffect(() => {
     const fetchGameDetails = async () => {
@@ -65,23 +282,51 @@ const Agent: React.FC = () => {
           return;
         }
 
+        // Récupérer l'utilisateur connecté
+        if (session?.user) {
+          const user = await getUserByAuthId(session.user.id);
+          if (user) {
+            setCurrentUser(user);
+            console.log(`Utilisateur connecté: ${user.email} (ID: ${user.id})`);
+          } else {
+            setError('Utilisateur non trouvé');
+            return;
+          }
+        } else {
+          setError('Utilisateur non connecté');
+          return;
+        }
+
         const gameService = new GameService();
-        const game = await gameService.getGameWithPropsByCode(code);
+        const game = await gameService.getGameDatasByCode(code);
         
         if (game && game[0]) {
           setGameDetails(game[0]);
+          
+          // Récupérer l'ID du joueur actuel en utilisant l'utilisateur connecté
+          if (game[0].players && game[0].players.length > 0 && currentUser) {
+            const currentPlayer = game[0].players.find((player: any) => player.user_id === currentUser.id);
+            if (currentPlayer) {
+              setCurrentPlayerId(currentPlayer.id_player);
+              console.log(`Joueur actuel identifié: ${currentPlayer.id_player} (${currentPlayer.role}) - Utilisateur: ${currentUser.email}`);
+            } else {
+              console.warn(`Aucun joueur trouvé pour l'utilisateur ${currentUser.email} dans cette partie`);
+            }
+          }
           
           // Générer les cercles d'objectifs
           if (game[0].props) {
             const circles = game[0].props.map((prop: GameProp) => ({
               id_prop: prop.id_prop,
               center: generateRandomPointInCircle(
-                [parseFloat(prop.latitude), parseFloat(prop.longitude)],
-                prop.detection_radius
+                [parseFloat(prop.latitude || '0'), parseFloat(prop.longitude || '0')],
+                prop.detection_radius || 0
               ),
-              radius: prop.detection_radius
+              radius: prop.detection_radius || 0
             }));
             setObjectiveCircles(circles);
+            setObjectiveCirclesInitialized(true);
+            console.log(`${circles.length} cercles d'objectifs initialisés`);
           }
         } else {
           setError('Partie non trouvée');
@@ -92,8 +337,10 @@ const Agent: React.FC = () => {
       }
     };
 
-    fetchGameDetails();
-  }, [location.search]);
+    if (session?.user) {
+      fetchGameDetails();
+    }
+  }, [location.search, session]);
 
   useEffect(() => {
     // Get initial position
@@ -128,6 +375,24 @@ const Agent: React.FC = () => {
     }
   }, []);
 
+  // Effet pour récupérer le trajet routier en phase de convergence
+  useEffect(() => {
+    if (gameDetails?.is_converging_phase && 
+        currentPosition && 
+        gameDetails.start_zone_latitude && 
+        gameDetails.start_zone_longitude) {
+      
+      const startZone: [number, number] = [
+        parseFloat(gameDetails.start_zone_latitude),
+        parseFloat(gameDetails.start_zone_longitude)
+      ];
+      
+      fetchRoute(currentPosition, startZone);
+    } else {
+      setRoutePath([]);
+    }
+  }, [gameDetails?.is_converging_phase, currentPosition, gameDetails?.start_zone_latitude, gameDetails?.start_zone_longitude]);
+
   return (
     <IonPage>
       <IonHeader>
@@ -139,12 +404,14 @@ const Agent: React.FC = () => {
         {error ? (
           <p>{error}</p>
         ) : gameDetails ? (
-          <div style={{ height: 'calc(100vh - 56px)', width: '100%', position: 'relative' }}>
+          <div className="map-container">
             <MapContainer
               key={`map-${gameDetails.code}`}
-              center={[parseFloat(gameDetails.map_center_latitude), parseFloat(gameDetails.map_center_longitude)]}
+              center={[
+                parseFloat(gameDetails.map_center_latitude || '0'), 
+                parseFloat(gameDetails.map_center_longitude || '0')
+              ]}
               zoom={15}
-              style={{ height: '100%', width: '100%' }}
               whenReady={() => {
                 // Force a resize after the map is ready
                 setTimeout(() => {
@@ -161,8 +428,11 @@ const Agent: React.FC = () => {
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               />
               <Circle
-                center={[parseFloat(gameDetails.map_center_latitude), parseFloat(gameDetails.map_center_longitude)]}
-                radius={gameDetails.map_radius}
+                center={[
+                  parseFloat(gameDetails.map_center_latitude || '0'), 
+                  parseFloat(gameDetails.map_center_longitude || '0')
+                ]}
+                radius={gameDetails.map_radius || 750}
                 pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
               />
               {gameDetails.start_zone_latitude && gameDetails.start_zone_longitude && (
@@ -220,6 +490,24 @@ const Agent: React.FC = () => {
                   })}
                 />
               )}
+              
+              {/* Affichage du trajet vers la zone de départ en phase de convergence */}
+              {gameDetails.is_converging_phase && 
+               currentPosition && 
+               gameDetails.start_zone_latitude && 
+               gameDetails.start_zone_longitude && 
+               routePath.length > 0 && (
+                <Polyline
+                  positions={routePath}
+                  pathOptions={{
+                    color: '#00ff41',
+                    weight: 4,
+                    opacity: 0.9,
+                    dashArray: '10, 5',
+                    className: 'neon-pulse-route'
+                  }}
+                />
+              )}
             </MapContainer>
           </div>
         ) : (
@@ -229,6 +517,74 @@ const Agent: React.FC = () => {
           EndGame
         </IonButton>
 
+        {/* Contrôles de la routine périodique */}
+        <IonCard>
+          <IonCardHeader>
+            <IonCardTitle>Routine Périodique</IonCardTitle>
+          </IonCardHeader>
+          <IonContent className="ion-padding">
+            <div className="routine-interval-controls">
+              <span>Intervalle: {routineInterval}ms</span>
+              <IonButton 
+                size="small" 
+                onClick={() => changeRoutineInterval(1000)}
+                color={routineInterval === 1000 ? 'primary' : 'medium'}
+              >
+                1s
+              </IonButton>
+              <IonButton 
+                size="small" 
+                onClick={() => changeRoutineInterval(5000)}
+                color={routineInterval === 5000 ? 'primary' : 'medium'}
+              >
+                5s
+              </IonButton>
+              <IonButton 
+                size="small" 
+                onClick={() => changeRoutineInterval(10000)}
+                color={routineInterval === 10000 ? 'primary' : 'medium'}
+              >
+                10s
+              </IonButton>
+            </div>
+            
+            <div className="routine-status-controls">
+              <span>Statut: {isRoutineActive ? '🟢 Actif' : '🔴 Inactif'}</span>
+              <IonButton 
+                size="small" 
+                onClick={toggleRoutine}
+                color={isRoutineActive ? 'danger' : 'success'}
+              >
+                {isRoutineActive ? 'Arrêter' : 'Démarrer'}
+              </IonButton>
+            </div>
+            
+            <div className="routine-info">
+              Exécutions: {routineExecutionCount} | 
+              Dernière exécution: {routineExecutionCount > 0 ? new Date().toLocaleTimeString() : 'Aucune'}
+            </div>
+            
+            <div className="routine-player-info">
+              <div>Joueur ID: {currentPlayerId || 'Non identifié'}</div>
+              <div>Mise à jour BDD: {currentPlayerId ? '🟢 Activée' : '🔴 Désactivée'}</div>
+            </div>
+            
+            <div className="routine-user-info">
+              <div>Utilisateur: {currentUser?.email || 'Non connecté'}</div>
+              <div>User ID: {currentUser?.id || 'N/A'}</div>
+              <div>Statut: {currentPlayerId ? '🟢 Joueur identifié' : '🔴 Joueur non trouvé'}</div>
+            </div>
+            
+            <div className="routine-updates-info">
+              <div><strong>Mises à jour automatiques :</strong></div>
+              <div>📍 Position joueur: {currentPlayerId ? '🟢' : '🔴'}</div>
+              <div>🎮 Données partie: 🟢</div>
+              <div>🎯 Objectifs: {objectiveCirclesInitialized ? '🟢 (fixes)' : '⚪'}</div>
+              <div>🗺️ Trajet (convergence): {gameDetails?.is_converging_phase ? '🟢' : '⚪'}</div>
+            </div>
+          </IonContent>
+        </IonCard>
+
         <div className="fab-container">
           <IonFabButton onClick={() => setIsFabOpen(!isFabOpen)}>
             <IonIcon icon={apertureOutline} />
@@ -236,44 +592,83 @@ const Agent: React.FC = () => {
           
           <div className={`fab-list fab-list-top ${!isFabOpen ? 'fab-list-hidden' : ''}`}>
             
-            <IonFabButton color="light" onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}>
+            <IonFabButton color="light" onClick={handleNetworkScan}>
               <IonIcon icon={cellularOutline} />
             </IonFabButton>
           </div>
 
           <div className={`fab-list fab-list-start ${!isFabOpen ? 'fab-list-hidden' : ''}`}>
-            <IonFabButton color="light" onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}>
+            <IonFabButton color="light" onClick={handleVisionMode}>
               <IonIcon icon={colorFilterOutline} />
             </IonFabButton>
-            <IonFabButton color="light" onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}>
+            <IonFabButton color="light" onClick={handleHealthCheck}>
               <IonIcon icon={fitnessOutline} />
             </IonFabButton>
           </div>
 
           <div className={`fab-list fab-list-end ${!isFabOpen ? 'fab-list-hidden' : ''}`}>
-            <IonFabButton color="light" onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}>
+            <IonFabButton color="light" onClick={handleLocationTracker}>
               <IonIcon icon={locateOutline} />
             </IonFabButton>
-            <IonFabButton color="light" onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}>
+            <IonFabButton color="light" onClick={handleThreatDetection}>
               <IonIcon icon={skullOutline} />
             </IonFabButton>
           </div>
         </div>
+
+        {/* Modal QR Code Scanner */}
+        <IonModal isOpen={isQRModalOpen} onDidDismiss={closeQRModal}>
+          <IonHeader>
+            <IonToolbar>
+              <IonTitle>Scanner QR Code</IonTitle>
+              <IonButtons slot="end">
+                <IonButton onClick={closeQRModal}>Fermer</IonButton>
+              </IonButtons>
+            </IonToolbar>
+          </IonHeader>
+          <IonContent className="ion-padding">
+            <div className="qr-modal-content">
+              {cameraError ? (
+                // Affichage de l'erreur de caméra
+                <div className="qr-error-container">
+                  <div className="qr-error-content">
+                    <div className="qr-error-icon">📷</div>
+                    <strong>Erreur Caméra</strong><br/>
+                    {cameraError}
+                  </div>
+                </div>
+              ) : (
+                // Scanner QR normal
+                <div className="qr-scanner-container">
+                  <div className="qr-scanner-wrapper">
+                    <QrReader
+                      constraints={{ facingMode: 'environment' }}
+                      onResult={(result: any, error: any) => {
+                        if (error) {
+                          return;
+                        }
+                        if (result) {
+                          handleQRCodeScanned(result?.text);
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+              
+              <p>{cameraError ? 'Impossible d\'accéder au scanner QR' : 'Placez le QR code dans la zone de scan'}</p>
+              
+              <IonButton 
+                expand="block" 
+                onClick={closeQRModal}
+                className="qr-modal-button"
+                color="medium"
+              >
+                {cameraError ? 'Fermer' : 'Annuler'}
+              </IonButton>
+            </div>
+          </IonContent>
+        </IonModal>
       </IonContent>
     </IonPage>
   );
