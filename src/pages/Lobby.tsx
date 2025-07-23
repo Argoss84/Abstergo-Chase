@@ -91,7 +91,6 @@ const Lobby: React.FC = () => {
   const [mapKey, setMapKey] = useState(0);
   const [players, setPlayers] = useState<Player[]>([]);
   const playersRef = useRef<Player[]>([]);
-  const [userPosition, setUserPosition] = useState<[number, number] | null>(null);
 
   // Update the ref whenever players changes
   useEffect(() => {
@@ -99,21 +98,6 @@ const Lobby: React.FC = () => {
       playersRef.current = [...players];
     }
   }, [players]);
-
-  // Récupère la position de l'utilisateur au montage
-  useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setUserPosition([position.coords.latitude, position.coords.longitude]);
-        },
-        (error) => {
-          setUserPosition(null);
-        },
-        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-      );
-    }
-  }, []);
 
   useEffect(() => {
     const fetchGameDetails = async () => {
@@ -129,15 +113,6 @@ const Lobby: React.FC = () => {
         const gameService = new GameService();
         const game = await gameService.getGameWithPropsByCode(code);
         
-        // Fonction utilitaire pour rafraîchir la liste des joueurs
-        const refreshPlayers = async (gameId: number) => {
-          const updatedPlayers = await gameService.getPlayersByGameId(gameId.toString());
-          if (updatedPlayers) {
-            setPlayers(updatedPlayers);
-            playersRef.current = updatedPlayers;
-          }
-        };
-        
         if (game && game[0]) {
           setGameDetails(game[0]);
           setObjectives(game[0].props || []);
@@ -149,44 +124,30 @@ const Lobby: React.FC = () => {
             playersRef.current = initialPlayers;
           }
           
-          // Récupérer l'ID de l'utilisateur
-          const user = await getUserByAuthId(session.user.id);
+          // Vérifier si l'utilisateur est déjà dans la partie
+          const isUserInGame = initialPlayers?.some(player => player.users.email === userEmail);
           
-          if (!user) {
-            setError('Utilisateur non trouvé');
-            return;
-          }
-
-          // Vérifier si l'utilisateur est déjà dans la partie (par user_id)
-          const isUserInGame = initialPlayers?.some(player => player.user_id === user.id);
-
           // Si l'utilisateur n'est pas dans la partie, l'ajouter
           if (!isUserInGame && userEmail && session?.user?.id) {
+            // Récupérer l'ID de l'utilisateur
+            const user = await getUserByAuthId(session.user.id);
+            
+            if (!user) {
+              setError('Utilisateur non trouvé');
+              return;
+            }
+
             // Déterminer le rôle en fonction du nombre de joueurs
             const role = initialPlayers?.length === 0 ? 'AGENT' : 'ROGUE';
-
+            
             const playerData = {
               id_game: game[0].id_game,
               user_id: user.id,
               role: role,
               created_at: new Date().toISOString()
             };
-
-            try {
-              await gameService.createPlayer(playerData);
-              await refreshPlayers(game[0].id_game); // Rafraîchir la liste après ajout
-            } catch (err: any) {
-              // Ignore duplicate key error (code 23505)
-              if (err.code === '23505') {
-                await refreshPlayers(game[0].id_game); // Rafraîchir la liste même en cas de doublon
-              } else {
-                setError('Erreur lors de l\'ajout du joueur');
-                return;
-              }
-            }
-          } else if (isUserInGame) {
-            // Si l'utilisateur existe déjà, rafraîchir la liste aussi
-            await refreshPlayers(game[0].id_game);
+                        
+            await gameService.createPlayer(playerData);
           }
 
           // Subscribe to player changes
@@ -363,18 +324,6 @@ const Lobby: React.FC = () => {
                     })}
                   />
                 ))}
-                {/* Marker position utilisateur */}
-                {userPosition && (
-                  <Marker
-                    position={userPosition}
-                    icon={L.divIcon({
-                      className: 'custom-div-icon',
-                      html: `<div style="background-color: purple; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">Moi</div>`,
-                      iconSize: [30, 30],
-                      iconAnchor: [15, 15],
-                    })}
-                  />
-                )}
                 {gameDetails.start_zone_latitude && gameDetails.start_zone_longitude && (
                   <>
                     <Marker

@@ -36,37 +36,4 @@
 
 .fab-list-hidden {
   display: none;
-}
-
-.agent-itinerary-polyline {
-  stroke: orange !important;
-  stroke-width: 4 !important;
-  stroke-dasharray: 10, 10 !important;
-}
-
-.agent-street-polyline {
-  stroke: gray !important;
-  stroke-width: 2 !important;
-}
-
-.agent-itinerary-polyline-pulse {
-  stroke: lime !important;
-  stroke-width: 6 !important;
-  filter: drop-shadow(0 0 8px #00ff00);
-  animation: pulse-green 1.2s infinite;
-}
-
-@keyframes pulse-green {
-  0% {
-    stroke-opacity: 1;
-    filter: drop-shadow(0 0 8px #00ff00);
-  }
-  50% {
-    stroke-opacity: 0.4;
-    filter: drop-shadow(0 0 20px #00ff00);
-  }
-  100% {
-    stroke-opacity: 1;
-    filter: drop-shadow(0 0 8px #00ff00);
-  }
 } 
