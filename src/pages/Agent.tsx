@@ -1,11 +1,11 @@
 import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Circle, Marker, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Circle, Marker, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import GameService from '../services/GameService';
-import { generateRandomPointInCircle } from '../utils/utils';
+import { generateRandomPointInCircle, fetchStreetsFromOverpass, getStraightLineItinerary, getShortestPathOnStreets } from '../utils/utils';
 import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, settings, skullOutline } from 'ionicons/icons';
 import './Agent.css';
 
@@ -53,6 +53,8 @@ const Agent: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [objectiveCircles, setObjectiveCircles] = useState<ObjectiveCircle[]>([]);
   const [isFabOpen, setIsFabOpen] = useState(false);
+  const [streets, setStreets] = useState<L.LatLngTuple[][]>([]);
+  const [path, setPath] = useState<[number, number][]>([]);
 
   useEffect(() => {
     const fetchGameDetails = async () => {
@@ -128,6 +130,41 @@ const Agent: React.FC = () => {
     }
   }, []);
 
+  // Raffraichir les rues et recalculer l'itinéraire toutes les secondes
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    const update = async () => {
+      if (gameDetails) {
+        const lat = parseFloat(gameDetails.map_center_latitude);
+        const lng = parseFloat(gameDetails.map_center_longitude);
+        const radius = gameDetails.map_radius;
+        const newStreets = await fetchStreetsFromOverpass(lat, lng, radius);
+        setStreets(newStreets);
+        if (currentPosition && gameDetails.start_zone_latitude && gameDetails.start_zone_longitude) {
+          const to: [number, number] = [parseFloat(gameDetails.start_zone_latitude), parseFloat(gameDetails.start_zone_longitude)];
+          setPath(getShortestPathOnStreets(currentPosition, to, newStreets));
+        } else {
+          setPath([]);
+        }
+      }
+    };
+    update();
+    interval = setInterval(update, 1000);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [gameDetails, currentPosition]);
+
+  // Fonction pour calculer l'itinéraire entre la position actuelle et la zone de départ
+  // (remplacée par le calcul du path)
+  // const getItinerary = (): [number, number][] | undefined => {
+  //   if (!currentPosition || !gameDetails?.start_zone_latitude || !gameDetails?.start_zone_longitude) return undefined;
+  //   return getStraightLineItinerary(
+  //     currentPosition,
+  //     [parseFloat(gameDetails.start_zone_latitude), parseFloat(gameDetails.start_zone_longitude)]
+  //   );
+  // };
+
   return (
     <IonPage>
       <IonHeader>
@@ -165,6 +202,23 @@ const Agent: React.FC = () => {
                 radius={gameDetails.map_radius}
                 pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
               />
+              {/* Affichage des rues */}
+              {streets.map((street, index) => (
+                <Polyline
+                  key={index}
+                  positions={street}
+                  pathOptions={{ color: 'gray', weight: 2 }}
+                  className="agent-street-polyline"
+                />
+              ))}
+              {/* Itinéraire (plus court chemin sur les rues) vers la zone de départ */}
+              {path.length > 1 && (
+                <Polyline
+                  positions={path}
+                  pathOptions={{ color: 'lime', weight: 6, dashArray: '0', className: 'agent-itinerary-polyline-pulse' }}
+                  className="agent-itinerary-polyline-pulse"
+                />
+              )}
               {gameDetails.start_zone_latitude && gameDetails.start_zone_longitude && (
                 <>
                   <Marker
