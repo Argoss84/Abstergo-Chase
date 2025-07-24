@@ -6,7 +6,18 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { QrReader } from 'react-qr-reader';
 import GameService from '../services/GameService';
-import { generateRandomPointInCircle } from '../utils/utils';
+import { 
+  generateRandomPointInCircle, 
+  fetchRoute, 
+  calculateDistanceToStartZone, 
+  isPlayerInStartZone 
+} from '../utils/utils';
+import {
+  updatePlayerPosition,
+  updatePlayerInStartZone,
+  updateGameData,
+  identifyCurrentPlayer
+} from '../utils/PlayerUtils';
 import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, settings, skullOutline } from 'ionicons/icons';
 import './Agent.css';
 import { GameProp, GameDetails, ObjectiveCircle } from '../components/Interfaces';
@@ -116,28 +127,10 @@ const Agent: React.FC = () => {
     setCameraError(null);
   };
 
-  // Fonction pour récupérer le trajet routier
-  const fetchRoute = async (start: [number, number], end: [number, number]) => {
-    try {
-      const url = `https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`;
-      const response = await fetch(url);
-      const data = await response.json();
-      
-      if (data.routes && data.routes[0]) {
-        const coordinates = data.routes[0].geometry.coordinates;
-        // Convertir les coordonnées [lng, lat] en [lat, lng] pour Leaflet
-        const routePath = coordinates.map((coord: [number, number]) => [coord[1], coord[0]]);
-        setRoutePath(routePath);
-      }
-    } catch (error) {
-      console.error('Erreur lors de la récupération du trajet:', error);
-      // En cas d'erreur, utiliser une ligne droite
-      setRoutePath([start, end]);
-    }
-  };
+
 
   // Fonction de routine périodique
-  const executeRoutine = useCallback(() => {
+  const executeRoutine = useCallback(async () => {
     console.log(`Routine exécutée #${routineExecutionCount + 1} à ${new Date().toLocaleTimeString()}`);
     
     // Incrémenter le compteur d'exécutions
@@ -155,22 +148,50 @@ const Agent: React.FC = () => {
     }
     
     // 2. Mettre à jour les données de la partie
-    updateGameData();
+    const params = new URLSearchParams(location.search);
+    const code = params.get('code');
+    if (code) {
+      const updatedGame = await updateGameData(code);
+      if (updatedGame) {
+        setGameDetails(updatedGame);
+      }
+    }
     
     // 3. Vérifier l'état de la partie
     if (gameDetails) {
       console.log(`État de la partie: ${gameDetails.is_converging_phase ? 'Phase de convergence' : 'Phase normale'}`);
     }
     
-    // 4. Vérifier la distance vers les objectifs
-    if (currentPosition && objectiveCircles.length > 0) {
-      objectiveCircles.forEach((circle, index) => {
-        const distance = Math.sqrt(
-          Math.pow(currentPosition[0] - circle.center[0], 2) + 
-          Math.pow(currentPosition[1] - circle.center[1], 2)
-        ) * 111000; // Conversion approximative en mètres
-        console.log(`Distance vers objectif ${index + 1}: ${distance.toFixed(0)}m`);
-      });
+    // 4. Vérifier la distance vers la zone de départ correspondante
+    if (currentPosition && gameDetails?.start_zone_latitude && gameDetails?.start_zone_longitude) {
+      const distance = calculateDistanceToStartZone(
+        currentPosition, 
+        gameDetails.start_zone_latitude, 
+        gameDetails.start_zone_longitude
+      );
+      
+      console.log(`Distance vers zone de départ: ${distance.toFixed(0)}m`);
+      
+      // Vérifier si le joueur est dans la zone de départ (rayon de 50m)
+      const isInStartZone = isPlayerInStartZone(
+        currentPosition, 
+        gameDetails.start_zone_latitude, 
+        gameDetails.start_zone_longitude
+      );
+      
+      if (isInStartZone) {
+        console.log('🎯 VOUS ÊTES DANS LA ZONE DE DÉPART !');
+        
+        // Mettre à jour IsInStartZone en base de données si le joueur est identifié
+        if (currentPlayerId) {
+          updatePlayerInStartZone(currentPlayerId, true);
+        }
+      } else {
+        // Mettre à jour IsInStartZone à false si le joueur n'est plus dans la zone
+        if (currentPlayerId) {
+          updatePlayerInStartZone(currentPlayerId, false);
+        }
+      }
     }
     
     // 5. Mettre à jour le trajet si nécessaire (en phase de convergence)
@@ -182,52 +203,13 @@ const Agent: React.FC = () => {
         parseFloat(gameDetails.start_zone_latitude),
         parseFloat(gameDetails.start_zone_longitude)
       ];
-      fetchRoute(currentPosition, startZone);
+      const route = await fetchRoute(currentPosition, startZone);
+      setRoutePath(route);
     }
     
   }, [currentPosition, gameDetails, objectiveCircles, routineExecutionCount, currentPlayerId, location.search]);
 
-  // Fonction pour mettre à jour la position du joueur en base de données
-  const updatePlayerPosition = async (playerId: number, latitude: number, longitude: number) => {
-    try {
-      const gameService = new GameService();
-      await gameService.updatePlayer(playerId.toString(), {
-        latitude: latitude.toString(),
-        longitude: longitude.toString(),
-        updated_at: new Date().toISOString()
-      });
-      console.log(`Position du joueur ${playerId} mise à jour en BDD: ${latitude}, ${longitude}`);
-    } catch (error) {
-      console.error('Erreur lors de la mise à jour de la position:', error);
-    }
-  };
 
-  // Fonction pour mettre à jour les données de la partie
-  const updateGameData = async () => {
-    try {
-      const params = new URLSearchParams(location.search);
-      const code = params.get('code');
-      
-      if (!code) {
-        console.warn('Code de partie non disponible pour la mise à jour');
-        return;
-      }
-
-      const gameService = new GameService();
-      const game = await gameService.getGameDatasByCode(code);
-      
-      if (game && game[0]) {
-        setGameDetails(game[0]);
-        
-        // Ne pas régénérer les cercles d'objectifs - ils sont déjà initialisés
-        // Les cercles aléatoires ne sont calculés qu'une seule fois au chargement initial
-        
-        console.log(`Données de la partie mises à jour: ${game[0].code} - Phase: ${game[0].is_converging_phase ? 'Convergence' : 'Normale'}`);
-      }
-    } catch (error) {
-      console.error('Erreur lors de la mise à jour des données de la partie:', error);
-    }
-  };
 
   // Gestionnaire pour démarrer/arrêter la routine
   const toggleRoutine = () => {
@@ -304,13 +286,11 @@ const Agent: React.FC = () => {
           setGameDetails(game[0]);
           
           // Récupérer l'ID du joueur actuel en utilisant l'utilisateur connecté
-          if (game[0].players && game[0].players.length > 0 && currentUser) {
-            const currentPlayer = game[0].players.find((player: any) => player.user_id === currentUser.id);
+          if (game[0].players && currentUser) {
+            const currentPlayer = identifyCurrentPlayer(game[0].players, currentUser.id);
             if (currentPlayer) {
               setCurrentPlayerId(currentPlayer.id_player);
-              console.log(`Joueur actuel identifié: ${currentPlayer.id_player} (${currentPlayer.role}) - Utilisateur: ${currentUser.email}`);
-            } else {
-              console.warn(`Aucun joueur trouvé pour l'utilisateur ${currentUser.email} dans cette partie`);
+              console.log(`Utilisateur: ${currentUser.email}`);
             }
           }
           
@@ -377,20 +357,25 @@ const Agent: React.FC = () => {
 
   // Effet pour récupérer le trajet routier en phase de convergence
   useEffect(() => {
-    if (gameDetails?.is_converging_phase && 
-        currentPosition && 
-        gameDetails.start_zone_latitude && 
-        gameDetails.start_zone_longitude) {
-      
-      const startZone: [number, number] = [
-        parseFloat(gameDetails.start_zone_latitude),
-        parseFloat(gameDetails.start_zone_longitude)
-      ];
-      
-      fetchRoute(currentPosition, startZone);
-    } else {
-      setRoutePath([]);
-    }
+    const updateRoute = async () => {
+      if (gameDetails?.is_converging_phase && 
+          currentPosition && 
+          gameDetails.start_zone_latitude && 
+          gameDetails.start_zone_longitude) {
+        
+        const startZone: [number, number] = [
+          parseFloat(gameDetails.start_zone_latitude),
+          parseFloat(gameDetails.start_zone_longitude)
+        ];
+        
+        const route = await fetchRoute(currentPosition, startZone);
+        setRoutePath(route);
+      } else {
+        setRoutePath([]);
+      }
+    };
+    
+    updateRoute();
   }, [gameDetails?.is_converging_phase, currentPosition, gameDetails?.start_zone_latitude, gameDetails?.start_zone_longitude]);
 
   return (

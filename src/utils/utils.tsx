@@ -221,3 +221,69 @@ export const checkIfInStartZone = (position: [number, number], startZoneLat: str
   );
   return distance <= radius;
 };
+
+// Fonction pour récupérer le trajet routier
+export const fetchRoute = async (start: [number, number], end: [number, number]): Promise<[number, number][]> => {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`;
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.routes && data.routes[0]) {
+      const coordinates = data.routes[0].geometry.coordinates;
+      // Convertir les coordonnées [lng, lat] en [lat, lng] pour Leaflet
+      const routePath = coordinates.map((coord: [number, number]) => [coord[1], coord[0]]);
+      return routePath;
+    } else {
+      // En cas d'erreur, utiliser une ligne droite
+      return [start, end];
+    }
+  } catch (error) {
+    console.error('Erreur lors de la récupération du trajet:', error);
+    // En cas d'erreur, utiliser une ligne droite
+    return [start, end];
+  }
+};
+
+// Fonction pour calculer la distance vers la zone de départ
+export const calculateDistanceToStartZone = (
+  currentPosition: [number, number], 
+  startZoneLat: string, 
+  startZoneLng: string
+): number => {
+  const startZoneLatNum = parseFloat(startZoneLat);
+  const startZoneLngNum = parseFloat(startZoneLng);
+  
+  const distance = Math.sqrt(
+    Math.pow(currentPosition[0] - startZoneLatNum, 2) + 
+    Math.pow(currentPosition[1] - startZoneLngNum, 2)
+  ) * 111000; // Conversion approximative en mètres
+  
+  return distance;
+};
+
+// Fonction pour vérifier si le joueur est dans la zone de départ
+export const isPlayerInStartZone = (
+  currentPosition: [number, number], 
+  startZoneLat: string, 
+  startZoneLng: string, 
+  radius: number = 50
+): boolean => {
+  const distance = calculateDistanceToStartZone(currentPosition, startZoneLat, startZoneLng);
+  return distance <= radius;
+};
+
+// Fonction pour calculer la distance vers les objectifs
+export const calculateDistanceToObjectives = (
+  currentPosition: [number, number], 
+  objectiveCircles: { center: [number, number]; radius: number }[]
+): { index: number; distance: number }[] => {
+  return objectiveCircles.map((circle, index) => {
+    const distance = Math.sqrt(
+      Math.pow(currentPosition[0] - circle.center[0], 2) + 
+      Math.pow(currentPosition[1] - circle.center[1], 2)
+    ) * 111000; // Conversion approximative en mètres
+    
+    return { index, distance };
+  });
+};
