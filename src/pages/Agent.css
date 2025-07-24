@@ -168,4 +168,29 @@
   stroke: #0004ff !important;
   stroke-width: 2px !important;
   filter: drop-shadow(0 0 3px #0004ff);
+}
+
+/* Style pour le compteur de distance dans le header */
+.distance-counter {
+  background: linear-gradient(135deg, #0004ff, #0000cc);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-weight: bold;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(0, 4, 255, 0.3);
+  animation: pulse 2s ease-in-out infinite;
+  margin-right: 16px;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 2px 8px rgba(0, 4, 255, 0.3);
+  }
+  50% {
+    box-shadow: 0 4px 16px rgba(0, 4, 255, 0.6);
+  }
+  100% {
+    box-shadow: 0 2px 8px rgba(0, 4, 255, 0.3);
+  }
 } 

@@ -1,4 +1,4 @@
-import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonModal, IonButtons } from '@ionic/react';
+import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonModal, IonButtons, IonLabel } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Circle, Marker, useMap, Polyline } from 'react-leaflet';
@@ -47,6 +47,7 @@ const Agent: React.FC = () => {
   const [scannedQRCode, setScannedQRCode] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [routePath, setRoutePath] = useState<[number, number][]>([]);
+  const [distanceToStartZone, setDistanceToStartZone] = useState<number | null>(null);
   
   // États pour la routine périodique
   const [routineInterval, setRoutineInterval] = useState<number>(2000); // 5 secondes par défaut
@@ -169,6 +170,9 @@ const Agent: React.FC = () => {
         gameDetails.start_zone_latitude, 
         gameDetails.start_zone_longitude
       );
+      
+      // Mettre à jour la distance pour l'affichage dans le header
+      setDistanceToStartZone(distance);
       
       console.log(`Distance vers zone de départ: ${distance.toFixed(0)}m`);
       
@@ -378,11 +382,23 @@ const Agent: React.FC = () => {
     updateRoute();
   }, [gameDetails?.is_converging_phase, currentPosition, gameDetails?.start_zone_latitude, gameDetails?.start_zone_longitude]);
 
+  // Effet pour réinitialiser la distance quand on n'est plus en phase de convergence
+  useEffect(() => {
+    if (!gameDetails?.is_converging_phase) {
+      setDistanceToStartZone(null);
+    }
+  }, [gameDetails?.is_converging_phase]);
+
   return (
     <IonPage>
       <IonHeader>
         <IonToolbar>
           <IonTitle>Agent</IonTitle>
+          {gameDetails?.is_converging_phase && distanceToStartZone !== null && (
+            <IonLabel slot="end" className="distance-counter">
+              🎯 {distanceToStartZone.toFixed(0)}m
+            </IonLabel>
+          )}
         </IonToolbar>
       </IonHeader>
       <IonContent>
