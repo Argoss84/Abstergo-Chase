@@ -217,6 +217,28 @@
   }
 }
 
+/* Style pour le compte à rebours actif */
+.duration-display.countdown-active {
+  background: linear-gradient(135deg, #ff4757, #ff3838);
+  animation: countdownPulse 1s ease-in-out infinite;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+}
+
+@keyframes countdownPulse {
+  0% {
+    box-shadow: 0 4px 15px rgba(255, 71, 87, 0.4);
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+  }
+  50% {
+    box-shadow: 0 6px 25px rgba(255, 71, 87, 0.8), 0 0 40px rgba(255, 71, 87, 0.5);
+    text-shadow: 0 0 20px rgba(255, 255, 255, 1), 0 0 30px rgba(255, 255, 255, 0.8);
+  }
+  100% {
+    box-shadow: 0 4px 15px rgba(255, 71, 87, 0.4);
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+  }
+}
+
 @keyframes pulse {
   0% {
     box-shadow: 0 2px 8px rgba(0, 4, 255, 0.3);

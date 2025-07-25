@@ -38,6 +38,7 @@ export interface GameDetails {
   rogue_range: number | null;
   agent_range: number | null;
   is_converging_phase: boolean | null;
+  started: boolean | null;
   props?: GameProp[];
   players?: Player[];
 }

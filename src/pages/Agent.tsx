@@ -18,6 +18,7 @@ import {
   updateGameData,
   identifyCurrentPlayer
 } from '../utils/PlayerUtils';
+import { updateGameWinnerType } from '../utils/AdminUtils';
 import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, settings, skullOutline } from 'ionicons/icons';
 import './Agent.css';
 import { GameProp, GameDetails, ObjectiveCircle } from '../components/Interfaces';
@@ -57,6 +58,11 @@ const Agent: React.FC = () => {
   const [currentPlayerId, setCurrentPlayerId] = useState<number | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [objectiveCirclesInitialized, setObjectiveCirclesInitialized] = useState<boolean>(false);
+  
+  // États pour le compte à rebours
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [isCountdownActive, setIsCountdownActive] = useState<boolean>(false);
+  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fonctions pour les boutons FAB
   const handleNetworkScan = () => {
@@ -126,6 +132,52 @@ const Agent: React.FC = () => {
     setIsQRModalOpen(false);
     setScannedQRCode(null);
     setCameraError(null);
+  };
+
+  // Handler pour la fin de partie
+  const handleGameEnd = async () => {
+    console.log('⏰ TEMPS ÉCOULÉ - Fin de la partie !');
+    
+    // Arrêter le compte à rebours
+    setIsCountdownActive(false);
+    setCountdown(0);
+        
+    let isCurrentPlayerAdmin = false;
+    
+    if (currentPlayerId) {
+      // Méthode 1: Chercher par currentPlayerId
+      const playerById = gameDetails?.players?.find(
+        player => player.id_player === currentPlayerId
+      );
+      isCurrentPlayerAdmin = playerById?.is_admin || false;
+    } else if (currentUser) {
+      // Méthode 2: Chercher par user_id si currentPlayerId n'est pas disponible
+      const playerByUserId = gameDetails?.players?.find(
+        player => player.user_id === currentUser.id
+      );
+      isCurrentPlayerAdmin = playerByUserId?.is_admin || false;
+    }
+    if (isCurrentPlayerAdmin) {
+      console.log('👑 ADMIN - Fin de partie détectée');
+      
+      // Mettre à jour le winner_type à "AGENT" car le temps est écoulé
+      const params = new URLSearchParams(location.search);
+      const code = params.get('code');
+      if (code) {
+        const success = await updateGameWinnerType(code, 'AGENT');
+        if (success) {
+          console.log('🏆 Winner_type mis à jour: AGENT (temps écoulé)');
+        } else {
+          console.error('❌ Échec de la mise à jour du winner_type');
+        }
+      }
+      
+    } else {
+      console.log('👤 JOUEUR - Fin de partie détectée');
+    }
+    
+    // Rediriger vers la page de fin de partie (pour tous les joueurs)
+    //history.push('/end-game');
   };
 
 
@@ -211,7 +263,15 @@ const Agent: React.FC = () => {
       setRoutePath(route);
     }
     
-  }, [currentPosition, gameDetails, objectiveCircles, routineExecutionCount, currentPlayerId, location.search]);
+    // 6. Gestion du compte à rebours
+    if (gameDetails?.started && gameDetails?.duration && !isCountdownActive) {
+      console.log('🚀 Partie démarrée - Initialisation du compte à rebours');
+      const totalSeconds = gameDetails.duration * 60; // Convertir les minutes en secondes
+      setCountdown(totalSeconds);
+      setIsCountdownActive(true);
+    }
+    
+  }, [currentPosition, gameDetails, objectiveCircles, routineExecutionCount, currentPlayerId, location.search, isCountdownActive]);
 
 
 
@@ -389,16 +449,62 @@ const Agent: React.FC = () => {
     }
   }, [gameDetails?.is_converging_phase]);
 
+  // Effet pour gérer le compte à rebours
+  useEffect(() => {
+    if (isCountdownActive && countdown !== null && countdown > 0) {
+      // Nettoyer l'intervalle précédent s'il existe
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+      }
+      
+      // Créer un nouvel intervalle pour le compte à rebours
+      countdownIntervalRef.current = setInterval(() => {
+        setCountdown(prev => {
+          if (prev !== null && prev > 0) {
+            const newCountdown = prev - 1;
+            if (newCountdown === 0) {
+              handleGameEnd();
+            }
+            
+            return newCountdown;
+          }
+          return prev;
+        });
+      }, 1000);
+      
+      console.log(`⏰ Compte à rebours démarré: ${Math.floor(countdown / 60)}:${(countdown % 60).toString().padStart(2, '0')}`);
+    } else if (countdown === 0) {
+      // Arrêter le compte à rebours quand il atteint 0
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+      }
+      setIsCountdownActive(false);
+    }
+    
+    // Cleanup lors du démontage du composant
+    return () => {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+      }
+    };
+  }, [isCountdownActive, countdown]);
+
   return (
     <IonPage>
       <IonHeader>
         <IonToolbar>
           <IonTitle>Agent</IonTitle>
-          {gameDetails?.duration && (
+          {countdown !== null && isCountdownActive ? (
+            <IonLabel slot="primary" className="duration-display countdown-active">
+              ⏰ {Math.floor(countdown / 60)}:{(countdown % 60).toString().padStart(2, '0')}
+            </IonLabel>
+          ) : gameDetails?.duration ? (
             <IonLabel slot="primary" className="duration-display">
               ⏱️ {Math.floor(gameDetails.duration)}:{(Math.round((gameDetails.duration % 1) * 60)).toString().padStart(2, '0')}
             </IonLabel>
-          )}
+          ) : null}
           {gameDetails?.is_converging_phase && distanceToStartZone !== null && (
             <IonLabel slot="end" className="distance-counter">
               🎯 {distanceToStartZone.toFixed(0)}m
