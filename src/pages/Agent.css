@@ -183,6 +183,40 @@
   margin-right: 16px;
 }
 
+/* Style futuriste pour l'affichage de la durée dans le header */
+.duration-display {
+  background: linear-gradient(135deg, #ff6b35, #f7931e);
+  color: white;
+  padding: 6px 16px;
+  border-radius: 25px;
+  font-weight: bold;
+  font-size: 16px;
+  box-shadow: 0 4px 15px rgba(255, 107, 53, 0.4);
+  animation: durationGlow 3s ease-in-out infinite;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+}
+
+@keyframes durationGlow {
+  0% {
+    box-shadow: 0 4px 15px rgba(255, 107, 53, 0.4);
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+  }
+  50% {
+    box-shadow: 0 6px 25px rgba(255, 107, 53, 0.7), 0 0 30px rgba(255, 107, 53, 0.3);
+    text-shadow: 0 0 15px rgba(255, 255, 255, 1), 0 0 25px rgba(255, 255, 255, 0.5);
+  }
+  100% {
+    box-shadow: 0 4px 15px rgba(255, 107, 53, 0.4);
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+  }
+}
+
 @keyframes pulse {
   0% {
     box-shadow: 0 2px 8px rgba(0, 4, 255, 0.3);

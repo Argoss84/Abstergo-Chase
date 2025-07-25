@@ -394,6 +394,11 @@ const Agent: React.FC = () => {
       <IonHeader>
         <IonToolbar>
           <IonTitle>Agent</IonTitle>
+          {gameDetails?.duration && (
+            <IonLabel slot="primary" className="duration-display">
+              ⏱️ {Math.floor(gameDetails.duration)}:{(Math.round((gameDetails.duration % 1) * 60)).toString().padStart(2, '0')}
+            </IonLabel>
+          )}
           {gameDetails?.is_converging_phase && distanceToStartZone !== null && (
             <IonLabel slot="end" className="distance-counter">
               🎯 {distanceToStartZone.toFixed(0)}m
