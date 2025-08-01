@@ -1,6 +1,8 @@
 import { Redirect, Route, Switch } from 'react-router-dom';
 import { IonApp, IonRouterOutlet, setupIonicReact } from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 import Home from './pages/Home';
 import NotFound from './pages/NotFound';
 import { useAuth, supabaseClient } from './contexts/AuthenticationContext';
@@ -83,6 +85,20 @@ const App: React.FC = () => {
           )}
         </IonRouterOutlet>
       </IonReactRouter>
+      
+      {/* Toast Container global pour toutes les pages */}
+      <ToastContainer
+        position="top-right"
+        autoClose={3000}
+        hideProgressBar={false}
+        newestOnTop={false}
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+        theme="light"
+      />
     </IonApp>
   );
 };

@@ -5,6 +5,7 @@ import { MapContainer, TileLayer, Circle, Marker, useMap, Polyline } from 'react
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { QrReader } from 'react-qr-reader';
+import { toast } from 'react-toastify';
 import GameService from '../services/GameService';
 import { 
   generateRandomPointInCircle, 
@@ -88,19 +89,19 @@ const Agent: React.FC = () => {
   const handleNetworkScan = () => {
     console.log('Scan réseau activé');
     // Ici vous pouvez ajouter la logique pour scanner le réseau
-    alert('Scan réseau en cours...');
+    toast.info('🔍 Scan réseau en cours...');
   };
 
   const handleVisionMode = () => {
     console.log('Mode vision activé');
     // Ici vous pouvez ajouter la logique pour changer le mode de vision
-    alert('Mode vision activé');
+    toast.success('👁️ Mode vision activé');
   };
 
   const handleHealthCheck = () => {
     console.log('Vérification de santé activée');
     // Ici vous pouvez ajouter la logique pour vérifier la santé
-    alert('Vérification de santé en cours...');
+    toast.warning('💊 Vérification de santé en cours...');
   };
 
   const handleLocationTracker = () => {
@@ -109,10 +110,11 @@ const Agent: React.FC = () => {
     if (currentPosition && mapRef.current) {
       mapRef.current.setView(currentPosition, 15);
       console.log(`Carte recentrée sur: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
+      toast.success('📍 Carte recentrée sur votre position');
     } else if (currentPosition) {
-      alert(`Position actuelle: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
+      toast.info(`📍 Position actuelle: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
     } else {
-      alert('Position non disponible');
+      toast.error('❌ Position non disponible');
     }
   };
 
@@ -147,7 +149,7 @@ const Agent: React.FC = () => {
     setScannedQRCode(result);
     console.log('QR Code scanné:', result);
     // Ici vous pouvez ajouter la logique pour traiter le QR code scanné
-    alert(`QR Code détecté: ${result}`);
+    toast.success(`🎯 QR Code détecté: ${result}`);
     setIsQRModalOpen(false);
   };
 
@@ -298,15 +300,7 @@ const Agent: React.FC = () => {
 
 
 
-  // Gestionnaire pour démarrer/arrêter la routine
-  const toggleRoutine = () => {
-    setIsRoutineActive(prev => !prev);
-  };
 
-  // Gestionnaire pour changer l'intervalle
-  const changeRoutineInterval = (newInterval: number) => {
-    setRoutineInterval(newInterval);
-  };
 
   // Effet pour gérer la routine périodique
   useEffect(() => {
@@ -649,79 +643,13 @@ const Agent: React.FC = () => {
         ) : (
           <p>Chargement des détails de la partie...</p>
         )}
-        <IonButton expand="block" onClick={() => history.push('/end-game')}>
-          EndGame
-        </IonButton>
+                 <IonButton expand="block" onClick={() => history.push('/end-game')}>
+           EndGame
+         </IonButton>
 
-        {/* Contrôles de la routine périodique */}
-        <IonCard>
-          <IonCardHeader>
-            <IonCardTitle>Routine Périodique</IonCardTitle>
-          </IonCardHeader>
-          <IonContent className="ion-padding">
-            <div className="routine-interval-controls">
-              <span>Intervalle: {routineInterval}ms</span>
-              <IonButton 
-                size="small" 
-                onClick={() => changeRoutineInterval(1000)}
-                color={routineInterval === 1000 ? 'primary' : 'medium'}
-              >
-                1s
-              </IonButton>
-              <IonButton 
-                size="small" 
-                onClick={() => changeRoutineInterval(5000)}
-                color={routineInterval === 5000 ? 'primary' : 'medium'}
-              >
-                5s
-              </IonButton>
-              <IonButton 
-                size="small" 
-                onClick={() => changeRoutineInterval(10000)}
-                color={routineInterval === 10000 ? 'primary' : 'medium'}
-              >
-                10s
-              </IonButton>
-            </div>
-            
-            <div className="routine-status-controls">
-              <span>Statut: {isRoutineActive ? '🟢 Actif' : '🔴 Inactif'}</span>
-              <IonButton 
-                size="small" 
-                onClick={toggleRoutine}
-                color={isRoutineActive ? 'danger' : 'success'}
-              >
-                {isRoutineActive ? 'Arrêter' : 'Démarrer'}
-              </IonButton>
-            </div>
-            
-            <div className="routine-info">
-              Exécutions: {routineExecutionCount} | 
-              Dernière exécution: {routineExecutionCount > 0 ? new Date().toLocaleTimeString() : 'Aucune'}
-            </div>
-            
-            <div className="routine-player-info">
-              <div>Joueur ID: {currentPlayerId || 'Non identifié'}</div>
-              <div>Mise à jour BDD: {currentPlayerId ? '🟢 Activée' : '🔴 Désactivée'}</div>
-            </div>
-            
-            <div className="routine-user-info">
-              <div>Utilisateur: {currentUser?.email || 'Non connecté'}</div>
-              <div>User ID: {currentUser?.id || 'N/A'}</div>
-              <div>Statut: {currentPlayerId ? '🟢 Joueur identifié' : '🔴 Joueur non trouvé'}</div>
-            </div>
-            
-            <div className="routine-updates-info">
-              <div><strong>Mises à jour automatiques :</strong></div>
-              <div>📍 Position joueur: {currentPlayerId ? '🟢' : '🔴'}</div>
-              <div>🎮 Données partie: 🟢</div>
-              <div>🎯 Objectifs: {objectiveCirclesInitialized ? '🟢 (fixes)' : '⚪'}</div>
-              <div>🗺️ Trajet (convergence): {gameDetails?.is_converging_phase ? '🟢' : '⚪'}</div>
-            </div>
-          </IonContent>
-        </IonCard>
 
-        <div className="fab-container">
+
+         <div className="fab-container">
           <IonFabButton onClick={() => setIsFabOpen(!isFabOpen)}>
             <IonIcon icon={apertureOutline} />
           </IonFabButton>
