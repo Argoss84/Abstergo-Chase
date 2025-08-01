@@ -1,9 +1,10 @@
-import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonLabel, IonCard, IonCardHeader, IonCardTitle } from '@ionic/react';
+import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonLabel, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Circle, Marker, useMap, Polyline, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import { toast } from 'react-toastify';
 import GameService from '../services/GameService';
 import { 
   generateRandomPointInCircle, 
@@ -18,7 +19,7 @@ import {
   identifyCurrentPlayer
 } from '../utils/PlayerUtils';
 import { updateGameWinnerType } from '../utils/AdminUtils';
-import { add } from 'ionicons/icons';
+import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, settings, skullOutline } from 'ionicons/icons';
 import './Rogue.css';
 import { GameProp, GameDetails, ObjectiveCircle } from '../components/Interfaces';
 import PopUpMarker from '../components/PopUpMarker';
@@ -78,6 +79,42 @@ const Rogue: React.FC = () => {
   
   // Logo du joueur (choisi aléatoirement parmi les 6 disponibles)
   const [playerLogo, setPlayerLogo] = useState<string>('joueur_1.png');
+  
+  // État pour les boutons FAB
+  const [isFabOpen, setIsFabOpen] = useState(false);
+
+  // Fonctions pour les boutons FAB
+  const handleNetworkScan = () => {
+    console.log('Scan réseau activé');
+    toast.info('🔍 Scan réseau en cours...');
+  };
+
+  const handleVisionMode = () => {
+    console.log('Mode vision activé');
+    toast.success('👁️ Mode vision activé');
+  };
+
+  const handleHealthCheck = () => {
+    console.log('Vérification de santé activée');
+    toast.warning('💊 Vérification de santé en cours...');
+  };
+
+  const handleLocationTracker = () => {
+    console.log('Traceur de localisation activé');
+    if (currentPosition && mapRef.current) {
+      mapRef.current.setView(currentPosition, 15);
+      toast.success('📍 Carte recentrée sur votre position');
+    } else if (currentPosition) {
+      toast.info(`📍 Position actuelle: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
+    } else {
+      toast.error('❌ Position non disponible');
+    }
+  };
+
+  const handleThreatDetection = () => {
+    console.log('Détection de menaces activée');
+    toast.info('⚠️ Détection de menaces activée');
+  };
 
   useEffect(() => {
     const fetchGameDetails = async () => {
@@ -557,10 +594,35 @@ const Rogue: React.FC = () => {
         )}
 
 
+        <div className="fab-container">
+          <IonFabButton onClick={() => setIsFabOpen(!isFabOpen)}>
+            <IonIcon icon={apertureOutline} />
+          </IonFabButton>
+          
+          <div className={`fab-list fab-list-top ${!isFabOpen ? 'fab-list-hidden' : ''}`}>
+            <IonFabButton color="light" onClick={handleNetworkScan}>
+              <IonIcon icon={cellularOutline} />
+            </IonFabButton>
+          </div>
 
-        <IonButton expand="block" onClick={() => history.push('/end-game')}>
-          EndGame
-        </IonButton>
+          <div className={`fab-list fab-list-start ${!isFabOpen ? 'fab-list-hidden' : ''}`}>
+            <IonFabButton color="light" onClick={handleVisionMode}>
+              <IonIcon icon={colorFilterOutline} />
+            </IonFabButton>
+            <IonFabButton color="light" onClick={handleHealthCheck}>
+              <IonIcon icon={fitnessOutline} />
+            </IonFabButton>
+          </div>
+
+          <div className={`fab-list fab-list-end ${!isFabOpen ? 'fab-list-hidden' : ''}`}>
+            <IonFabButton color="light" onClick={handleLocationTracker}>
+              <IonIcon icon={locateOutline} />
+            </IonFabButton>
+            <IonFabButton color="light" onClick={handleThreatDetection}>
+              <IonIcon icon={skullOutline} />
+            </IonFabButton>
+          </div>
+        </div>
       </IonContent>
     </IonPage>
   );
