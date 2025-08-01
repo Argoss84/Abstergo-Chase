@@ -22,6 +22,7 @@ import { updateGameWinnerType } from '../utils/AdminUtils';
 import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, settings, skullOutline } from 'ionicons/icons';
 import './Agent.css';
 import { GameProp, GameDetails, ObjectiveCircle } from '../components/Interfaces';
+import PopUpMarker from '../components/PopUpMarker';
 import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
 
@@ -583,14 +584,10 @@ const Agent: React.FC = () => {
               />
               {gameDetails.start_zone_latitude && gameDetails.start_zone_longitude && (
                 <>
-                  <Marker
+                  <PopUpMarker
                     position={[parseFloat(gameDetails.start_zone_latitude), parseFloat(gameDetails.start_zone_longitude)]}
-                    icon={L.divIcon({
-                      className: 'custom-div-icon',
-                      html: `<div style="background-color: blue; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-                      iconSize: [20, 20],
-                      iconAnchor: [10, 10],
-                    })}
+                    type="start-zone"
+                    id="start-zone-agent"
                   />
                   <Circle
                     center={[parseFloat(gameDetails.start_zone_latitude), parseFloat(gameDetails.start_zone_longitude)]}
@@ -601,14 +598,10 @@ const Agent: React.FC = () => {
               )}
               {gameDetails.start_zone_rogue_latitude && gameDetails.start_zone_rogue_longitude && (
                 <>
-                  <Marker
+                  <PopUpMarker
                     position={[parseFloat(gameDetails.start_zone_rogue_latitude), parseFloat(gameDetails.start_zone_rogue_longitude)]}
-                    icon={L.divIcon({
-                      className: 'custom-div-icon',
-                      html: `<div style="background-color: green; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-                      iconSize: [20, 20],
-                      iconAnchor: [10, 10],
-                    })}
+                    type="start-zone-rogue"
+                    id="start-zone-rogue"
                   />
                   <Circle
                     center={[parseFloat(gameDetails.start_zone_rogue_latitude), parseFloat(gameDetails.start_zone_rogue_longitude)]}
@@ -626,14 +619,11 @@ const Agent: React.FC = () => {
                 />
               ))}
               {currentPosition && (
-                <Marker
+                <PopUpMarker
                   position={currentPosition}
-                  icon={L.divIcon({
-                    className: 'custom-div-icon',
-                    html: `<img src="/src/ressources/logo/${playerLogo}" style="width: 30px; height: 30px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);" />`,
-                    iconSize: [30, 30],
-                    iconAnchor: [15, 15],
-                  })}
+                  type="player"
+                  playerLogo={playerLogo}
+                  id="player-position"
                 />
               )}
               
