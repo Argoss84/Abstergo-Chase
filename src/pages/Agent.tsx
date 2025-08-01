@@ -35,6 +35,19 @@ const ResizeMap = () => {
   return null;
 };
 
+// Composant pour gérer la référence de la carte
+const MapController = ({ onMapReady }: { onMapReady: (map: L.Map) => void }) => {
+  const map = useMap();
+  
+  useEffect(() => {
+    onMapReady(map);
+  }, [map, onMapReady]);
+  
+  return null;
+};
+
+
+
 const Agent: React.FC = () => {
   const history = useHistory();
   const location = useLocation();
@@ -63,6 +76,12 @@ const Agent: React.FC = () => {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isCountdownActive, setIsCountdownActive] = useState<boolean>(false);
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Référence pour la carte
+  const mapRef = useRef<L.Map | null>(null);
+  
+  // Logo du joueur (choisi aléatoirement parmi les 6 disponibles)
+  const [playerLogo, setPlayerLogo] = useState<string>('joueur_1.png');
 
   // Fonctions pour les boutons FAB
   const handleNetworkScan = () => {
@@ -85,8 +104,11 @@ const Agent: React.FC = () => {
 
   const handleLocationTracker = () => {
     console.log('Traceur de localisation activé');
-    // Ici vous pouvez ajouter la logique pour tracer la localisation
-    if (currentPosition) {
+    // Recentrer la carte sur la position du joueur
+    if (currentPosition && mapRef.current) {
+      mapRef.current.setView(currentPosition, 15);
+      console.log(`Carte recentrée sur: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
+    } else if (currentPosition) {
       alert(`Position actuelle: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
     } else {
       alert('Position non disponible');
@@ -387,6 +409,10 @@ const Agent: React.FC = () => {
   }, [location.search, session]);
 
   useEffect(() => {
+    // Choisir un logo de joueur aléatoirement
+    const logoNumber = Math.floor(Math.random() * 6) + 1;
+    setPlayerLogo(`joueur_${logoNumber}.png`);
+    
     // Get initial position
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
@@ -531,10 +557,18 @@ const Agent: React.FC = () => {
                   if (mapElement) {
                     mapElement.style.height = '100%';
                   }
+                  // Récupérer la référence de la carte via le DOM
+                  const mapInstance = (mapElement?.parentElement as any)?._leaflet_map;
+                  if (mapInstance) {
+                    mapRef.current = mapInstance;
+                  }
                 }, 100);
               }}
             >
               <ResizeMap />
+              <MapController onMapReady={(map) => {
+                mapRef.current = map;
+              }} />
               <TileLayer
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -596,9 +630,9 @@ const Agent: React.FC = () => {
                   position={currentPosition}
                   icon={L.divIcon({
                     className: 'custom-div-icon',
-                    html: `<div style="background-color: red; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-                    iconSize: [20, 20],
-                    iconAnchor: [10, 10],
+                    html: `<img src="/src/ressources/logo/${playerLogo}" style="width: 30px; height: 30px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);" />`,
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 15],
                   })}
                 />
               )}
