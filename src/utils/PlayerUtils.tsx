@@ -9,7 +9,7 @@ export const updatePlayerPosition = async (playerId: number, latitude: number, l
       longitude: longitude.toString(),
       updated_at: new Date().toISOString()
     });
-    console.log(`Position du joueur ${playerId} mise à jour en BDD: ${latitude}, ${longitude}`);
+    
   } catch (error) {
     console.error('Erreur lors de la mise à jour de la position:', error);
   }
@@ -23,7 +23,7 @@ export const updatePlayerInStartZone = async (playerId: number, isInStartZone: b
       isInStartZone: isInStartZone,
       updated_at: new Date().toISOString()
     });
-    console.log(`Statut IsInStartZone du joueur ${playerId} mis à jour: ${isInStartZone}`);
+    
   } catch (error) {
     console.error('Erreur lors de la mise à jour du statut IsInStartZone:', error);
   }
@@ -40,8 +40,7 @@ export const updateGameData = async (code: string) => {
     const gameService = new GameService();
     const game = await gameService.getGameDatasByCode(code);
     
-    if (game && game[0]) {
-      console.log(`Données de la partie mises à jour: ${game[0].code} - Phase: ${game[0].is_converging_phase ? 'Convergence' : 'Normale'}`);
+    if (game && game[0]) { 
       return game[0];
     }
     

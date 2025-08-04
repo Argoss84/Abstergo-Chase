@@ -120,7 +120,7 @@ const Rogue: React.FC = () => {
     }
   };
 
-  const handleCaptureObjectiv = () => {
+  const handleCaptureObjectiv = async () => {
     // Vérifier si une capture est déjà en cours
     if (isCaptureInProgress) {
       toast.info('⚠️ Capture déjà en cours...');
@@ -162,14 +162,56 @@ const Rogue: React.FC = () => {
       // Stocker l'ID du toast dans la référence
       captureToastRef.current = toastId;
       
-      // Fermer le toast et réinitialiser l'état à la fin de l'animation
-      setTimeout(() => {
-        if (captureToastRef.current) {
-          toast.dismiss(captureToastRef.current);
+      // Trouver l'objectif à portée pour le capturer
+      if (currentPosition && objectiveProps.length > 0) {
+        const objectiveInRange = objectiveProps
+          .filter(prop => prop.visible === true)
+          .find(prop => {
+            const distance = calculateDistanceToStartZone(
+              currentPosition,
+              prop.latitude || '0',
+              prop.longitude || '0'
+            );
+            const detectionRadius = prop.detection_radius || 30;
+            return distance <= detectionRadius;
+          });
+        
+        if (objectiveInRange) {
+          // Fermer le toast et réinitialiser l'état à la fin de l'animation
+          setTimeout(async () => {
+            if (captureToastRef.current) {
+              toast.dismiss(captureToastRef.current);
+            }
+            
+            try {
+              // Mettre à jour l'objectif capturé
+              const gameService = new GameService();
+              await gameService.updateProp(objectiveInRange.id_prop.toString(), {
+                visible: false,
+                state: "CAPTURED"
+              });
+              
+              // Mettre à jour l'état local des objectifs
+              setObjectiveProps(prevProps => 
+                prevProps.map(prop => 
+                  prop.id_prop === objectiveInRange.id_prop 
+                    ? { ...prop, visible: false, state: "CAPTURED" }
+                    : prop
+                )
+              );
+              
+              toast.success('🎯 Objectif capturé avec succès !');
+              console.log(`✅ Objectif ${objectiveInRange.id_prop} capturé`);
+            } catch (error) {
+              console.error('❌ Erreur lors de la capture de l\'objectif:', error);
+              toast.error('❌ Erreur lors de la capture de l\'objectif');
+            }
+            
+            setIsCaptureInProgress(false);
+            captureToastRef.current = null;
+          }, hackDuration);
         }
-        setIsCaptureInProgress(false);
-        captureToastRef.current = null;
-      }, hackDuration);
+      }
     } else {
       toast.warning('❌ Aucun objectif à portée');
     }
@@ -192,6 +234,31 @@ const Rogue: React.FC = () => {
           if (user) {
             setCurrentUser(user);
             console.log(`Utilisateur connecté: ${user.email} (ID: ${user.id})`);
+            
+            // Récupérer les données de la partie après avoir obtenu l'utilisateur
+            const gameService = new GameService();
+            const game = await gameService.getGameDatasByCode(code);
+            
+            if (game && game[0]) {
+              setGameDetails(game[0]);
+              
+              // Récupérer l'ID du joueur actuel en utilisant l'utilisateur connecté
+              if (game[0].players) {
+                const currentPlayer = identifyCurrentPlayer(game[0].players, user.id);
+                if (currentPlayer) {
+                  setCurrentPlayerId(currentPlayer.id_player);
+                }
+              }
+              
+              // Récupérer les props d'objectifs
+              if (game[0].props) {
+                setObjectiveProps(game[0].props);
+                setObjectivePropsInitialized(true);
+                console.log(`${game[0].props.length} objectifs initialisés`);
+              }
+            } else {
+              setError('Partie non trouvée');
+            }
           } else {
             setError('Utilisateur non trouvé');
             return;
@@ -199,31 +266,6 @@ const Rogue: React.FC = () => {
         } else {
           setError('Utilisateur non connecté');
           return;
-        }
-
-        const gameService = new GameService();
-        const game = await gameService.getGameDatasByCode(code);
-        
-        if (game && game[0]) {
-          setGameDetails(game[0]);
-          
-          // Récupérer l'ID du joueur actuel en utilisant l'utilisateur connecté
-          if (game[0].players && currentUser) {
-            const currentPlayer = identifyCurrentPlayer(game[0].players, currentUser.id);
-            if (currentPlayer) {
-              setCurrentPlayerId(currentPlayer.id_player);
-              console.log(`Utilisateur: ${currentUser.email}`);
-            }
-          }
-          
-          // Récupérer les props d'objectifs
-          if (game[0].props) {
-            setObjectiveProps(game[0].props);
-            setObjectivePropsInitialized(true);
-            console.log(`${game[0].props.length} objectifs initialisés`);
-          }
-        } else {
-          setError('Partie non trouvée');
         }
       } catch (err) {
         console.error('Error fetching game details:', err);
@@ -373,7 +415,6 @@ const Rogue: React.FC = () => {
 
   // Fonction de routine périodique
   const executeRoutine = useCallback(async () => {
-    console.log(`Routine exécutée #${routineExecutionCount + 1} à ${new Date().toLocaleTimeString()}`);
     
     // Incrémenter le compteur d'exécutions
     setRoutineExecutionCount(prev => prev + 1);
@@ -381,7 +422,6 @@ const Rogue: React.FC = () => {
     // Exemple de tâches que la routine peut effectuer :
     // 1. Vérifier la position actuelle
     if (currentPosition) {
-      console.log(`Position actuelle: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
       
       // Mettre à jour la position du joueur en base de données
       if (currentPlayerId) {
@@ -400,61 +440,57 @@ const Rogue: React.FC = () => {
     }
     
     // 3. Vérifier l'état de la partie
+    let gameState = 'Phase normale';
+    let distanceToStart = null;
+    let isInStartZone = false;
+    let objectiveInRange = false;
+    
     if (gameDetails) {
-      console.log(`État de la partie: ${gameDetails.is_converging_phase ? 'Phase de convergence' : 'Phase normale'}`);
+      gameState = gameDetails.is_converging_phase ? 'Phase de convergence' : 'Phase normale';
     }
     
-         // 4. Vérifier la distance vers la zone de départ correspondante
-     if (currentPosition && gameDetails?.start_zone_rogue_latitude && gameDetails?.start_zone_rogue_longitude) {
-       const distance = calculateDistanceToStartZone(
-         currentPosition, 
-         gameDetails.start_zone_rogue_latitude, 
-         gameDetails.start_zone_rogue_longitude
-       );
-       
-       // Mettre à jour la distance pour l'affichage dans le header
-       setDistanceToStartZone(distance);
-       
-       console.log(`Distance vers zone de départ Rogue: ${distance.toFixed(0)}m`);
-       
-       // Vérifier si le joueur est dans la zone de départ Rogue (rayon de 50m)
-       const isInStartZone = isPlayerInStartZone(
-         currentPosition, 
-         gameDetails.start_zone_rogue_latitude, 
-         gameDetails.start_zone_rogue_longitude
-       );
-       
-       if (isInStartZone) {
-         console.log('🎯 VOUS ÊTES DANS LA ZONE DE DÉPART ROGUE !');
-         
-         // Mettre à jour IsInStartZone en base de données si le joueur est identifié
-         if (currentPlayerId) {
-           updatePlayerInStartZone(currentPlayerId, true);
-         }
-       } else {
-         // Mettre à jour IsInStartZone à false si le joueur n'est plus dans la zone
-         if (currentPlayerId) {
-           updatePlayerInStartZone(currentPlayerId, false);
-         }
-       }
-     }
-     
-     // 5. Mettre à jour le trajet si nécessaire (en phase de convergence)
-     if (gameDetails?.is_converging_phase && 
-         currentPosition && 
-         gameDetails.start_zone_rogue_latitude && 
-         gameDetails.start_zone_rogue_longitude) {
-       const startZone: [number, number] = [
-         parseFloat(gameDetails.start_zone_rogue_latitude),
-         parseFloat(gameDetails.start_zone_rogue_longitude)
-       ];
-       const route = await fetchRoute(currentPosition, startZone);
-       setRoutePath(route);
-     }
-     
-           // 6. Vérifier si un objectif est à portée (utilise detection_radius de GameProp)
-      if (currentPosition && objectiveProps.length > 0) {
-        const objectiveInRange = objectiveProps.some(prop => {
+    // 4. Vérifier la distance vers la zone de départ correspondante
+    if (currentPosition && gameDetails?.start_zone_rogue_latitude && gameDetails?.start_zone_rogue_longitude) {
+      distanceToStart = calculateDistanceToStartZone(
+        currentPosition, 
+        gameDetails.start_zone_rogue_latitude, 
+        gameDetails.start_zone_rogue_longitude
+      );
+      
+      // Mettre à jour la distance pour l'affichage dans le header
+      setDistanceToStartZone(distanceToStart);
+      
+      // Vérifier si le joueur est dans la zone de départ Rogue (rayon de 50m)
+      isInStartZone = isPlayerInStartZone(
+        currentPosition, 
+        gameDetails.start_zone_rogue_latitude, 
+        gameDetails.start_zone_rogue_longitude
+      );
+      
+      // Mettre à jour IsInStartZone en base de données si le joueur est identifié
+      if (currentPlayerId) {
+        updatePlayerInStartZone(currentPlayerId, isInStartZone);
+      }
+    }
+    
+    // 5. Mettre à jour le trajet si nécessaire (en phase de convergence)
+    if (gameDetails?.is_converging_phase && 
+        currentPosition && 
+        gameDetails.start_zone_rogue_latitude && 
+        gameDetails.start_zone_rogue_longitude) {
+      const startZone: [number, number] = [
+        parseFloat(gameDetails.start_zone_rogue_latitude),
+        parseFloat(gameDetails.start_zone_rogue_longitude)
+      ];
+      const route = await fetchRoute(currentPosition, startZone);
+      setRoutePath(route);
+    }
+    
+    // 6. Vérifier si un objectif est à portée (utilise detection_radius de GameProp)
+    if (currentPosition && objectiveProps.length > 0) {
+      objectiveInRange = objectiveProps
+        .filter(prop => prop.visible === true)
+        .some(prop => {
           const distance = calculateDistanceToStartZone(
             currentPosition,
             prop.latitude || '0',
@@ -464,13 +500,12 @@ const Rogue: React.FC = () => {
           const detectionRadius = prop.detection_radius || 30;
           return distance <= detectionRadius;
         });
-        
-        setIsObjectiveInRange(objectiveInRange);
-        
-        if (objectiveInRange) {
-          console.log('🎯 OBJECTIF À PORTÉE !');
-        }
-      }
+      
+      setIsObjectiveInRange(objectiveInRange);
+    }
+    
+    // Console.log unifié avec toutes les informations de la routine
+    console.log(`🔄 Routine #${routineExecutionCount} | État: ${gameState} | Distance: ${distanceToStart ? distanceToStart.toFixed(0) + 'm' : 'N/A'} | Zone départ: ${isInStartZone ? 'OUI' : 'NON'} | Objectif: ${objectiveInRange ? 'À PORTÉE' : 'HORS PORTÉE'}`);
     
      }, [currentPosition, gameDetails, objectiveProps, routineExecutionCount, currentPlayerId, location.search]);
 
@@ -489,7 +524,6 @@ const Rogue: React.FC = () => {
         executeRoutine();
       }, routineInterval);
       
-      console.log(`Routine démarrée avec un intervalle de ${routineInterval}ms`);
     } else {
       // Arrêter la routine
       if (routineIntervalRef.current) {
@@ -630,15 +664,17 @@ const Rogue: React.FC = () => {
                   />
                 </>
               )}
-              {objectiveProps.map((prop) => (
-                <PopUpMarker
-                  key={prop.id_prop}
-                  position={[parseFloat(prop.latitude || '0'), parseFloat(prop.longitude || '0')]}
-                  type="objective"
-                  data={prop}
-                  id={prop.id_prop}
-                />
-              ))}
+              {objectiveProps
+                .filter(prop => prop.visible === true)
+                .map((prop) => (
+                  <PopUpMarker
+                    key={prop.id_prop}
+                    position={[parseFloat(prop.latitude || '0'), parseFloat(prop.longitude || '0')]}
+                    type="objective"
+                    data={prop}
+                    id={prop.id_prop}
+                  />
+                ))}
                
                {/* Affichage du trajet vers la zone de départ en phase de convergence */}
                {gameDetails.is_converging_phase && 
