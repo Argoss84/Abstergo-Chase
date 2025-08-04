@@ -19,7 +19,7 @@ import {
   identifyCurrentPlayer
 } from '../utils/PlayerUtils';
 import { updateGameWinnerType } from '../utils/AdminUtils';
-import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, settings, skullOutline } from 'ionicons/icons';
+import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, radioOutline, settings, skullOutline } from 'ionicons/icons';
 import './Rogue.css';
 import { GameProp, GameDetails, ObjectiveCircle } from '../components/Interfaces';
 import PopUpMarker from '../components/PopUpMarker';
@@ -82,6 +82,15 @@ const Rogue: React.FC = () => {
   
   // État pour les boutons FAB
   const [isFabOpen, setIsFabOpen] = useState(false);
+  
+  // État pour détecter si un objectif est à portée
+  const [isObjectiveInRange, setIsObjectiveInRange] = useState<boolean>(false);
+  
+  // État pour suivre si une capture est en cours
+  const [isCaptureInProgress, setIsCaptureInProgress] = useState<boolean>(false);
+  
+  // Référence pour stocker l'ID du toast de capture
+  const captureToastRef = useRef<string | number | null>(null);
 
   // Fonctions pour les boutons FAB
   const handleNetworkScan = () => {
@@ -111,9 +120,59 @@ const Rogue: React.FC = () => {
     }
   };
 
-  const handleThreatDetection = () => {
-    console.log('Détection de menaces activée');
-    toast.info('⚠️ Détection de menaces activée');
+  const handleCaptureObjectiv = () => {
+    // Vérifier si une capture est déjà en cours
+    if (isCaptureInProgress) {
+      toast.info('⚠️ Capture déjà en cours...');
+      return;
+    }
+    
+    if (isObjectiveInRange) {
+      const hackDuration = gameDetails?.hack_duration_ms || 5000; // 5 secondes par défaut
+      
+      // Marquer qu'une capture est en cours
+      setIsCaptureInProgress(true);
+      
+      const toastId = toast(
+        <div className="hacker-toast">
+          <div className="hacker-header">
+            <span className="hacker-icon">⚡</span>
+            <span className="hacker-title">SYSTÈME DE CAPTURE ACTIVÉ</span>
+            <span className="hacker-icon">⚡</span>
+          </div>
+          <div className="hacker-progress">
+            <div className="hacker-progress-bar">
+              <div className="hacker-progress-fill" style={{ animationDuration: `${hackDuration}ms` }}></div>
+            </div>
+            <div className="hacker-status">INTRUSION EN COURS...</div>
+          </div>
+        </div>,
+        {
+          autoClose: false,
+          closeButton: false,
+          draggable: false,
+          closeOnClick: false,
+          pauseOnHover: false,
+          position: "top-center",
+          className: "hacker-toast-container",
+          type: "default"
+        }
+      );
+      
+      // Stocker l'ID du toast dans la référence
+      captureToastRef.current = toastId;
+      
+      // Fermer le toast et réinitialiser l'état à la fin de l'animation
+      setTimeout(() => {
+        if (captureToastRef.current) {
+          toast.dismiss(captureToastRef.current);
+        }
+        setIsCaptureInProgress(false);
+        captureToastRef.current = null;
+      }, hackDuration);
+    } else {
+      toast.warning('❌ Aucun objectif à portée');
+    }
   };
 
   useEffect(() => {
@@ -392,6 +451,26 @@ const Rogue: React.FC = () => {
        const route = await fetchRoute(currentPosition, startZone);
        setRoutePath(route);
      }
+     
+           // 6. Vérifier si un objectif est à portée (utilise detection_radius de GameProp)
+      if (currentPosition && objectiveProps.length > 0) {
+        const objectiveInRange = objectiveProps.some(prop => {
+          const distance = calculateDistanceToStartZone(
+            currentPosition,
+            prop.latitude || '0',
+            prop.longitude || '0'
+          );
+          // Utiliser detection_radius de l'objet GameProp, avec une valeur par défaut de 30m
+          const detectionRadius = prop.detection_radius || 30;
+          return distance <= detectionRadius;
+        });
+        
+        setIsObjectiveInRange(objectiveInRange);
+        
+        if (objectiveInRange) {
+          console.log('🎯 OBJECTIF À PORTÉE !');
+        }
+      }
     
      }, [currentPosition, gameDetails, objectiveProps, routineExecutionCount, currentPlayerId, location.search]);
 
@@ -618,9 +697,14 @@ const Rogue: React.FC = () => {
             <IonFabButton color="light" onClick={handleLocationTracker}>
               <IonIcon icon={locateOutline} />
             </IonFabButton>
-            <IonFabButton color="light" onClick={handleThreatDetection}>
-              <IonIcon icon={skullOutline} />
-            </IonFabButton>
+                         <IonFabButton 
+               color="light" 
+               onClick={handleCaptureObjectiv}
+               className={`${isObjectiveInRange ? 'objective-in-range' : ''} ${isCaptureInProgress ? 'capture-in-progress' : ''}`}
+               disabled={isCaptureInProgress}
+             >
+               <IonIcon icon={radioOutline} />
+             </IonFabButton>
           </div>
         </div>
       </IonContent>
