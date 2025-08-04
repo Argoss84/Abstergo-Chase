@@ -185,10 +185,11 @@ const Lobby: React.FC = () => {
             }
           );
 
-          // Subscribe to game changes
-          const gameChangesChannel = gameService.subscribeToGameChanges(
+          // Subscribe to game changes with improved handling
+          const gameChangesChannel = gameService.subscribeToGameDataChanges(
             game[0].code,
             (payload) => {
+              
               if (payload.eventType === 'UPDATE') {
                 setGameDetails(prev => {
                   const newGameDetails = prev ? { ...prev, ...payload.new } : null;
@@ -210,9 +211,18 @@ const Lobby: React.FC = () => {
                   
                   return newGameDetails;
                 });
+              } else if (payload.eventType === 'INSERT') {
+                // Handle new game data if needed
+                console.log('New game data inserted:', payload.new);
+              } else if (payload.eventType === 'DELETE') {
+                // Handle game deletion if needed
+                console.log('Game deleted:', payload.old);
+                setError('La partie a été supprimée');
               }
             }
           );
+
+
 
           // Fetch streets
           if (game[0].map_center_latitude && game[0].map_center_longitude) {
@@ -279,6 +289,18 @@ const Lobby: React.FC = () => {
     } catch (err) {
       console.error('Error updating player role:', err);
       setError('Erreur lors du changement de rôle');
+    }
+  };
+
+  const handleStartGame = async () => {
+    try {
+      const gameService = new GameService();
+      await gameService.updateGameByCode(gameDetails!.code, {
+        is_converging_phase: true
+      });
+    } catch (error) {
+      console.error('Error starting game:', error);
+      setError('Erreur lors du démarrage de la partie');
     }
   };
 
@@ -448,6 +470,18 @@ const Lobby: React.FC = () => {
                 </IonList>
               </IonCardContent>
             </IonCard>
+
+            {/* Bouton Démarrer visible uniquement pour l'admin */}
+            {players.find(player => player.users.email === userEmail)?.is_admin && (
+              <IonButton 
+                expand="block" 
+                color="success"
+                onClick={handleStartGame}
+                className="ion-margin-bottom"
+              >
+                🚀 Démarrer la partie
+              </IonButton>
+            )}
 
             <IonButton 
               expand="block" 

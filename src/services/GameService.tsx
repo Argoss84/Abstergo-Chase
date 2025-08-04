@@ -206,8 +206,48 @@ class GameService {
         const channel = supabaseClient.channel(`game-changes-${code}`)
           .on(
             'postgres_changes',
-            { event: 'UPDATE', schema: 'public', table: 'game', filter: `code=eq.${code}` },
+            { event: '*', schema: 'public', table: 'game', filter: `code=eq.${code}` },
             callback
+          )
+          .subscribe();
+        return channel;
+      }
+
+      // Méthode d'abonnement complète pour les changements de game
+      subscribeToGameDataChanges(code: string, callback: (payload: any) => void) {
+        const channel = supabaseClient.channel(`game-data-changes-${code}`)
+          .on(
+            'postgres_changes',
+            { 
+              event: '*', 
+              schema: 'public', 
+              table: 'game', 
+              filter: `code=eq.${code}` 
+            },
+            (payload) => {
+              console.log('Game data change event:', payload);
+              callback(payload);
+            }
+          )
+          .subscribe();
+        return channel;
+      }
+
+      // Méthode d'abonnement pour les changements des props (objectifs)
+      subscribeToPropsChanges(id_game: string, callback: (payload: any) => void) {
+        const channel = supabaseClient.channel(`props-changes-${id_game}`)
+          .on(
+            'postgres_changes',
+            { 
+              event: '*', 
+              schema: 'public', 
+              table: 'props', 
+              filter: `id_game=eq.${id_game}` 
+            },
+            (payload) => {
+              console.log('Props change event:', payload);
+              callback(payload);
+            }
           )
           .subscribe();
         return channel;
