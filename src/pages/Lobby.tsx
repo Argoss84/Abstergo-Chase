@@ -318,6 +318,39 @@ const Lobby: React.FC = () => {
           </IonText>
         ) : gameDetails ? (
           <>
+            {/* Cadre pour partie en cours */}
+            {gameDetails.is_converging_phase && (
+              <IonCard color="warning" style={{ margin: '1rem' }}>
+                <IonCardHeader>
+                  <IonCardTitle style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    ⚠️ Partie en cours
+                  </IonCardTitle>
+                </IonCardHeader>
+                <IonCardContent>
+                  <IonText color="light">
+                    <p>Cette partie a déjà commencé. Vous pouvez la rejoindre en tant que spectateur ou participant.</p>
+                  </IonText>
+                  <IonButton 
+                    expand="block" 
+                    color="success"
+                    onClick={() => {
+                      const currentPlayer = players.find(p => p.users.email === userEmail);
+                      if (currentPlayer) {
+                        if (currentPlayer.role === 'AGENT') {
+                          history.push(`/agent?code=${gameDetails.code}`);
+                        } else if (currentPlayer.role === 'ROGUE') {
+                          history.push(`/rogue?code=${gameDetails.code}`);
+                        }
+                      }
+                    }}
+                    style={{ marginTop: '1rem' }}
+                  >
+                    🎮 Rejoindre la partie
+                  </IonButton>
+                </IonCardContent>
+              </IonCard>
+            )}
+
             <div style={{ height: '300px', width: '100%', marginBottom: '1rem' }}>
               <MapContainer
                 key={mapKey}
