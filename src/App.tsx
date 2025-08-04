@@ -44,6 +44,7 @@ import Lobby from './pages/Lobby';
 import Agent from './pages/Agent';
 import Rogue from './pages/Rogue';
 import EndGame from './pages/EndGame';
+import { WakeLockProvider } from './components/WakeLockProvider';
 setupIonicReact();
 
 const App: React.FC = () => {
@@ -54,52 +55,54 @@ const App: React.FC = () => {
   }
 
   return (
-    <IonApp>
-      <IonReactRouter>
-        <IonRouterOutlet>
-          {!session ? (
-            <Route exact path="/">
-              <Auth 
-                supabaseClient={supabaseClient}
-                appearance={{
-                  theme: ThemeSupa,
-                  style: {
-                    input: { background: 'grey', color: 'white' },
-                    button: { background: 'grey', color: 'white'}
-                  },
-                }} 
-              />
-            </Route>
-          ) : (
-            <Switch>
-              <Route exact path="/" render={() => <Redirect to="/home" />} />
-              <Route exact path="/home" render={() => <Home />} />
-              <Route exact path="/create-lobby" render={() => <CreateLobby />} />
-              <Route exact path="/join-lobby" render={() => <JoinLobby />} />
-              <Route exact path="/lobby" render={() => <Lobby />} />
-              <Route exact path="/agent" render={() => <Agent />} />
-              <Route exact path="/rogue" render={() => <Rogue />} />
-              <Route exact path="/end-game" render={() => <EndGame />} />
-              <Route path="*" component={NotFound} />
-            </Switch>
-          )}
-        </IonRouterOutlet>
-      </IonReactRouter>
-      
-      {/* Toast Container global pour toutes les pages */}
-      <ToastContainer
-        position="top-right"
-        autoClose={3000}
-        hideProgressBar={false}
-        newestOnTop={false}
-        closeOnClick
-        rtl={false}
-        pauseOnFocusLoss
-        draggable
-        pauseOnHover
-        theme="light"
-      />
-    </IonApp>
+    <WakeLockProvider enabled={true}>
+      <IonApp>
+        <IonReactRouter>
+          <IonRouterOutlet>
+            {!session ? (
+              <Route exact path="/">
+                <Auth 
+                  supabaseClient={supabaseClient}
+                  appearance={{
+                    theme: ThemeSupa,
+                    style: {
+                      input: { background: 'grey', color: 'white' },
+                      button: { background: 'grey', color: 'white'}
+                    },
+                  }} 
+                />
+              </Route>
+            ) : (
+              <Switch>
+                <Route exact path="/" render={() => <Redirect to="/home" />} />
+                <Route exact path="/home" render={() => <Home />} />
+                <Route exact path="/create-lobby" render={() => <CreateLobby />} />
+                <Route exact path="/join-lobby" render={() => <JoinLobby />} />
+                <Route exact path="/lobby" render={() => <Lobby />} />
+                <Route exact path="/agent" render={() => <Agent />} />
+                <Route exact path="/rogue" render={() => <Rogue />} />
+                <Route exact path="/end-game" render={() => <EndGame />} />
+                <Route path="*" component={NotFound} />
+              </Switch>
+            )}
+          </IonRouterOutlet>
+        </IonReactRouter>
+        
+        {/* Toast Container global pour toutes les pages */}
+        <ToastContainer
+          position="top-right"
+          autoClose={3000}
+          hideProgressBar={false}
+          newestOnTop={false}
+          closeOnClick
+          rtl={false}
+          pauseOnFocusLoss
+          draggable
+          pauseOnHover
+          theme="light"
+        />
+      </IonApp>
+    </WakeLockProvider>
   );
 };
 

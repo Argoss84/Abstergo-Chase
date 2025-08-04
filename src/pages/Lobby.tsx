@@ -27,6 +27,7 @@ import L from 'leaflet';
 import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
 import { GameDetails, GameProp, Player } from '../components/Interfaces';
+import { useWakeLock } from '../utils/useWakeLock';
 
 // Interface étendue pour Player avec les informations utilisateur
 interface PlayerWithUser extends Player {
@@ -58,6 +59,9 @@ const Lobby: React.FC = () => {
   const [players, setPlayers] = useState<PlayerWithUser[]>([]);
   const playersRef = useRef<PlayerWithUser[]>([]);
   const isJoiningRef = useRef(false);
+
+  // Wake Lock pour empêcher l'écran de se mettre en veille
+  const { releaseWakeLock } = useWakeLock(true);
 
   // Update the ref whenever players changes
   useEffect(() => {

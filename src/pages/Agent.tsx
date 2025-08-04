@@ -26,6 +26,7 @@ import { GameProp, GameDetails, ObjectiveCircle } from '../components/Interfaces
 import PopUpMarker from '../components/PopUpMarker';
 import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
+import { useWakeLock } from '../utils/useWakeLock';
 
 const ResizeMap = () => {
   const map = useMap();
@@ -84,6 +85,9 @@ const Agent: React.FC = () => {
   
   // Logo du joueur (choisi aléatoirement parmi les 6 disponibles)
   const [playerLogo, setPlayerLogo] = useState<string>('joueur_1.png');
+
+  // Wake Lock pour empêcher l'écran de se mettre en veille
+  const { releaseWakeLock } = useWakeLock(true);
 
   // Fonctions pour les boutons FAB
   const handleNetworkScan = () => {
@@ -209,15 +213,18 @@ const Agent: React.FC = () => {
 
   // Fonction de routine périodique
   const executeRoutine = useCallback(async () => {
-    console.log(`Routine exécutée #${routineExecutionCount + 1} à ${new Date().toLocaleTimeString()}`);
-    
     // Incrémenter le compteur d'exécutions
     setRoutineExecutionCount(prev => prev + 1);
     
-    // Exemple de tâches que la routine peut effectuer :
+    // Variables pour collecter les informations de la routine
+    let gameState = 'Phase normale';
+    let distanceToStart = null;
+    let isInStartZone = false;
+    let positionInfo = 'N/A';
+    
     // 1. Vérifier la position actuelle
     if (currentPosition) {
-      console.log(`Position actuelle: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
+      positionInfo = `${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`;
       
       // Mettre à jour la position du joueur en base de données
       if (currentPlayerId) {
@@ -237,41 +244,30 @@ const Agent: React.FC = () => {
     
     // 3. Vérifier l'état de la partie
     if (gameDetails) {
-      console.log(`État de la partie: ${gameDetails.is_converging_phase ? 'Phase de convergence' : 'Phase normale'}`);
+      gameState = gameDetails.is_converging_phase ? 'Phase de convergence' : 'Phase normale';
     }
     
     // 4. Vérifier la distance vers la zone de départ correspondante
     if (currentPosition && gameDetails?.start_zone_latitude && gameDetails?.start_zone_longitude) {
-      const distance = calculateDistanceToStartZone(
+      distanceToStart = calculateDistanceToStartZone(
         currentPosition, 
         gameDetails.start_zone_latitude, 
         gameDetails.start_zone_longitude
       );
       
       // Mettre à jour la distance pour l'affichage dans le header
-      setDistanceToStartZone(distance);
-      
-      console.log(`Distance vers zone de départ: ${distance.toFixed(0)}m`);
+      setDistanceToStartZone(distanceToStart);
       
       // Vérifier si le joueur est dans la zone de départ (rayon de 50m)
-      const isInStartZone = isPlayerInStartZone(
+      isInStartZone = isPlayerInStartZone(
         currentPosition, 
         gameDetails.start_zone_latitude, 
         gameDetails.start_zone_longitude
       );
       
-      if (isInStartZone) {
-        console.log('🎯 VOUS ÊTES DANS LA ZONE DE DÉPART !');
-        
-        // Mettre à jour IsInStartZone en base de données si le joueur est identifié
-        if (currentPlayerId) {
-          updatePlayerInStartZone(currentPlayerId, true);
-        }
-      } else {
-        // Mettre à jour IsInStartZone à false si le joueur n'est plus dans la zone
-        if (currentPlayerId) {
-          updatePlayerInStartZone(currentPlayerId, false);
-        }
+      // Mettre à jour IsInStartZone en base de données si le joueur est identifié
+      if (currentPlayerId) {
+        updatePlayerInStartZone(currentPlayerId, isInStartZone);
       }
     }
     
@@ -290,11 +286,13 @@ const Agent: React.FC = () => {
     
     // 6. Gestion du compte à rebours
     if (gameDetails?.started && gameDetails?.duration && !isCountdownActive) {
-      console.log('🚀 Partie démarrée - Initialisation du compte à rebours');
       const totalSeconds = gameDetails.duration * 60; // Convertir les minutes en secondes
       setCountdown(totalSeconds);
       setIsCountdownActive(true);
     }
+    
+    // Console.log unifié avec toutes les informations de la routine
+    console.log(`🔄 Routine #${routineExecutionCount} | État: ${gameState} | Position: ${positionInfo} | Distance: ${distanceToStart ? distanceToStart.toFixed(0) + 'm' : 'N/A'} | Zone départ: ${isInStartZone ? 'OUI' : 'NON'}`);
     
   }, [currentPosition, gameDetails, objectiveCircles, routineExecutionCount, currentPlayerId, location.search, isCountdownActive]);
 
@@ -315,7 +313,7 @@ const Agent: React.FC = () => {
         executeRoutine();
       }, routineInterval);
       
-      console.log(`Routine démarrée avec un intervalle de ${routineInterval}ms`);
+      
     } else {
       // Arrêter la routine
       if (routineIntervalRef.current) {
@@ -371,7 +369,7 @@ const Agent: React.FC = () => {
             const currentPlayer = identifyCurrentPlayer(game[0].players, currentUser.id);
             if (currentPlayer) {
               setCurrentPlayerId(currentPlayer.id_player);
-              console.log(`Utilisateur: ${currentUser.email}`);
+              
             }
           }
           

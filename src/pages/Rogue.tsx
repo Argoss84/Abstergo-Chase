@@ -25,6 +25,7 @@ import { GameProp, GameDetails, ObjectiveCircle } from '../components/Interfaces
 import PopUpMarker from '../components/PopUpMarker';
 import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
+import { useWakeLock } from '../utils/useWakeLock';
 
 const ResizeMap = () => {
   const map = useMap();
@@ -91,6 +92,9 @@ const Rogue: React.FC = () => {
   
   // Référence pour stocker l'ID du toast de capture
   const captureToastRef = useRef<string | number | null>(null);
+
+  // Wake Lock pour empêcher l'écran de se mettre en veille
+  const { releaseWakeLock } = useWakeLock(true);
 
   // Fonctions pour les boutons FAB
   const handleNetworkScan = () => {
