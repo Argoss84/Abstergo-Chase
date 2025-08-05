@@ -54,7 +54,7 @@ const MapController = ({ onMapReady }: { onMapReady: (map: L.Map) => void }) => 
 const Agent: React.FC = () => {
   const history = useHistory();
   const location = useLocation();
-  const { session, userEmail } = useAuth();
+  const { session, userEmail, appParams } = useAuth();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
   const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +67,7 @@ const Agent: React.FC = () => {
   const [distanceToStartZone, setDistanceToStartZone] = useState<number | null>(null);
   
   // États pour la routine périodique
-  const [routineInterval, setRoutineInterval] = useState<number>(2000); // 5 secondes par défaut
+  const [routineInterval, setRoutineInterval] = useState<number>(2000); // Valeur par défaut
   const [isRoutineActive, setIsRoutineActive] = useState<boolean>(true);
   const [routineExecutionCount, setRoutineExecutionCount] = useState<number>(0);
   const routineIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -509,6 +509,20 @@ const Agent: React.FC = () => {
       }
     };
   }, [isCountdownActive, countdown]);
+
+  // Effet pour configurer l'intervalle de routine basé sur le paramètre game_refresh_ms
+  useEffect(() => {
+    if (appParams) {
+      const gameRefreshParam = appParams.find(param => param.param_name === 'game_refresh_ms');
+      if (gameRefreshParam && gameRefreshParam.param_value) {
+        const refreshMs = parseInt(gameRefreshParam.param_value);
+        if (!isNaN(refreshMs) && refreshMs > 0) {
+          setRoutineInterval(refreshMs);
+          console.log(`🔄 Intervalle de routine configuré: ${refreshMs}ms`);
+        }
+      }
+    }
+  }, [appParams]);
 
   return (
     <IonPage>

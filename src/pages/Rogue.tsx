@@ -51,7 +51,7 @@ const MapController = ({ onMapReady }: { onMapReady: (map: L.Map) => void }) => 
 const Rogue: React.FC = () => {
   const history = useHistory();
   const location = useLocation();
-  const { session } = useAuth();
+  const { session, appParams } = useAuth();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
   const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +64,7 @@ const Rogue: React.FC = () => {
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
   // États pour la routine périodique
-  const [routineInterval, setRoutineInterval] = useState<number>(2000); // 2 secondes par défaut
+  const [routineInterval, setRoutineInterval] = useState<number>(2000); // Valeur par défaut
   const [isRoutineActive, setIsRoutineActive] = useState<boolean>(true);
   const [routineExecutionCount, setRoutineExecutionCount] = useState<number>(0);
   const routineIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -95,6 +95,20 @@ const Rogue: React.FC = () => {
 
   // Wake Lock pour empêcher l'écran de se mettre en veille
   const { releaseWakeLock } = useWakeLock(true);
+
+  // Effet pour configurer l'intervalle de routine basé sur le paramètre game_refresh_ms
+  useEffect(() => {
+    if (appParams) {
+      const gameRefreshParam = appParams.find(param => param.param_name === 'game_refresh_ms');
+      if (gameRefreshParam && gameRefreshParam.param_value) {
+        const refreshMs = parseInt(gameRefreshParam.param_value);
+        if (!isNaN(refreshMs) && refreshMs > 0) {
+          setRoutineInterval(refreshMs);
+          console.log(`🔄 Intervalle de routine configuré: ${refreshMs}ms`);
+        }
+      }
+    }
+  }, [appParams]);
 
   // Fonctions pour les boutons FAB
   const handleNetworkScan = () => {

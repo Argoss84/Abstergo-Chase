@@ -4,6 +4,7 @@ import { Auth } from '@supabase/auth-ui-react';
 import { ThemeSupa } from '@supabase/auth-ui-shared';
 import { getUserByAuthId, createUser } from '../services/UserServices';
 import { listParameters } from '../services/AdminService'; // Importer la fonction listParameters
+import { AppParamsService, AppParam } from '../services/AppParamsService';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
 const supabaseKey = import.meta.env.VITE_SUPABASE_KEY || "";
@@ -14,6 +15,9 @@ interface AuthContextType {
   session: any;
   userEmail: string | null;
   loading: boolean;
+  appParams: AppParam[] | null;
+  appParamsLoading: boolean;
+  refreshAppParams: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -25,7 +29,27 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [session, setSession] = useState<any>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  
+  const [appParams, setAppParams] = useState<AppParam[] | null>(null);
+  const [appParamsLoading, setAppParamsLoading] = useState(false);
+
+  // Fonction pour charger les paramètres de l'application
+  const loadAppParams = async () => {
+    setAppParamsLoading(true);
+    try {
+      const params = await AppParamsService.getAllParams();
+      setAppParams(params);
+    } catch (error) {
+      console.error('Erreur lors du chargement des paramètres:', error);
+      setAppParams(null);
+    } finally {
+      setAppParamsLoading(false);
+    }
+  };
+
+  // Fonction pour rafraîchir les paramètres
+  const refreshAppParams = async () => {
+    await loadAppParams();
+  };
 
   const handleUserAuth = async (session: any) => {
     if (session?.user) {
@@ -50,6 +74,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (session?.user) {
         handleUserAuth(session);
+        // Charger les paramètres après authentification
+        loadAppParams();
       }
     });
 
@@ -59,6 +85,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (session?.user) {
         handleUserAuth(session);
+        // Charger les paramètres après authentification
+        loadAppParams();
+      } else {
+        // Réinitialiser les paramètres lors de la déconnexion
+        setAppParams(null);
       }
     });
 
@@ -90,7 +121,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }
 
   return (
-    <AuthContext.Provider value={{ session, userEmail, loading, logout }}>
+    <AuthContext.Provider value={{ 
+      session, 
+      userEmail, 
+      loading, 
+      appParams, 
+      appParamsLoading, 
+      refreshAppParams, 
+      logout 
+    }}>
       {children}
     </AuthContext.Provider>
   );
