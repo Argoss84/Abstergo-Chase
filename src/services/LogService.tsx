@@ -153,6 +153,7 @@ export class LogService {
     message: string,
     details?: string
   ): Promise<void> {
+    console.log('Logging:', createdBy, source, message, details);
     await this.insertLog(createdBy, source, message, details);
   }
 } 

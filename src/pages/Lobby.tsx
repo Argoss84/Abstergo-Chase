@@ -28,6 +28,7 @@ import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
 import { GameDetails, GameProp, Player } from '../components/Interfaces';
 import { useWakeLock } from '../utils/useWakeLock';
+import { LogService } from '../services/LogService';
 
 // Interface étendue pour Player avec les informations utilisateur
 interface PlayerWithUser extends Player {
@@ -105,6 +106,7 @@ const Lobby: React.FC = () => {
           if (!isUserInGame && !isUserAlreadyInCurrentPlayers && userEmail && session?.user?.id && !isJoiningRef.current) {
             isJoiningRef.current = true; // Marquer que nous sommes en train de rejoindre
             
+            
             try {
               // Récupérer l'ID de l'utilisateur
               const user = await getUserByAuthId(session.user.id);
@@ -118,8 +120,8 @@ const Lobby: React.FC = () => {
               const role = initialPlayers?.length === 0 ? 'AGENT' : 'ROGUE';
               
               // Le premier joueur devient automatiquement admin
-              const isAdmin = initialPlayers?.length === 0;
-              
+              const isAdmin = initialPlayers?.length === 0; 
+
               const playerData = {
                 id_game: game[0].id_game,
                 user_id: user.id,
@@ -132,6 +134,13 @@ const Lobby: React.FC = () => {
               
               // Attendre un peu pour s'assurer que la base de données a bien enregistré les changements
               await new Promise(resolve => setTimeout(resolve, 500));
+              
+              // Logger la connexion du joueur seulement lors de l'ajout effectif
+              await LogService.quickLog(
+                userEmail,
+                'LOBBY',
+                `Joueur ${userEmail} a rejoint la partie ${game[0].code}`, "null"
+              );
               
               // Rafraîchir la liste des joueurs après la création
               const updatedPlayers = await gameService.getPlayersByGameId(game[0].id_game.toString());
