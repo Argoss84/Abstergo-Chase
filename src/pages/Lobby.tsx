@@ -29,6 +29,7 @@ import { getUserByAuthId } from '../services/UserServices';
 import { GameDetails, GameProp, Player } from '../components/Interfaces';
 import { useWakeLock } from '../utils/useWakeLock';
 import { LogService } from '../services/LogService';
+import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 
 // Interface étendue pour Player avec les informations utilisateur
 interface PlayerWithUser extends Player {
@@ -64,6 +65,23 @@ const Lobby: React.FC = () => {
   // Wake Lock pour empêcher l'écran de se mettre en veille
   const { releaseWakeLock } = useWakeLock(true);
 
+
+
+  // Fonction utilitaire pour effacer les erreurs
+  const clearError = () => {
+    setError(null);
+  };
+
+  // Fonction helper pour gérer les erreurs avec l'email de l'utilisateur
+  const handleErrorWithUser = async (errorMessage: string, error?: any, context?: string) => {
+    const errorResult = await handleError(errorMessage, error, {
+      context: context || ERROR_CONTEXTS.GENERAL,
+      userEmail: userEmail || undefined
+    });
+    setError(errorResult.message);
+    return errorResult;
+  };
+
   // Update the ref whenever players changes
   useEffect(() => {
     if (players.length > 0) {
@@ -78,7 +96,7 @@ const Lobby: React.FC = () => {
         const code = params.get('code');
         
         if (!code) {
-          setError('Code de partie non trouvé');
+          await handleErrorWithUser('Code de partie non trouvé', null, ERROR_CONTEXTS.LOBBY_INIT);
           return;
         }
 
@@ -112,7 +130,7 @@ const Lobby: React.FC = () => {
               const user = await getUserByAuthId(session.user.id);
               
               if (!user) {
-                setError('Utilisateur non trouvé');
+                await handleErrorWithUser('Utilisateur non trouvé', null, ERROR_CONTEXTS.PLAYER_CREATION);
                 return;
               }
 
@@ -150,8 +168,7 @@ const Lobby: React.FC = () => {
                 playersRef.current = updatedPlayers;
               }
             } catch (error) {
-              console.error('Error creating player:', error);
-              setError('Erreur lors de l\'ajout du joueur');
+              await handleErrorWithUser('Erreur lors de l\'ajout du joueur', error, ERROR_CONTEXTS.PLAYER_CREATION);
             } finally {
               isJoiningRef.current = false; // Réinitialiser le flag
             }
@@ -197,7 +214,7 @@ const Lobby: React.FC = () => {
           // Subscribe to game changes with improved handling
           const gameChangesChannel = gameService.subscribeToGameDataChanges(
             game[0].code,
-            (payload) => {
+            async (payload) => {
               
               if (payload.eventType === 'UPDATE') {
                 setGameDetails(prev => {
@@ -223,11 +240,11 @@ const Lobby: React.FC = () => {
               } else if (payload.eventType === 'INSERT') {
                 // Handle new game data if needed
                 console.log('New game data inserted:', payload.new);
-              } else if (payload.eventType === 'DELETE') {
-                // Handle game deletion if needed
-                console.log('Game deleted:', payload.old);
-                setError('La partie a été supprimée');
-              }
+                             } else if (payload.eventType === 'DELETE') {
+                 // Handle game deletion if needed
+                 console.log('Game deleted:', payload.old);
+                 await handleErrorWithUser('La partie a été supprimée', payload.old, ERROR_CONTEXTS.GAME_EVENTS);
+               }
             }
           );
 
@@ -235,26 +252,40 @@ const Lobby: React.FC = () => {
 
           // Fetch streets
           if (game[0].map_center_latitude && game[0].map_center_longitude) {
-            const overpassUrl = `https://overpass-api.de/api/interpreter?data=
-              [out:json];
-              (
-                way(around:${game[0].map_radius},${game[0].map_center_latitude},${game[0].map_center_longitude})["highway"]["foot"!~"no"];
-                way(around:${game[0].map_radius},${game[0].map_center_latitude},${game[0].map_center_longitude})["amenity"="square"]["foot"!~"no"];
-              );
-              (._;>;);
-              out;`;
+            try {
+              const overpassUrl = `https://overpass-api.de/api/interpreter?data=
+                [out:json];
+                (
+                  way(around:${game[0].map_radius},${game[0].map_center_latitude},${game[0].map_center_longitude})["highway"]["foot"!~"no"];
+                  way(around:${game[0].map_radius},${game[0].map_center_latitude},${game[0].map_center_longitude})["amenity"="square"]["foot"!~"no"];
+                );
+                (._;>;);
+                out;`;
 
-            const response = await fetch(overpassUrl);
-            const data = await response.json();
-            const ways = data.elements.filter((el: any) => el.type === "way");
-            const nodes = data.elements.filter((el: any) => el.type === "node");
-            const nodeMap = new Map(
-              nodes.map((node: any) => [node.id, [node.lat, node.lon]])
-            );
-            const streetLines = ways.map((way: any) =>
-              way.nodes.map((nodeId: any) => nodeMap.get(nodeId))
-            );
-            setStreets(streetLines);
+              const response = await fetch(overpassUrl);
+              if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+              }
+              const data = await response.json();
+              const ways = data.elements.filter((el: any) => el.type === "way");
+              const nodes = data.elements.filter((el: any) => el.type === "node");
+              const nodeMap = new Map(
+                nodes.map((node: any) => [node.id, [node.lat, node.lon]])
+              );
+              const streetLines = ways.map((way: any) =>
+                way.nodes.map((nodeId: any) => nodeMap.get(nodeId))
+              );
+              setStreets(streetLines);
+                         } catch (streetError) {
+               // Log l'erreur mais ne bloque pas le chargement de la partie
+               console.warn('Erreur lors de la récupération des rues:', streetError);
+               // Utiliser la fonction factorisée handleError pour le logging
+               await handleError('Erreur lors de la récupération des rues', streetError, {
+                 context: ERROR_CONTEXTS.STREET_FETCH,
+                 userEmail: userEmail || undefined,
+                 shouldShowError: false // Ne pas afficher l'erreur à l'utilisateur
+               });
+             }
           }
 
           // Cleanup subscriptions
@@ -264,11 +295,10 @@ const Lobby: React.FC = () => {
             gameChangesChannel.unsubscribe();
           };
         } else {
-          setError('Partie non trouvée');
+          await handleErrorWithUser('Partie non trouvée', null, ERROR_CONTEXTS.LOBBY_INIT);
         }
       } catch (err) {
-        console.error('Error fetching game details:', err);
-        setError('Erreur lors du chargement de la partie');
+        await handleErrorWithUser('Erreur lors du chargement de la partie', err, ERROR_CONTEXTS.LOBBY_INIT);
       }
     };
 
@@ -285,19 +315,18 @@ const Lobby: React.FC = () => {
       
       // Vérifier si le changement est possible
       if (newRole === 'AGENT' && currentAgents >= (gameDetails?.max_agents || 1)) {
-        setError('Nombre maximum d\'agents atteint');
+        await handleErrorWithUser('Nombre maximum d\'agents atteint', null, ERROR_CONTEXTS.ROLE_CHANGE);
         return;
       }
       if (newRole === 'ROGUE' && currentRogues >= (gameDetails?.max_rogue || 1)) {
-        setError('Nombre maximum de rogues atteint');
+        await handleErrorWithUser('Nombre maximum de rogues atteint', null, ERROR_CONTEXTS.ROLE_CHANGE);
         return;
       }
 
       // Mettre à jour le rôle
       await gameService.updatePlayer(playerId.toString(), { role: newRole });
     } catch (err) {
-      console.error('Error updating player role:', err);
-      setError('Erreur lors du changement de rôle');
+      await handleErrorWithUser('Erreur lors du changement de rôle', err, ERROR_CONTEXTS.ROLE_CHANGE);
     }
   };
 
@@ -308,8 +337,7 @@ const Lobby: React.FC = () => {
         is_converging_phase: true
       });
     } catch (error) {
-      console.error('Error starting game:', error);
-      setError('Erreur lors du démarrage de la partie');
+      await handleErrorWithUser('Erreur lors du démarrage de la partie', error, ERROR_CONTEXTS.GAME_START);
     }
   };
 
@@ -322,9 +350,26 @@ const Lobby: React.FC = () => {
       </IonHeader>
       <IonContent fullscreen>
         {error ? (
-          <IonText color="danger">
-            <p>{error}</p>
-          </IonText>
+          <IonCard color="danger" style={{ margin: '1rem' }}>
+            <IonCardHeader>
+              <IonCardTitle style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                ⚠️ Erreur
+              </IonCardTitle>
+            </IonCardHeader>
+            <IonCardContent>
+              <IonText color="light">
+                <p>{error}</p>
+              </IonText>
+              <IonButton 
+                expand="block" 
+                color="light"
+                onClick={clearError}
+                style={{ marginTop: '1rem' }}
+              >
+                ✕ Fermer l'erreur
+              </IonButton>
+            </IonCardContent>
+          </IonCard>
         ) : gameDetails ? (
           <>
             {/* Cadre pour partie en cours */}
