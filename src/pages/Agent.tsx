@@ -27,6 +27,7 @@ import PopUpMarker from '../components/PopUpMarker';
 import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
 import { useWakeLock } from '../utils/useWakeLock';
+import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 
 const ResizeMap = () => {
   const map = useMap();
@@ -88,6 +89,16 @@ const Agent: React.FC = () => {
 
   // Wake Lock pour empêcher l'écran de se mettre en veille
   const { releaseWakeLock } = useWakeLock(true);
+
+  // Fonction helper pour gérer les erreurs avec l'email de l'utilisateur
+  const handleErrorWithUser = async (errorMessage: string, error?: any, context?: string) => {
+    const errorResult = await handleError(errorMessage, error, {
+      context: context || ERROR_CONTEXTS.GENERAL,
+      userEmail: userEmail || undefined
+    });
+    setError(errorResult.message);
+    return errorResult;
+  };
 
   // Fonctions pour les boutons FAB
   const handleNetworkScan = () => {
@@ -339,7 +350,7 @@ const Agent: React.FC = () => {
         const code = params.get('code');
         
         if (!code) {
-          setError('Code de partie non trouvé');
+          await handleErrorWithUser('Code de partie non trouvé', null, ERROR_CONTEXTS.VALIDATION);
           return;
         }
 
@@ -350,11 +361,11 @@ const Agent: React.FC = () => {
             setCurrentUser(user);
             console.log(`Utilisateur connecté: ${user.email} (ID: ${user.id})`);
           } else {
-            setError('Utilisateur non trouvé');
+            await handleErrorWithUser('Utilisateur non trouvé', null, ERROR_CONTEXTS.AUTHENTICATION);
             return;
           }
         } else {
-          setError('Utilisateur non connecté');
+          await handleErrorWithUser('Utilisateur non connecté', null, ERROR_CONTEXTS.AUTHENTICATION);
           return;
         }
 
@@ -388,11 +399,10 @@ const Agent: React.FC = () => {
             console.log(`${circles.length} cercles d'objectifs initialisés`);
           }
         } else {
-          setError('Partie non trouvée');
+          await handleErrorWithUser('Partie non trouvée', null, ERROR_CONTEXTS.DATABASE);
         }
       } catch (err) {
-        console.error('Error fetching game details:', err);
-        setError('Erreur lors du chargement de la partie');
+        await handleErrorWithUser('Erreur lors du chargement de la partie', err, ERROR_CONTEXTS.DATABASE);
       }
     };
 
@@ -413,7 +423,11 @@ const Agent: React.FC = () => {
           setCurrentPosition([position.coords.latitude, position.coords.longitude]);
         },
         (error) => {
-          console.error("Error getting location:", error);
+          handleError("Erreur lors de la récupération de la position", error, {
+            context: ERROR_CONTEXTS.NETWORK,
+            userEmail: userEmail || undefined,
+            shouldShowError: false
+          });
         }
       );
 
@@ -423,7 +437,11 @@ const Agent: React.FC = () => {
           setCurrentPosition([position.coords.latitude, position.coords.longitude]);
         },
         (error) => {
-          console.error("Error watching location:", error);
+          handleError("Erreur lors de la surveillance de la position", error, {
+            context: ERROR_CONTEXTS.NETWORK,
+            userEmail: userEmail || undefined,
+            shouldShowError: false
+          });
         },
         {
           enableHighAccuracy: true,

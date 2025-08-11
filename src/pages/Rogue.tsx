@@ -26,6 +26,7 @@ import PopUpMarker from '../components/PopUpMarker';
 import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
 import { useWakeLock } from '../utils/useWakeLock';
+import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 
 const ResizeMap = () => {
   const map = useMap();
@@ -95,6 +96,16 @@ const Rogue: React.FC = () => {
 
   // Wake Lock pour empêcher l'écran de se mettre en veille
   const { releaseWakeLock } = useWakeLock(true);
+
+  // Fonction helper pour gérer les erreurs avec l'email de l'utilisateur
+  const handleErrorWithUser = async (errorMessage: string, error?: any, context?: string) => {
+    const errorResult = await handleError(errorMessage, error, {
+      context: context || ERROR_CONTEXTS.GENERAL,
+      userEmail: currentUser?.email || undefined
+    });
+    setError(errorResult.message);
+    return errorResult;
+  };
 
   // Effet pour configurer l'intervalle de routine basé sur le paramètre game_refresh_ms
   useEffect(() => {
@@ -242,7 +253,7 @@ const Rogue: React.FC = () => {
         const code = params.get('code');
         
         if (!code) {
-          setError('Code de partie non trouvé');
+          await handleErrorWithUser('Code de partie non trouvé', null, ERROR_CONTEXTS.VALIDATION);
           return;
         }
 
@@ -275,19 +286,18 @@ const Rogue: React.FC = () => {
                 console.log(`${game[0].props.length} objectifs initialisés`);
               }
             } else {
-              setError('Partie non trouvée');
+              await handleErrorWithUser('Partie non trouvée', null, ERROR_CONTEXTS.DATABASE);
             }
           } else {
-            setError('Utilisateur non trouvé');
+            await handleErrorWithUser('Utilisateur non trouvé', null, ERROR_CONTEXTS.AUTHENTICATION);
             return;
           }
         } else {
-          setError('Utilisateur non connecté');
+          await handleErrorWithUser('Utilisateur non connecté', null, ERROR_CONTEXTS.AUTHENTICATION);
           return;
         }
       } catch (err) {
-        console.error('Error fetching game details:', err);
-        setError('Erreur lors du chargement de la partie');
+        await handleErrorWithUser('Erreur lors du chargement de la partie', err, ERROR_CONTEXTS.DATABASE);
       }
     };
 
@@ -354,7 +364,11 @@ const Rogue: React.FC = () => {
           setCurrentPosition([position.coords.latitude, position.coords.longitude]);
         },
         (error) => {
-          console.error("Error getting location:", error);
+          handleError("Erreur lors de la récupération de la position", error, {
+            context: ERROR_CONTEXTS.NETWORK,
+            userEmail: currentUser?.email || undefined,
+            shouldShowError: false
+          });
         }
       );
 
@@ -364,7 +378,11 @@ const Rogue: React.FC = () => {
           setCurrentPosition([position.coords.latitude, position.coords.longitude]);
         },
         (error) => {
-          console.error("Error watching location:", error);
+          handleError("Erreur lors de la surveillance de la position", error, {
+            context: ERROR_CONTEXTS.NETWORK,
+            userEmail: currentUser?.email || undefined,
+            shouldShowError: false
+          });
         },
         {
           enableHighAccuracy: true,

@@ -26,6 +26,7 @@ import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Circle, Polyline
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { generateRandomPoints, generateStartZone, generateStartZoneRogue } from '../utils/utils';
+import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 
 interface GameFormData {
   objectif_number: number;
@@ -84,6 +85,14 @@ const CreateLobby: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
 
+  // Fonction helper pour gérer les erreurs
+  const handleErrorWithContext = async (errorMessage: string, error?: any, context?: string) => {
+    await handleError(errorMessage, error, {
+      context: context || ERROR_CONTEXTS.GENERAL,
+      shouldShowError: false // Ne pas afficher l'erreur à l'utilisateur dans ce composant
+    });
+  };
+
   const handleInputChange = (field: keyof GameFormData, value: string | number) => {
     setFormData(prev => ({
       ...prev,
@@ -114,7 +123,7 @@ const CreateLobby: React.FC = () => {
     setStreets(streetLines);
   };
 
-  const handleGenerateObjectives = () => {
+  const handleGenerateObjectives = async () => {
     if (!selectedPosition) {
       return;
     }
@@ -154,7 +163,7 @@ const CreateLobby: React.FC = () => {
         rogue: rogueStartZone
       });
     } catch (error) {
-      console.error('Error generating objectives:', error);
+      await handleErrorWithContext('Erreur lors de la génération des objectifs', error, ERROR_CONTEXTS.VALIDATION);
       // You might want to show a toast or some user feedback here
     }
   };
@@ -199,7 +208,7 @@ const CreateLobby: React.FC = () => {
         history.push(`/lobby?code=${code}`);
       }
     } catch (error) {
-      console.error('Error creating game:', error);
+      await handleErrorWithContext('Erreur lors de la création de la partie', error, ERROR_CONTEXTS.DATABASE);
     } finally {
       setIsLoading(false);
     }
@@ -234,7 +243,10 @@ const CreateLobby: React.FC = () => {
           }));
         },
         (error) => {
-          console.error('Error getting location:', error);
+          handleError('Erreur lors de la récupération de la position', error, {
+            context: ERROR_CONTEXTS.NETWORK,
+            shouldShowError: false
+          });
           // Fallback to Paris coordinates if geolocation fails
           const fallbackPosition: [number, number] = [48.8566, 2.3522];
           setUserPosition(fallbackPosition);

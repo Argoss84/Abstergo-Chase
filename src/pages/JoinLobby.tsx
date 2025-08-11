@@ -16,17 +16,32 @@ import {
     IonLabel,
   } from '@ionic/react';
   import { useHistory } from 'react-router-dom';
-  import { useState } from 'react';
+import { useState } from 'react';
+import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
   
   const JoinLobby: React.FC = () => {
     const history = useHistory();
     const [gameCode, setGameCode] = useState('');
   
-    const handleJoinGame = () => {
-      if (gameCode.trim()) {
-        history.push(`/lobby?code=${gameCode}`);
-      }
-    };
+      const handleJoinGame = async () => {
+    if (!gameCode.trim()) {
+      await handleError('Veuillez entrer un code de partie', null, {
+        context: ERROR_CONTEXTS.VALIDATION,
+        shouldShowError: false
+      });
+      return;
+    }
+    
+    if (gameCode.trim().length !== 8) {
+      await handleError('Le code de partie doit contenir exactement 8 caractères', null, {
+        context: ERROR_CONTEXTS.VALIDATION,
+        shouldShowError: false
+      });
+      return;
+    }
+    
+    history.push(`/lobby?code=${gameCode}`);
+  };
   
     return (
       <IonPage id="JoinLobby-page">
