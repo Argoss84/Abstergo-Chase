@@ -28,6 +28,7 @@ import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
 import { GameDetails, GameProp, Player } from '../components/Interfaces';
 import { useWakeLock } from '../utils/useWakeLock';
+import { useVibration } from '../hooks/useVibration';
 import { LogService } from '../services/LogService';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 
@@ -64,6 +65,9 @@ const Lobby: React.FC = () => {
 
   // Wake Lock pour empêcher l'écran de se mettre en veille
   const { releaseWakeLock } = useWakeLock(true);
+
+  // Hook pour la vibration
+  const { vibrate, patterns } = useVibration();
 
 
 
@@ -166,6 +170,9 @@ const Lobby: React.FC = () => {
                 console.log('Refreshed players list:', updatedPlayers);
                 setPlayers(updatedPlayers);
                 playersRef.current = updatedPlayers;
+                
+                // Vibration courte pour indiquer qu'un joueur a rejoint
+                vibrate(patterns.short);
               }
             } catch (error) {
               await handleErrorWithUser('Erreur lors de l\'ajout du joueur', error, ERROR_CONTEXTS.PLAYER_CREATION);
@@ -184,6 +191,10 @@ const Lobby: React.FC = () => {
                 setPlayers(prev => {
                   const newPlayers = [...prev, payload.new];
                   playersRef.current = newPlayers;
+                  
+                  // Vibration courte pour indiquer qu'un joueur a rejoint
+                  vibrate(patterns.short);
+                  
                   return newPlayers;
                 });
               } else if (payload.eventType === 'UPDATE') {
