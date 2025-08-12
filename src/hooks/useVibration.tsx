@@ -18,7 +18,6 @@ export const useVibration = () => {
 
     try {
       navigator.vibrate(duration);
-      console.log(`📳 Vibration activée pour ${duration}ms`);
       return true;
     } catch (error) {
       console.error('❌ Erreur lors de la vibration:', error);
@@ -35,7 +34,6 @@ export const useVibration = () => {
 
     try {
       navigator.vibrate(pattern);
-      console.log(`📳 Pattern de vibration activé:`, pattern);
       return true;
     } catch (error) {
       console.error('❌ Erreur lors du pattern de vibration:', error);
@@ -51,7 +49,6 @@ export const useVibration = () => {
 
     try {
       navigator.vibrate(0);
-      console.log('📳 Vibration arrêtée');
       return true;
     } catch (error) {
       console.error('❌ Erreur lors de l\'arrêt de la vibration:', error);
@@ -69,10 +66,8 @@ export const useVibration = () => {
     try {
       if (options.pattern) {
         navigator.vibrate(options.pattern);
-        console.log(`📳 Pattern de vibration activé:`, options.pattern);
       } else if (options.duration) {
         navigator.vibrate(options.duration);
-        console.log(`📳 Vibration activée pour ${options.duration}ms`);
       }
       return true;
     } catch (error) {
