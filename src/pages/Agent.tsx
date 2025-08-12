@@ -27,6 +27,7 @@ import PopUpMarker from '../components/PopUpMarker';
 import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
 import { useWakeLock } from '../utils/useWakeLock';
+import { useVibration } from '../hooks/useVibration';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 
 const ResizeMap = () => {
@@ -90,6 +91,9 @@ const Agent: React.FC = () => {
   // Wake Lock pour empêcher l'écran de se mettre en veille
   const { releaseWakeLock } = useWakeLock(true);
 
+  // Hook pour la vibration
+  const { vibrate, patterns } = useVibration();
+
   // Fonction helper pour gérer les erreurs avec l'email de l'utilisateur
   const handleErrorWithUser = async (errorMessage: string, error?: any, context?: string) => {
     const errorResult = await handleError(errorMessage, error, {
@@ -105,18 +109,21 @@ const Agent: React.FC = () => {
     console.log('Scan réseau activé');
     // Ici vous pouvez ajouter la logique pour scanner le réseau
     toast.info('🔍 Scan réseau en cours...');
+    vibrate(patterns.short);
   };
 
   const handleVisionMode = () => {
     console.log('Mode vision activé');
     // Ici vous pouvez ajouter la logique pour changer le mode de vision
     toast.success('👁️ Mode vision activé');
+    vibrate(patterns.short);
   };
 
   const handleHealthCheck = () => {
     console.log('Vérification de santé activée');
     // Ici vous pouvez ajouter la logique pour vérifier la santé
     toast.warning('💊 Vérification de santé en cours...');
+    vibrate(patterns.short);
   };
 
   const handleLocationTracker = () => {
@@ -131,6 +138,7 @@ const Agent: React.FC = () => {
     } else {
       toast.error('❌ Position non disponible');
     }
+    vibrate(patterns.short);
   };
 
   const handleThreatDetection = async () => {
@@ -158,6 +166,7 @@ const Agent: React.FC = () => {
       setCameraError('Impossible d\'accéder à la caméra. Vérifiez les permissions.');
       setIsQRModalOpen(true);
     }
+    vibrate(patterns.short);
   };
 
   const handleQRCodeScanned = (result: string) => {

@@ -26,6 +26,7 @@ import PopUpMarker from '../components/PopUpMarker';
 import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
 import { useWakeLock } from '../utils/useWakeLock';
+import { useVibration } from '../hooks/useVibration';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 
 const ResizeMap = () => {
@@ -97,6 +98,9 @@ const Rogue: React.FC = () => {
   // Wake Lock pour empêcher l'écran de se mettre en veille
   const { releaseWakeLock } = useWakeLock(true);
 
+  // Hook pour la vibration
+  const { vibrate, patterns } = useVibration();
+
   // Fonction helper pour gérer les erreurs avec l'email de l'utilisateur
   const handleErrorWithUser = async (errorMessage: string, error?: any, context?: string) => {
     const errorResult = await handleError(errorMessage, error, {
@@ -125,16 +129,19 @@ const Rogue: React.FC = () => {
   const handleNetworkScan = () => {
     console.log('Scan réseau activé');
     toast.info('🔍 Scan réseau en cours...');
+    vibrate(patterns.short);
   };
 
   const handleVisionMode = () => {
     console.log('Mode vision activé');
     toast.success('👁️ Mode vision activé');
+    vibrate(patterns.short);
   };
 
   const handleHealthCheck = () => {
     console.log('Vérification de santé activée');
     toast.warning('💊 Vérification de santé en cours...');
+    vibrate(patterns.short);
   };
 
   const handleLocationTracker = () => {
@@ -147,6 +154,7 @@ const Rogue: React.FC = () => {
     } else {
       toast.error('❌ Position non disponible');
     }
+    vibrate(patterns.short);
   };
 
   const handleCaptureObjectiv = async () => {
@@ -230,7 +238,6 @@ const Rogue: React.FC = () => {
               );
               
               toast.success('🎯 Objectif capturé avec succès !');
-              console.log(`✅ Objectif ${objectiveInRange.id_prop} capturé`);
             } catch (error) {
               console.error('❌ Erreur lors de la capture de l\'objectif:', error);
               toast.error('❌ Erreur lors de la capture de l\'objectif');
@@ -244,6 +251,7 @@ const Rogue: React.FC = () => {
     } else {
       toast.warning('❌ Aucun objectif à portée');
     }
+    vibrate(patterns.short);
   };
 
   useEffect(() => {
