@@ -759,6 +759,7 @@ const Rogue: React.FC = () => {
         <div className="compass-overlay">
           <Compass
             size="small"
+            width={75} // Largeur personnalisée pour un meilleur positionnement
             currentPosition={
               currentPosition 
                 ? {
@@ -770,18 +771,27 @@ const Rogue: React.FC = () => {
                     longitude: 2.3522
                   }
             }
-            targetPoint={
-              gameDetails?.start_zone_rogue_latitude && gameDetails?.start_zone_rogue_longitude
-                ? {
+            targetPoints={[
+              // Zone de départ Rogue
+              ...(gameDetails?.start_zone_rogue_latitude && gameDetails?.start_zone_rogue_longitude
+                ? [{
                     latitude: parseFloat(gameDetails.start_zone_rogue_latitude),
-                    longitude: parseFloat(gameDetails.start_zone_rogue_longitude)
-                  }
-                : {
-                    latitude: 48.8584, // Tour Eiffel par défaut
-                    longitude: 2.2945
-                  }
-            }
-            showTargetArrow={true}
+                    longitude: parseFloat(gameDetails.start_zone_rogue_longitude),
+                    label: "Zone Rogue",
+                    color: "#00ff41"
+                  }]
+                : []),
+              // Objectifs visibles
+              ...objectiveProps
+                .filter(prop => prop.visible === true)
+                .map((prop, index) => ({
+                  latitude: parseFloat(prop.latitude || '0'),
+                  longitude: parseFloat(prop.longitude || '0'),
+                  label: `Objectif ${index + 1}`,
+                  color: "#ff6b6b"
+                }))
+            ]}
+            showTargetArrows={true}
           />
           {!currentPosition && (
             <div className="compass-debug-info">

@@ -1,17 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import './Compass.css';
 
 interface CompassProps {
-  targetPoint?: {
+  targetPoints?: Array<{
     latitude: number;
     longitude: number;
-  };
+    label?: string;
+    color?: string;
+  }>;
   currentPosition?: {
     latitude: number;
     longitude: number;
   };
   size?: 'small' | 'medium' | 'large';
-  showTargetArrow?: boolean;
+  width?: number; // Largeur personnalisée en pixels
+  showTargetArrows?: boolean;
   className?: string;
 }
 
@@ -28,15 +31,15 @@ interface DeviceOrientationData {
 }
 
 const Compass: React.FC<CompassProps> = ({
-  targetPoint,
+  targetPoints = [],
   currentPosition,
   size = 'medium',
-  showTargetArrow = true,
+  width,
+  showTargetArrows = true,
   className = ''
 }) => {
   const [deviceOrientation, setDeviceOrientation] = useState<DeviceOrientationData | null>(null);
   const [compassHeading, setCompassHeading] = useState<number>(0);
-  const [targetBearing, setTargetBearing] = useState<number | null>(null);
   const requestRef = useRef<number | undefined>(undefined);
 
   // Calculer le bearing vers la cible
@@ -70,18 +73,22 @@ const Compass: React.FC<CompassProps> = ({
     return heading;
   };
 
-  // Mettre à jour le bearing vers la cible
-  useEffect(() => {
-    if (targetPoint && currentPosition) {
-      const bearing = calculateBearing(
-        currentPosition.latitude,
-        currentPosition.longitude,
-        targetPoint.latitude,
-        targetPoint.longitude
-      );
-      setTargetBearing(bearing);
+  // Mémoriser les bearings vers les cibles pour éviter les recalculs inutiles
+  const targetBearings = useMemo(() => {
+    if (targetPoints.length > 0 && currentPosition) {
+      return targetPoints.map(point => ({
+        bearing: calculateBearing(
+          currentPosition.latitude,
+          currentPosition.longitude,
+          point.latitude,
+          point.longitude
+        ),
+        label: point.label,
+        color: point.color
+      }));
     }
-  }, [targetPoint, currentPosition]);
+    return [];
+  }, [targetPoints, currentPosition]);
 
   // Écouter l'orientation de l'appareil
   useEffect(() => {
@@ -121,11 +128,38 @@ const Compass: React.FC<CompassProps> = ({
     return `rotate(${compassHeading}deg)`;
   };
 
-  // Calculer la rotation de la flèche de la cible
-  const getTargetRotation = () => {
-    if (targetBearing === null) return 'rotate(0deg)';
-    const relativeBearing = (targetBearing - compassHeading + 360) % 360;
-    return `rotate(${relativeBearing}deg)`;
+  // Calculer la largeur effective de la boussole
+  const getCompassWidth = () => {
+    if (width) return width;
+    
+    switch (size) {
+      case 'small': return 80;
+      case 'medium': return 120;
+      case 'large': return 160;
+      default: return 120;
+    }
+  };
+
+  // Calculer le rayon de la boussole (moins la moitié de la largeur du point)
+  const getCompassRadius = () => {
+    const compassWidth = getCompassWidth();
+    return (compassWidth / 2) - 4; // 4px pour la moitié de la largeur du point (8px)
+  };
+
+  // Calculer la position d'un point sur le cercle
+  const getTargetPosition = (bearing: number) => {
+    const radius = getCompassRadius();
+    // Utiliser seulement le bearing absolu, pas la différence avec compassHeading
+    const angleInRadians = bearing * (Math.PI / 180);
+    
+    // Calculer les coordonnées x et y sur le cercle
+    const x = Math.sin(angleInRadians) * radius;
+    const y = -Math.cos(angleInRadians) * radius; // Négatif car l'axe Y pointe vers le bas en CSS
+    
+    return {
+      left: `calc(50% + ${x}px)`,
+      top: `calc(50% + ${y}px)`
+    };
   };
 
   return (
@@ -145,6 +179,34 @@ const Compass: React.FC<CompassProps> = ({
           <div className="cardinal east">E</div>
           <div className="cardinal south">S</div>
           <div className="cardinal west">W</div>
+        </div>
+
+        {/* Points de cible sur le cercle - TOURNENT avec les points cardinaux */}
+        <div 
+          className="compass-targets"
+          style={{ transform: `rotate(${-compassHeading}deg)` }}
+        >
+          {showTargetArrows && targetBearings.map((target, index) => {
+            const position = getTargetPosition(target.bearing);
+            return (
+              <div
+                key={index}
+                className="target-point"
+                style={{
+                  left: position.left,
+                  top: position.top,
+                  color: target.color || '#ff6b6b'
+                }}
+              >
+                <div className="target-dot"></div>
+                {target.label && (
+                  <div className="target-label" style={{ color: target.color || '#ff6b6b' }}>
+                    {target.label}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
