@@ -23,6 +23,7 @@ import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutli
 import './Rogue.css';
 import { GameProp, GameDetails, ObjectiveCircle } from '../components/Interfaces';
 import PopUpMarker from '../components/PopUpMarker';
+import Compass from '../components/Compass';
 import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
 import { useWakeLock } from '../utils/useWakeLock';
@@ -752,6 +753,42 @@ const Rogue: React.FC = () => {
           <p>Chargement des détails de la partie...</p>
         )}
 
+        {/* Composant de test de la boussole */}
+        {/* Boussole superposée sur la carte */}
+        {/* Boussole toujours visible */}
+        <div className="compass-overlay">
+          <Compass
+            size="small"
+            currentPosition={
+              currentPosition 
+                ? {
+                    latitude: currentPosition[0],
+                    longitude: currentPosition[1]
+                  }
+                : {
+                    latitude: 48.8566, // Paris par défaut
+                    longitude: 2.3522
+                  }
+            }
+            targetPoint={
+              gameDetails?.start_zone_rogue_latitude && gameDetails?.start_zone_rogue_longitude
+                ? {
+                    latitude: parseFloat(gameDetails.start_zone_rogue_latitude),
+                    longitude: parseFloat(gameDetails.start_zone_rogue_longitude)
+                  }
+                : {
+                    latitude: 48.8584, // Tour Eiffel par défaut
+                    longitude: 2.2945
+                  }
+            }
+            showTargetArrow={true}
+          />
+          {!currentPosition && (
+            <div className="compass-debug-info">
+              <small>🧭 Mode Test - Position en cours de chargement</small>
+            </div>
+          )}
+        </div>
 
         <div className="fab-container">
           <IonFabButton onClick={() => setIsFabOpen(!isFabOpen)}>
