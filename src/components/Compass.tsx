@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import './Compass.css';
+import { calculateDistance } from '../utils/utils';
 
 interface CompassProps {
   targetPoints?: Array<{
@@ -188,6 +189,15 @@ const Compass: React.FC<CompassProps> = ({
         >
           {showTargetArrows && targetBearings.map((target, index) => {
             const position = getTargetPosition(target.bearing);
+            // Calculer la distance si on a la position actuelle
+            const distance = currentPosition ? 
+              calculateDistance(
+                currentPosition.latitude,
+                currentPosition.longitude,
+                targetPoints[index].latitude,
+                targetPoints[index].longitude
+              ) : null;
+            
             return (
               <div
                 key={index}
@@ -207,7 +217,15 @@ const Compass: React.FC<CompassProps> = ({
                       transform: `rotate(${compassHeading}deg)` // Rotation inverse pour garder le label horizontal
                     }}
                   >
-                    {target.label}
+                    <div className="target-name">{target.label}</div>
+                    {distance !== null && (
+                      <div className="target-distance">
+                        {distance < 1000 ? 
+                          `${Math.round(distance)}m` : 
+                          `${(distance / 1000).toFixed(1)}km`
+                        }
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
