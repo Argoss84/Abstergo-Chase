@@ -200,7 +200,13 @@ const Compass: React.FC<CompassProps> = ({
               >
                 <div className="target-dot"></div>
                 {target.label && (
-                  <div className="target-label" style={{ color: target.color || '#ff6b6b' }}>
+                  <div 
+                    className="target-label" 
+                    style={{ 
+                      color: target.color || '#ff6b6b',
+                      transform: `rotate(${compassHeading}deg)` // Rotation inverse pour garder le label horizontal
+                    }}
+                  >
                     {target.label}
                   </div>
                 )}
