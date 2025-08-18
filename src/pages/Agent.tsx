@@ -688,6 +688,7 @@ const Agent: React.FC = () => {
         <div className="compass-overlay">
           <Compass
             size="small"
+            width={75} // Largeur personnalisée pour un meilleur positionnement
             currentPosition={
               currentPosition 
                 ? {
@@ -699,18 +700,27 @@ const Agent: React.FC = () => {
                     longitude: 2.3522
                   }
             }
-            targetPoint={
-              gameDetails?.start_zone_latitude && gameDetails?.start_zone_longitude
-                ? {
+            targetPoints={[
+              // Zone de départ Agent
+              ...(gameDetails?.start_zone_latitude && gameDetails?.start_zone_longitude
+                ? [{
                     latitude: parseFloat(gameDetails.start_zone_latitude),
-                    longitude: parseFloat(gameDetails.start_zone_longitude)
-                  }
-                : {
-                    latitude: 48.8584, // Tour Eiffel par défaut
-                    longitude: 2.2945
-                  }
-            }
-            showTargetArrow={true}
+                    longitude: parseFloat(gameDetails.start_zone_longitude),
+                    label: "Zone Agent",
+                    color: "#0066ff"
+                  }]
+                : []),
+              // Cercles d'objectifs (centres des cercles)
+              ...objectiveCircles
+                .filter(circle => circle.radius > 0)
+                .map((circle, index) => ({
+                  latitude: circle.center[0],
+                  longitude: circle.center[1],
+                  label: `Objectif ${index + 1}`,
+                  color: "#ff6b6b"
+                }))
+            ]}
+            showTargetArrows={true}
           />
           {!currentPosition && (
             <div className="compass-debug-info">
