@@ -181,30 +181,39 @@
 }
 
 .target-label {
-  font-size: 0.7em;
+  font-size: 0.6em;
   font-weight: bold;
-  text-shadow: 1px 1px 2px rgba(255, 255, 255, 0.8);
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
   background: rgba(255, 255, 255, 0.9);
-  padding: 2px 6px;
-  border-radius: 10px;
+  padding: 1px 4px;
+  border-radius: 4px;
   white-space: nowrap;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  border: none;
+  box-shadow: none;
   transform: rotate(0deg); /* Garde le label droit */
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   text-align: center;
+  gap: 2px;
 }
 
 .target-name {
   font-weight: bold;
-  margin-bottom: 1px;
+  text-shadow: none;
 }
 
 .target-distance {
-  font-size: 0.8em;
+  font-size: 0.9em;
   font-weight: normal;
   opacity: 0.8;
-  color: #666;
+  text-shadow: none;
 }
+
+.target-separator {
+  color: rgba(0, 0, 0, 0.3);
+  font-weight: normal;
+  margin: 0;
+}
+
+

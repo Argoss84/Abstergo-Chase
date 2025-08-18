@@ -219,12 +219,15 @@ const Compass: React.FC<CompassProps> = ({
                   >
                     <div className="target-name">{target.label}</div>
                     {distance !== null && (
-                      <div className="target-distance">
-                        {distance < 1000 ? 
-                          `${Math.round(distance)}m` : 
-                          `${(distance / 1000).toFixed(1)}km`
-                        }
-                      </div>
+                      <>
+                        <span className="target-separator">-</span>
+                        <div className="target-distance">
+                          {distance < 1000 ? 
+                            `${Math.round(distance)}m` : 
+                            `${(distance / 1000).toFixed(1)}km`
+                          }
+                        </div>
+                      </>
                     )}
                   </div>
                 )}
