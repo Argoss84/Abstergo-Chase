@@ -123,9 +123,10 @@
 }
 
 .compass-overlay .compass:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  transform: scale(3) translate(-35%, 35%);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.5);
   background: rgba(255, 255, 255, 1);
+  z-index: 1001;
 }
 
 /* Responsive pour la boussole sur mobile */
