@@ -1,10 +1,10 @@
-import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonModal, IonButtons, IonLabel } from '@ionic/react';
+import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonButtons, IonLabel } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Circle, Marker, useMap, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { QrReader } from 'react-qr-reader';
+
 import { toast } from 'react-toastify';
 import GameService from '../services/GameService';
 import { 
@@ -63,9 +63,7 @@ const Agent: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [objectiveCircles, setObjectiveCircles] = useState<ObjectiveCircle[]>([]);
   const [isFabOpen, setIsFabOpen] = useState(false);
-  const [isQRModalOpen, setIsQRModalOpen] = useState(false);
-  const [scannedQRCode, setScannedQRCode] = useState<string | null>(null);
-  const [cameraError, setCameraError] = useState<string | null>(null);
+
   const [routePath, setRoutePath] = useState<[number, number][]>([]);
   const [distanceToStartZone, setDistanceToStartZone] = useState<number | null>(null);
   
@@ -143,46 +141,16 @@ const Agent: React.FC = () => {
   };
 
   const handleThreatDetection = async () => {
-    console.log('Scanner QR Code activé');
+    console.log('Détection de menaces activée');
     
-    // Vérifier si la caméra est disponible
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(device => device.kind === 'videoinput');
-      
-      if (videoDevices.length === 0) {
-        setCameraError('Aucune caméra détectée sur cet appareil');
-        setIsQRModalOpen(true);
-        return;
-      }
-      
-      // Vérifier les permissions de caméra
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      stream.getTracks().forEach(track => track.stop()); // Arrêter le stream de test
-      
-      setCameraError(null);
-      setIsQRModalOpen(true);
-    } catch (error) {
-      console.error('Erreur d\'accès à la caméra:', error);
-      setCameraError('Impossible d\'accéder à la caméra. Vérifiez les permissions.');
-      setIsQRModalOpen(true);
-    }
+    // Fonctionnalité temporairement désactivée
+    toast.info('🔍 Détection de menaces - Fonctionnalité en développement');
     vibrate(patterns.short);
   };
 
-  const handleQRCodeScanned = (result: string) => {
-    setScannedQRCode(result);
-    console.log('QR Code scanné:', result);
-    // Ici vous pouvez ajouter la logique pour traiter le QR code scanné
-    toast.success(`🎯 QR Code détecté: ${result}`);
-    setIsQRModalOpen(false);
-  };
 
-  const closeQRModal = () => {
-    setIsQRModalOpen(false);
-    setScannedQRCode(null);
-    setCameraError(null);
-  };
+
+
 
   // Handler pour la fin de partie
   const handleGameEnd = async () => {
@@ -766,59 +734,7 @@ const Agent: React.FC = () => {
           </div>
         </div>
 
-        {/* Modal QR Code Scanner */}
-        <IonModal isOpen={isQRModalOpen} onDidDismiss={closeQRModal}>
-          <IonHeader>
-            <IonToolbar>
-              <IonTitle>Scanner QR Code</IonTitle>
-              <IonButtons slot="end">
-                <IonButton onClick={closeQRModal}>Fermer</IonButton>
-              </IonButtons>
-            </IonToolbar>
-          </IonHeader>
-          <IonContent className="ion-padding">
-            <div className="qr-modal-content">
-              {cameraError ? (
-                // Affichage de l'erreur de caméra
-                <div className="qr-error-container">
-                  <div className="qr-error-content">
-                    <div className="qr-error-icon">📷</div>
-                    <strong>Erreur Caméra</strong><br/>
-                    {cameraError}
-                  </div>
-                </div>
-              ) : (
-                // Scanner QR normal
-                <div className="qr-scanner-container">
-                  <div className="qr-scanner-wrapper">
-                    <QrReader
-                      constraints={{ facingMode: 'environment' }}
-                      onResult={(result: any, error: any) => {
-                        if (error) {
-                          return;
-                        }
-                        if (result) {
-                          handleQRCodeScanned(result?.text);
-                        }
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-              
-              <p>{cameraError ? 'Impossible d\'accéder au scanner QR' : 'Placez le QR code dans la zone de scan'}</p>
-              
-              <IonButton 
-                expand="block" 
-                onClick={closeQRModal}
-                className="qr-modal-button"
-                color="medium"
-              >
-                {cameraError ? 'Fermer' : 'Annuler'}
-              </IonButton>
-            </div>
-          </IonContent>
-        </IonModal>
+
       </IonContent>
     </IonPage>
   );
