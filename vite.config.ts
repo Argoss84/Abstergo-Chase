@@ -11,12 +11,7 @@ export default defineConfig({
     legacy()
   ],
   server: {
-    headers: {
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0'
-    },
-    allowedHosts: ['momotech.wtf'] // Ajout de l'hôte autorisé
+    allowedHosts: ['all'] // Ajout de l'hôte autorisé
   },
   test: {
     globals: true,
