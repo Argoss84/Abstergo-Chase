@@ -15,11 +15,17 @@ export default defineConfig({
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Pragma': 'no-cache',
       'Expires': '0'
-    }
+    },
+    allowedHosts: ['momotech.wtf'] // Ajout de l'hôte autorisé
   },
   test: {
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/setupTests.ts',
+  },
+  resolve: {
+    alias: {
+      // Ajout d'alias si nécessaire
+    }
   }
 })
