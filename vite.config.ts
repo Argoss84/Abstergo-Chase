@@ -11,7 +11,7 @@ export default defineConfig({
     legacy()
   ],
   server: {
-    allowedHosts: ['all'] // Ajout de l'hôte autorisé
+    allowedHosts: ['momotech.wtf'] // Ajout de l'hôte autorisé
   },
   test: {
     globals: true,
