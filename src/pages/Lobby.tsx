@@ -695,6 +695,10 @@ const Lobby: React.FC = () => {
                           <IonSelect
                             value={player.role || ''}
                             placeholder="Sélectionner un rôle"
+                            interface="popover"
+                            interfaceOptions={{
+                              showBackdrop: false
+                            }}
                             onIonChange={(e) => {
                               const newRole = e.detail.value || null;
                               setPlayers(prev => prev.map(p => 
