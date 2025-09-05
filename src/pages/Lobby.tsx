@@ -17,6 +17,8 @@ import {
     IonButtons,
     IonAvatar,
     IonToggle,
+    IonSelect,
+    IonSelectOption,
 } from '@ionic/react';
 import { useEffect, useState, useRef } from 'react';
 import { useLocation, useHistory } from 'react-router-dom';
@@ -138,8 +140,8 @@ const Lobby: React.FC = () => {
                 return;
               }
 
-              // Déterminer le rôle en fonction du nombre de joueurs
-              const role = initialPlayers?.length === 0 ? 'AGENT' : 'ROGUE';
+              // Les joueurs entrent sans rôle assigné par défaut
+              const role = null;
               
               // Le premier joueur devient automatiquement admin
               const isAdmin = initialPlayers?.length === 0; 
@@ -418,7 +420,7 @@ const Lobby: React.FC = () => {
     fetchGameDetails();
   }, [location.search, userEmail, session?.user?.id]);
 
-  const handleRoleChange = async (playerId: number, newRole: string) => {
+  const handleRoleChange = async (playerId: number, newRole: string | null) => {
     try {
       const gameService = new GameService();
       
@@ -433,6 +435,7 @@ const Lobby: React.FC = () => {
   const checkRoleRequirements = () => {
     const currentAgents = players.filter(p => p.role === 'AGENT').length;
     const currentRogues = players.filter(p => p.role === 'ROGUE').length;
+    const playersWithoutRole = players.filter(p => !p.role).length;
     
     // Le minimum est toujours 1, le maximum est défini dans les paramètres de la partie
     const minAgents = 1;
@@ -445,6 +448,7 @@ const Lobby: React.FC = () => {
       roguesMet: currentRogues >= minRogues && currentRogues <= maxRogues,
       currentAgents,
       currentRogues,
+      playersWithoutRole,
       minAgents,
       minRogues,
       maxAgents,
@@ -661,7 +665,7 @@ const Lobby: React.FC = () => {
                         <div style={{
                           width: '100%',
                           height: '100%',
-                          backgroundColor: player.role === 'AGENT' ? '#3880ff' : '#ff4961',
+                          backgroundColor: player.role === 'AGENT' ? '#3880ff' : player.role === 'ROGUE' ? '#ff4961' : '#6c757d',
                           borderRadius: '50%',
                           display: 'flex',
                           alignItems: 'center',
@@ -669,7 +673,7 @@ const Lobby: React.FC = () => {
                           color: 'white',
                           fontWeight: 'bold'
                         }}>
-                          {player.role === 'AGENT' ? 'A' : 'R'}
+                          {player.role === 'AGENT' ? 'A' : player.role === 'ROGUE' ? 'R' : '?'}
                         </div>
                       </IonAvatar>
                       <IonLabel>
@@ -686,21 +690,13 @@ const Lobby: React.FC = () => {
                             </span>
                           )}
                         </h2>
-                        <p>{player.role}</p>
-                      </IonLabel>
-                      {/* Contrôles de rôle visibles uniquement pour l'admin */}
-                      {players.find(p => p.users?.email === userEmail)?.is_admin && (
-                        <div style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px'
-                        }}>
-                          <span style={{ color: '#3880ff' }}>Agent</span>
-                          <IonToggle
-                            checked={player.role === 'ROGUE'}
+                        {/* Contrôles de rôle visibles uniquement pour l'admin */}
+                        {players.find(p => p.users?.email === userEmail)?.is_admin && (
+                          <IonSelect
+                            value={player.role || ''}
+                            placeholder="Sélectionner un rôle"
                             onIonChange={(e) => {
-                              const newRole = e.detail.checked ? 'ROGUE' : 'AGENT';
-                              // Mise à jour immédiate de l'état local
+                              const newRole = e.detail.value || null;
                               setPlayers(prev => prev.map(p => 
                                 p.id_player === player.id_player 
                                   ? { ...p, role: newRole }
@@ -708,11 +704,14 @@ const Lobby: React.FC = () => {
                               ));
                               handleRoleChange(player.id_player, newRole);
                             }}
-                            color="danger"
-                          />
-                          <span style={{ color: '#ff4961' }}>Rogue</span>
-                        </div>
-                      )}
+                            style={{ marginTop: '8px' }}
+                          >
+                            <IonSelectOption value="AGENT">Agent</IonSelectOption>
+                            <IonSelectOption value="ROGUE">Rogue</IonSelectOption>
+                            <IonSelectOption value="">Aucun rôle</IonSelectOption>
+                          </IonSelect>
+                        )}
+                      </IonLabel>
                     </IonItem>
                   ))}
                 </IonList>
@@ -733,21 +732,34 @@ const Lobby: React.FC = () => {
                         <div style={{ 
                           display: 'flex', 
                           alignItems: 'center', 
-                          gap: '8px',
-                          marginBottom: '8px',
+                          gap: '4px',
+                          marginBottom: '4px',
+                          fontSize: '14px',
                           color: requirements.agentsMet ? '#28a745' : '#dc3545'
                         }}>
                           <span>{requirements.agentsMet ? '✅' : '❌'}</span>
-                          <span>Agents: {requirements.currentAgents} (min: {requirements.minAgents}, max: {requirements.maxAgents})</span>
+                          <span>A: {requirements.currentAgents}/{requirements.minAgents}-{requirements.maxAgents}</span>
                         </div>
                         <div style={{ 
                           display: 'flex', 
                           alignItems: 'center', 
-                          gap: '8px',
+                          gap: '4px',
+                          marginBottom: '4px',
+                          fontSize: '14px',
                           color: requirements.roguesMet ? '#28a745' : '#dc3545'
                         }}>
                           <span>{requirements.roguesMet ? '✅' : '❌'}</span>
-                          <span>Rogues: {requirements.currentRogues} (min: {requirements.minRogues}, max: {requirements.maxRogues})</span>
+                          <span>R: {requirements.currentRogues}/{requirements.minRogues}-{requirements.maxRogues}</span>
+                        </div>
+                        <div style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: '4px',
+                          fontSize: '14px',
+                          color: '#6c757d'
+                        }}>
+                          <span>ℹ️</span>
+                          <span>Sans rôle: {requirements.playersWithoutRole}</span>
                         </div>
                       </div>
                     );
