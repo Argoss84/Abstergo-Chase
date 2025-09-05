@@ -742,7 +742,7 @@ const Lobby: React.FC = () => {
                           color: requirements.agentsMet ? '#28a745' : '#dc3545'
                         }}>
                           <span>{requirements.agentsMet ? '✅' : '❌'}</span>
-                          <span>A: {requirements.currentAgents}/{requirements.minAgents}-{requirements.maxAgents}</span>
+                          <span>Agents: {requirements.currentAgents}/{requirements.minAgents}-{requirements.maxAgents}</span>
                         </div>
                         <div style={{ 
                           display: 'flex', 
@@ -753,7 +753,7 @@ const Lobby: React.FC = () => {
                           color: requirements.roguesMet ? '#28a745' : '#dc3545'
                         }}>
                           <span>{requirements.roguesMet ? '✅' : '❌'}</span>
-                          <span>R: {requirements.currentRogues}/{requirements.minRogues}-{requirements.maxRogues}</span>
+                          <span>Rogues: {requirements.currentRogues}/{requirements.minRogues}-{requirements.maxRogues}</span>
                         </div>
                         <div style={{ 
                           display: 'flex', 
