@@ -22,6 +22,11 @@ import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
   const JoinLobby: React.FC = () => {
     const history = useHistory();
     const [gameCode, setGameCode] = useState('');
+
+    const handleInputChange = (e: CustomEvent) => {
+      const value = e.detail.value || '';
+      setGameCode(value.toUpperCase());
+    };
   
       const handleJoinGame = async () => {
     if (!gameCode.trim()) {
@@ -66,28 +71,20 @@ import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
                 <IonLabel position="stacked">Code de la partie</IonLabel>
                 <IonInput
                   value={gameCode}
-                  onIonChange={e => setGameCode(e.detail.value!)}
+                  onIonInput={handleInputChange}
                   placeholder="Entrez le code de la partie"
+                  maxlength={8}
                 />
               </IonItem>
               
               <IonButton 
                 expand="block" 
                 onClick={handleJoinGame}
-                disabled={!gameCode.trim()}
+                disabled={gameCode.length !== 8}
                 className="ion-margin-top"
               >
                 Rejoindre la partie
               </IonButton>
-
-              <div className="ion-margin-top">
-                <IonButton expand="block" onClick={() => history.push('/rogue')}>
-                  Rogue
-                </IonButton>
-                <IonButton expand="block" onClick={() => history.push('/agent')}>
-                  Agent
-                </IonButton>
-              </div>
             </IonCardContent>
           </IonCard>
   
