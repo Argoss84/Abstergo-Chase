@@ -119,10 +119,10 @@ const Lobby: React.FC = () => {
           }
           
           // Vérifier si l'utilisateur est déjà dans la partie
-          const isUserInGame = initialPlayers?.some(player => player.users.email === userEmail);
+          const isUserInGame = initialPlayers?.some(player => player.users?.email === userEmail);
           
           // Vérifier aussi dans les joueurs actuels pour éviter les doublons
-          const isUserAlreadyInCurrentPlayers = players.some(player => player.users.email === userEmail);
+          const isUserAlreadyInCurrentPlayers = players.some(player => player.users?.email === userEmail);
           
           // Si l'utilisateur n'est pas dans la partie, l'ajouter
           if (!isUserInGame && !isUserAlreadyInCurrentPlayers && userEmail && session?.user?.id && !isJoiningRef.current) {
@@ -181,47 +181,6 @@ const Lobby: React.FC = () => {
             }
           }
 
-          // Subscribe to player changes
-          const playerChangesChannel = gameService.subscribeToPlayerChanges(
-            game[0].id_game.toString(),
-            (payload) => {
-              console.log('Player change event received:', payload);
-              if (payload.eventType === 'INSERT') {
-                console.log('INSERT event - adding new player:', payload.new);
-                setPlayers(prev => {
-                  const newPlayers = [...prev, payload.new];
-                  playersRef.current = newPlayers;
-                  
-                  // Vibration courte pour indiquer qu'un joueur a rejoint
-                  vibrate(patterns.short);
-                  
-                  return newPlayers;
-                });
-              } else if (payload.eventType === 'UPDATE') {
-                console.log('UPDATE event - updating player:', payload.new);
-                setPlayers(prev => {
-                  const newPlayers = prev.map(p => 
-                    p.id_player === payload.new.id_player ? payload.new : p
-                  );
-                  playersRef.current = newPlayers;
-                  return newPlayers;
-                });
-              }
-            }
-          );
-
-          // Subscribe to player deletions
-          const playerDeleteChannel = gameService.subscribeToPlayerDelete(
-            game[0].id_game.toString(),
-            (payload) => {
-              setPlayers(prev => {
-                const newPlayers = prev.filter(p => p.id_player !== payload.old.id_player);
-                playersRef.current = newPlayers;
-                return newPlayers;
-              });
-            }
-          );
-
           // Subscribe to game changes with improved handling
           const gameChangesChannel = gameService.subscribeToGameDataChanges(
             game[0].code,
@@ -234,7 +193,7 @@ const Lobby: React.FC = () => {
                   // Check if the game has started (is_converging_phase is true)
                   if (payload.new.is_converging_phase === true) {
                     // Find the current player's role using the ref
-                    const currentPlayer = playersRef.current.find(p => p.users.email === userEmail);
+                    const currentPlayer = playersRef.current.find(p => p.users?.email === userEmail);
                     if (currentPlayer) {
                       // Redirect based on role
                       const gameCode = payload.new.code;
@@ -299,11 +258,154 @@ const Lobby: React.FC = () => {
              }
           }
 
+          // Attendre que la page soit complètement chargée avant de créer les abonnements
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Créer les abonnements aux joueurs à la fin du chargement
+          console.log('🚀 Setting up player subscriptions for game:', game[0].id_game);
+          const playerChangesChannel = gameService.subscribeToPlayerChanges(
+            game[0].id_game.toString(),
+            (payload) => {
+              console.log('🔔 Player change event received:', {
+                eventType: payload.eventType,
+                timestamp: new Date().toISOString(),
+                gameId: game[0].id_game,
+                payload: payload
+              });
+              
+              if (payload.eventType === 'INSERT') {
+                console.log('➕ INSERT event - adding new player:', {
+                  newPlayer: payload.new,
+                  currentPlayersCount: players.length,
+                  newPlayersCount: players.length + 1
+                });
+                
+                // Récupérer les données utilisateur complètes pour le nouveau joueur
+                const fetchPlayerWithUser = async () => {
+                  try {
+                    const gameService = new GameService();
+                    const playerWithUser = await gameService.getPlayerByIdWithUser(payload.new.id_player.toString());
+                    
+                    if (playerWithUser && playerWithUser[0]) {
+                      setPlayers(prev => {
+                        // Vérifier si le joueur n'est pas déjà présent pour éviter les doublons
+                        const isPlayerAlreadyPresent = prev.some(p => p.id_player === playerWithUser[0].id_player);
+                        
+                        if (!isPlayerAlreadyPresent) {
+                          const newPlayers = [...prev, playerWithUser[0]];
+                          playersRef.current = newPlayers;
+                          
+                          console.log('✅ Player added successfully with user data. New players list:', newPlayers);
+                          
+                          // Vibration courte pour indiquer qu'un joueur a rejoint
+                          vibrate(patterns.short);
+                          
+                          return newPlayers;
+                        } else {
+                          console.log('⚠️ Player already present, skipping duplicate:', playerWithUser[0]);
+                          return prev;
+                        }
+                      });
+                    } else {
+                      console.log('⚠️ No player data found for ID:', payload.new.id_player);
+                    }
+                  } catch (error) {
+                    console.error('❌ Error fetching player user data:', error);
+                  }
+                };
+                
+                fetchPlayerWithUser();
+              } else if (payload.eventType === 'UPDATE') {
+                console.log('🔄 UPDATE event - updating player:', {
+                  updatedPlayer: payload.new,
+                  playerId: payload.new.id_player,
+                  previousPlayersCount: players.length
+                });
+                
+                // Récupérer les données utilisateur complètes pour la mise à jour
+                const updatePlayerWithUser = async () => {
+                  try {
+                    const gameService = new GameService();
+                    const playerWithUser = await gameService.getPlayerByIdWithUser(payload.new.id_player.toString());
+                    
+                    if (playerWithUser && playerWithUser[0]) {
+                      setPlayers(prev => {
+                        const newPlayers = prev.map(p => 
+                          p.id_player === payload.new.id_player ? playerWithUser[0] : p
+                        );
+                        playersRef.current = newPlayers;
+                        
+                        console.log('✅ Player updated successfully with user data. Updated players list:', newPlayers);
+                        
+                        return newPlayers;
+                      });
+                    } else {
+                      // Fallback si la récupération échoue
+                      setPlayers(prev => {
+                        const newPlayers = prev.map(p => 
+                          p.id_player === payload.new.id_player ? payload.new : p
+                        );
+                        playersRef.current = newPlayers;
+                        
+                        console.log('⚠️ Player updated without user data. Updated players list:', newPlayers);
+                        
+                        return newPlayers;
+                      });
+                    }
+                  } catch (error) {
+                    console.error('❌ Error fetching updated player user data:', error);
+                    // Fallback en cas d'erreur
+                    setPlayers(prev => {
+                      const newPlayers = prev.map(p => 
+                        p.id_player === payload.new.id_player ? payload.new : p
+                      );
+                      playersRef.current = newPlayers;
+                      
+                      console.log('⚠️ Player updated without user data (error fallback). Updated players list:', newPlayers);
+                      
+                      return newPlayers;
+                    });
+                  }
+                };
+                
+                updatePlayerWithUser();
+              } else {
+                console.log('❓ Unknown event type:', payload.eventType);
+              }
+            }
+          );
+
+          // Subscribe to player deletions
+          const playerDeleteChannel = gameService.subscribeToPlayerDelete(
+            game[0].id_game.toString(),
+            (payload) => {
+              console.log('🗑️ Player DELETE event received:', {
+                eventType: payload.eventType,
+                timestamp: new Date().toISOString(),
+                gameId: game[0].id_game,
+                deletedPlayer: payload.old,
+                playerId: payload.old.id_player,
+                currentPlayersCount: players.length
+              });
+              
+              setPlayers(prev => {
+                const newPlayers = prev.filter(p => p.id_player !== payload.old.id_player);
+                playersRef.current = newPlayers;
+                
+                console.log('✅ Player deleted successfully. Remaining players list:', newPlayers);
+                
+                return newPlayers;
+              });
+            }
+          );
+
           // Cleanup subscriptions
           return () => {
+            console.log('🧹 Cleaning up subscriptions for game:', game[0].id_game);
             playerChangesChannel.unsubscribe();
             playerDeleteChannel.unsubscribe();
             gameChangesChannel.unsubscribe();
+            console.log('✅ All subscriptions cleaned up');
           };
         } else {
           await handleErrorWithUser('Partie non trouvée', null, ERROR_CONTEXTS.LOBBY_INIT);
@@ -320,29 +422,76 @@ const Lobby: React.FC = () => {
     try {
       const gameService = new GameService();
       
-      // Compter le nombre actuel de joueurs par rôle
-      const currentAgents = players.filter(p => p.role === 'AGENT').length;
-      const currentRogues = players.filter(p => p.role === 'ROGUE').length;
-      
-      // Vérifier si le changement est possible
-      if (newRole === 'AGENT' && currentAgents >= (gameDetails?.max_agents || 1)) {
-        await handleErrorWithUser('Nombre maximum d\'agents atteint', null, ERROR_CONTEXTS.ROLE_CHANGE);
-        return;
-      }
-      if (newRole === 'ROGUE' && currentRogues >= (gameDetails?.max_rogue || 1)) {
-        await handleErrorWithUser('Nombre maximum de rogues atteint', null, ERROR_CONTEXTS.ROLE_CHANGE);
-        return;
-      }
-
-      // Mettre à jour le rôle
+      // Mettre à jour le rôle sans vérification de limite
       await gameService.updatePlayer(playerId.toString(), { role: newRole });
     } catch (err) {
       await handleErrorWithUser('Erreur lors du changement de rôle', err, ERROR_CONTEXTS.ROLE_CHANGE);
     }
   };
 
+  // Fonction pour vérifier si les prérequis de rôles sont remplis
+  const checkRoleRequirements = () => {
+    const currentAgents = players.filter(p => p.role === 'AGENT').length;
+    const currentRogues = players.filter(p => p.role === 'ROGUE').length;
+    
+    // Le minimum est toujours 1, le maximum est défini dans les paramètres de la partie
+    const minAgents = 1;
+    const minRogues = 1;
+    const maxAgents = gameDetails?.max_agents || 1;
+    const maxRogues = gameDetails?.max_rogue || 1;
+    
+    return {
+      agentsMet: currentAgents >= minAgents && currentAgents <= maxAgents,
+      roguesMet: currentRogues >= minRogues && currentRogues <= maxRogues,
+      currentAgents,
+      currentRogues,
+      minAgents,
+      minRogues,
+      maxAgents,
+      maxRogues
+    };
+  };
+
   const handleStartGame = async () => {
     try {
+      // Vérifier les prérequis de rôles avant de démarrer
+      const requirements = checkRoleRequirements();
+      
+      // Vérifier si les prérequis sont remplis
+      if (!requirements.agentsMet) {
+        if (requirements.currentAgents < requirements.minAgents) {
+          await handleErrorWithUser(
+            `Nombre d'agents insuffisant. Minimum requis: ${requirements.minAgents}, Actuel: ${requirements.currentAgents}`, 
+            null, 
+            ERROR_CONTEXTS.GAME_START
+          );
+        } else if (requirements.currentAgents > requirements.maxAgents) {
+          await handleErrorWithUser(
+            `Nombre d'agents trop élevé. Maximum autorisé: ${requirements.maxAgents}, Actuel: ${requirements.currentAgents}`, 
+            null, 
+            ERROR_CONTEXTS.GAME_START
+          );
+        }
+        return;
+      }
+      
+      if (!requirements.roguesMet) {
+        if (requirements.currentRogues < requirements.minRogues) {
+          await handleErrorWithUser(
+            `Nombre de rogues insuffisant. Minimum requis: ${requirements.minRogues}, Actuel: ${requirements.currentRogues}`, 
+            null, 
+            ERROR_CONTEXTS.GAME_START
+          );
+        } else if (requirements.currentRogues > requirements.maxRogues) {
+          await handleErrorWithUser(
+            `Nombre de rogues trop élevé. Maximum autorisé: ${requirements.maxRogues}, Actuel: ${requirements.currentRogues}`, 
+            null, 
+            ERROR_CONTEXTS.GAME_START
+          );
+        }
+        return;
+      }
+
       const gameService = new GameService();
       await gameService.updateGameByCode(gameDetails!.code, {
         is_converging_phase: true
@@ -399,7 +548,7 @@ const Lobby: React.FC = () => {
                     expand="block" 
                     color="success"
                     onClick={() => {
-                      const currentPlayer = players.find(p => p.users.email === userEmail);
+                      const currentPlayer = players.find(p => p.users?.email === userEmail);
                       if (currentPlayer) {
                         if (currentPlayer.role === 'AGENT') {
                           history.push(`/agent?code=${gameDetails.code}`);
@@ -525,7 +674,7 @@ const Lobby: React.FC = () => {
                       </IonAvatar>
                       <IonLabel>
                         <h2>
-                          {player.users.email}
+                          {player.users?.email || 'Utilisateur inconnu'}
                           {player.is_admin && (
                             <span style={{ 
                               color: '#ff6b35', 
@@ -539,7 +688,8 @@ const Lobby: React.FC = () => {
                         </h2>
                         <p>{player.role}</p>
                       </IonLabel>
-                      {player.users.email === userEmail && (
+                      {/* Contrôles de rôle visibles uniquement pour l'admin */}
+                      {players.find(p => p.users?.email === userEmail)?.is_admin && (
                         <div style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -569,13 +719,51 @@ const Lobby: React.FC = () => {
               </IonCardContent>
             </IonCard>
 
+            {/* Indicateur des prérequis de rôles */}
+            {players.find(player => player.users?.email === userEmail)?.is_admin && (
+              <IonCard style={{ margin: '1rem' }}>
+                <IonCardHeader>
+                  <IonCardTitle>Prérequis pour démarrer</IonCardTitle>
+                </IonCardHeader>
+                <IonCardContent>
+                  {(() => {
+                    const requirements = checkRoleRequirements();
+                    return (
+                      <div>
+                        <div style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: '8px',
+                          marginBottom: '8px',
+                          color: requirements.agentsMet ? '#28a745' : '#dc3545'
+                        }}>
+                          <span>{requirements.agentsMet ? '✅' : '❌'}</span>
+                          <span>Agents: {requirements.currentAgents} (min: {requirements.minAgents}, max: {requirements.maxAgents})</span>
+                        </div>
+                        <div style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: '8px',
+                          color: requirements.roguesMet ? '#28a745' : '#dc3545'
+                        }}>
+                          <span>{requirements.roguesMet ? '✅' : '❌'}</span>
+                          <span>Rogues: {requirements.currentRogues} (min: {requirements.minRogues}, max: {requirements.maxRogues})</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </IonCardContent>
+              </IonCard>
+            )}
+
             {/* Bouton Démarrer visible uniquement pour l'admin */}
-            {players.find(player => player.users.email === userEmail)?.is_admin && (
+            {players.find(player => player.users?.email === userEmail)?.is_admin && (
               <IonButton 
                 expand="block" 
                 color="success"
                 onClick={handleStartGame}
                 className="ion-margin-bottom"
+                disabled={!checkRoleRequirements().agentsMet || !checkRoleRequirements().roguesMet}
               >
                 🚀 Démarrer la partie
               </IonButton>

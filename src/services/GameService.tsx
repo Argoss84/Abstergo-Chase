@@ -130,6 +130,20 @@ class GameService {
         if (error) throw error;
         return data;
       }
+
+      async getPlayerByIdWithUser(id_player: string) {
+        const { data, error } = await supabaseClient
+          .from('players')
+          .select(`
+            *,
+            users (
+              *
+            )
+          `)
+          .eq('id_player', id_player);
+        if (error) throw error;
+        return data;
+      }
   
   
       async getPlayersByGameId(id_game: string) {
@@ -181,24 +195,57 @@ class GameService {
 
       // méthodes temps réel 
       subscribeToPlayerChanges(id_game : string, callback:(payload : any) => void){
+        console.log('🔗 Creating subscription to player changes for game:', id_game);
         const channel = supabaseClient.channel(`player-changes-${id_game}`)
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'players', filter: `id_game=eq.${id_game}` },
-          callback
+          (payload) => {
+            console.log('📡 Supabase player change event received:', {
+              channel: `player-changes-${id_game}`,
+              event: payload.eventType,
+              table: payload.table,
+              schema: payload.schema,
+              filter: `id_game=eq.${id_game}`,
+              payload: payload
+            });
+            callback(payload);
+          }
         )
-        .subscribe();
+        .subscribe((status) => {
+          console.log('📡 Player changes subscription status:', {
+            channel: `player-changes-${id_game}`,
+            status: status,
+            gameId: id_game
+          });
+        });
       return channel;
       }
     
       subscribeToPlayerDelete(id_game : string, callback:(payload : any) => void){
+        console.log('🔗 Creating subscription to player deletions for game:', id_game);
         const channel = supabaseClient.channel(`player-delete-${id_game}`)
         .on(
           'postgres_changes',
           { event: 'DELETE', schema: 'public', table: 'players' },
-          callback
+          (payload) => {
+            console.log('📡 Supabase player DELETE event received:', {
+              channel: `player-delete-${id_game}`,
+              event: payload.eventType,
+              table: payload.table,
+              schema: payload.schema,
+              payload: payload
+            });
+            callback(payload);
+          }
         )
-        .subscribe();
+        .subscribe((status) => {
+          console.log('📡 Player delete subscription status:', {
+            channel: `player-delete-${id_game}`,
+            status: status,
+            gameId: id_game
+          });
+        });
       return channel;
       }
       
