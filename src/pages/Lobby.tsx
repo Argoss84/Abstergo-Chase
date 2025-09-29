@@ -33,6 +33,7 @@ import { useWakeLock } from '../utils/useWakeLock';
 import { useVibration } from '../hooks/useVibration';
 import { LogService } from '../services/LogService';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
+import Loading from '../components/Loading';
 
 // Interface étendue pour Player avec les informations utilisateur
 interface PlayerWithUser extends Player {
@@ -62,14 +63,71 @@ const Lobby: React.FC = () => {
   const [streets, setStreets] = useState<L.LatLngTuple[][]>([]);
   const [mapKey, setMapKey] = useState(0);
   const [players, setPlayers] = useState<PlayerWithUser[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [loadingMessage, setLoadingMessage] = useState("Chargement de la partie...");
   const playersRef = useRef<PlayerWithUser[]>([]);
   const isJoiningRef = useRef(false);
+  
+  // Refs pour stocker les channels et gérer les reconnexions
+  const playerChangesChannelRef = useRef<any>(null);
+  const playerDeleteChannelRef = useRef<any>(null);
+  const gameChangesChannelRef = useRef<any>(null);
+  const reconnectTimeoutsRef = useRef<{ [key: string]: NodeJS.Timeout }>({});
+  const maxRetries = 5;
+  const baseRetryDelay = 1000; // 1 seconde
 
   // Wake Lock pour empêcher l'écran de se mettre en veille
   const { releaseWakeLock } = useWakeLock(true);
 
   // Hook pour la vibration
   const { vibrate, patterns } = useVibration();
+
+  // Fonction utilitaire pour créer un abonnement avec reconnexion automatique
+  const createSubscriptionWithRetry = async (
+    subscriptionKey: string,
+    createSubscription: () => any,
+    retryCount: number = 0
+  ): Promise<any> => {
+    try {
+      const channel = createSubscription();
+      
+      // Attendre un peu pour vérifier si la connexion est établie
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      return channel;
+      
+    } catch (error) {
+      if (retryCount < maxRetries - 1) {
+        const delay = baseRetryDelay * Math.pow(2, retryCount); // Backoff exponentiel
+        
+        return new Promise((resolve) => {
+          const timeoutId = setTimeout(async () => {
+            const newChannel = await createSubscriptionWithRetry(subscriptionKey, createSubscription, retryCount + 1);
+            resolve(newChannel);
+          }, delay);
+          
+          // Stocker le timeout pour pouvoir l'annuler si nécessaire
+          reconnectTimeoutsRef.current[subscriptionKey] = timeoutId;
+        });
+      } else {
+        await handleErrorWithUser(
+          `Impossible de se connecter au service temps réel (${subscriptionKey})`, 
+          error, 
+          'SUBSCRIPTION_ERROR'
+        );
+        throw error;
+      }
+    }
+  };
+
+  // Fonction pour nettoyer les timeouts de reconnexion
+  const clearReconnectTimeouts = () => {
+    Object.values(reconnectTimeoutsRef.current).forEach(timeout => {
+      if (timeout) clearTimeout(timeout);
+    });
+    reconnectTimeoutsRef.current = {};
+  };
 
 
 
@@ -98,20 +156,31 @@ const Lobby: React.FC = () => {
   useEffect(() => {
     const fetchGameDetails = async () => {
       try {
+        setIsLoading(true);
+        setLoadingProgress(10);
+        setLoadingMessage("Récupération du code de partie...");
+        
         const params = new URLSearchParams(location.search);
         const code = params.get('code');
         
         if (!code) {
           await handleErrorWithUser('Code de partie non trouvé', null, ERROR_CONTEXTS.LOBBY_INIT);
+          setIsLoading(false);
           return;
         }
 
+        setLoadingProgress(20);
+        setLoadingMessage("Chargement des données de la partie...");
+        
         const gameService = new GameService();
         const game = await gameService.getGameDatasByCode(code);
         
         if (game && game[0]) {
           setGameDetails(game[0]);
           setObjectives(game[0].props || []);
+          
+          setLoadingProgress(40);
+          setLoadingMessage("Chargement des joueurs...");
           
           // Fetch initial players
           const initialPlayers = await gameService.getPlayersByGameId(game[0].id_game.toString());
@@ -130,6 +199,8 @@ const Lobby: React.FC = () => {
           if (!isUserInGame && !isUserAlreadyInCurrentPlayers && userEmail && session?.user?.id && !isJoiningRef.current) {
             isJoiningRef.current = true; // Marquer que nous sommes en train de rejoindre
             
+            setLoadingProgress(60);
+            setLoadingMessage("Ajout du joueur à la partie...");
             
             try {
               // Récupérer l'ID de l'utilisateur
@@ -169,7 +240,6 @@ const Lobby: React.FC = () => {
               // Rafraîchir la liste des joueurs après la création
               const updatedPlayers = await gameService.getPlayersByGameId(game[0].id_game.toString());
               if (updatedPlayers) {
-                console.log('Refreshed players list:', updatedPlayers);
                 setPlayers(updatedPlayers);
                 playersRef.current = updatedPlayers;
                 
@@ -183,45 +253,13 @@ const Lobby: React.FC = () => {
             }
           }
 
-          // Subscribe to game changes with improved handling
-          const gameChangesChannel = gameService.subscribeToGameDataChanges(
-            game[0].code,
-            async (payload) => {
-              
-              if (payload.eventType === 'UPDATE') {
-                setGameDetails(prev => {
-                  const newGameDetails = prev ? { ...prev, ...payload.new } : null;
-                  
-                  // Check if the game has started (is_converging_phase is true)
-                  if (payload.new.is_converging_phase === true) {
-                    // Find the current player's role using the ref
-                    const currentPlayer = playersRef.current.find(p => p.users?.email === userEmail);
-                    if (currentPlayer) {
-                      // Redirect based on role
-                      const gameCode = payload.new.code;
-                      if (currentPlayer.role === 'AGENT') {
-                        history.push(`/agent?code=${gameCode}`);
-                      } else if (currentPlayer.role === 'ROGUE') {
-                        history.push(`/rogue?code=${gameCode}`);
-                      }
-                    }
-                  }
-                  
-                  return newGameDetails;
-                });
-              } else if (payload.eventType === 'INSERT') {
-                // Handle new game data if needed
-                console.log('New game data inserted:', payload.new);
-                             } else if (payload.eventType === 'DELETE') {
-                 // Handle game deletion if needed
-                 console.log('Game deleted:', payload.old);
-                 await handleErrorWithUser('La partie a été supprimée', payload.old, ERROR_CONTEXTS.GAME_EVENTS);
-               }
-            }
-          );
 
 
 
+
+          setLoadingProgress(70);
+          setLoadingMessage("Chargement de la carte...");
+          
           // Fetch streets
           if (game[0].map_center_latitude && game[0].map_center_longitude) {
             try {
@@ -260,160 +298,198 @@ const Lobby: React.FC = () => {
              }
           }
 
+          setLoadingProgress(80);
+          setLoadingMessage("Configuration des connexions temps réel...");
+          
           // Attendre que la page soit complètement chargée avant de créer les abonnements
           await new Promise(resolve => setTimeout(resolve, 1000));
           
-          // Créer les abonnements aux joueurs à la fin du chargement
-          console.log('🚀 Setting up player subscriptions for game:', game[0].id_game);
-          const playerChangesChannel = gameService.subscribeToPlayerChanges(
-            game[0].id_game.toString(),
-            (payload) => {
-              console.log('🔔 Player change event received:', {
-                eventType: payload.eventType,
-                timestamp: new Date().toISOString(),
-                gameId: game[0].id_game,
-                payload: payload
-              });
-              
-              if (payload.eventType === 'INSERT') {
-                console.log('➕ INSERT event - adding new player:', {
-                  newPlayer: payload.new,
-                  currentPlayersCount: players.length,
-                  newPlayersCount: players.length + 1
-                });
-                
-                // Récupérer les données utilisateur complètes pour le nouveau joueur
-                const fetchPlayerWithUser = async () => {
-                  try {
-                    const gameService = new GameService();
-                    const playerWithUser = await gameService.getPlayerByIdWithUser(payload.new.id_player.toString());
+          // Créer les abonnements aux joueurs à la fin du chargement avec reconnexion automatique
+          
+          // Abonnement aux changements de joueurs avec reconnexion
+          try {
+            playerChangesChannelRef.current = await createSubscriptionWithRetry(
+              `player-changes-${game[0].id_game}`,
+              () => gameService.subscribeToPlayerChanges(
+                game[0].id_game.toString(),
+                (payload) => {
+                  if (payload.eventType === 'INSERT') {
                     
-                    if (playerWithUser && playerWithUser[0]) {
-                      setPlayers(prev => {
-                        // Vérifier si le joueur n'est pas déjà présent pour éviter les doublons
-                        const isPlayerAlreadyPresent = prev.some(p => p.id_player === playerWithUser[0].id_player);
+                    // Récupérer les données utilisateur complètes pour le nouveau joueur
+                    const fetchPlayerWithUser = async () => {
+                      try {
+                        const gameService = new GameService();
+                        const playerWithUser = await gameService.getPlayerByIdWithUser(payload.new.id_player.toString());
                         
-                        if (!isPlayerAlreadyPresent) {
-                          const newPlayers = [...prev, playerWithUser[0]];
+                        if (playerWithUser && playerWithUser[0]) {
+                          setPlayers(prev => {
+                            // Vérifier si le joueur n'est pas déjà présent pour éviter les doublons
+                            const isPlayerAlreadyPresent = prev.some(p => p.id_player === playerWithUser[0].id_player);
+                            
+                            if (!isPlayerAlreadyPresent) {
+                              const newPlayers = [...prev, playerWithUser[0]];
+                              playersRef.current = newPlayers;
+                              
+                              // Vibration courte pour indiquer qu'un joueur a rejoint
+                              vibrate(patterns.short);
+                              
+                              return newPlayers;
+                            } else {
+                              return prev;
+                            }
+                          });
+                        }
+                      } catch (error) {
+                        // Erreur silencieuse lors de la récupération des données utilisateur
+                      }
+                    };
+                    
+                    fetchPlayerWithUser();
+                  } else if (payload.eventType === 'UPDATE') {
+                    
+                    // Récupérer les données utilisateur complètes pour la mise à jour
+                    const updatePlayerWithUser = async () => {
+                      try {
+                        const gameService = new GameService();
+                        const playerWithUser = await gameService.getPlayerByIdWithUser(payload.new.id_player.toString());
+                        
+                        if (playerWithUser && playerWithUser[0]) {
+                          setPlayers(prev => {
+                            const newPlayers = prev.map(p => 
+                              p.id_player === payload.new.id_player ? playerWithUser[0] : p
+                            );
+                            playersRef.current = newPlayers;
+                            
+                            return newPlayers;
+                          });
+                        } else {
+                          // Fallback si la récupération échoue
+                          setPlayers(prev => {
+                            const newPlayers = prev.map(p => 
+                              p.id_player === payload.new.id_player ? payload.new : p
+                            );
+                            playersRef.current = newPlayers;
+                            
+                            return newPlayers;
+                          });
+                        }
+                      } catch (error) {
+                        // Fallback en cas d'erreur
+                        setPlayers(prev => {
+                          const newPlayers = prev.map(p => 
+                            p.id_player === payload.new.id_player ? payload.new : p
+                          );
                           playersRef.current = newPlayers;
                           
-                          console.log('✅ Player added successfully with user data. New players list:', newPlayers);
-                          
-                          // Vibration courte pour indiquer qu'un joueur a rejoint
-                          vibrate(patterns.short);
-                          
                           return newPlayers;
-                        } else {
-                          console.log('⚠️ Player already present, skipping duplicate:', playerWithUser[0]);
-                          return prev;
-                        }
-                      });
-                    } else {
-                      console.log('⚠️ No player data found for ID:', payload.new.id_player);
-                    }
-                  } catch (error) {
-                    console.error('❌ Error fetching player user data:', error);
-                  }
-                };
-                
-                fetchPlayerWithUser();
-              } else if (payload.eventType === 'UPDATE') {
-                console.log('🔄 UPDATE event - updating player:', {
-                  updatedPlayer: payload.new,
-                  playerId: payload.new.id_player,
-                  previousPlayersCount: players.length
-                });
-                
-                // Récupérer les données utilisateur complètes pour la mise à jour
-                const updatePlayerWithUser = async () => {
-                  try {
-                    const gameService = new GameService();
-                    const playerWithUser = await gameService.getPlayerByIdWithUser(payload.new.id_player.toString());
+                        });
+                      }
+                    };
                     
-                    if (playerWithUser && playerWithUser[0]) {
-                      setPlayers(prev => {
-                        const newPlayers = prev.map(p => 
-                          p.id_player === payload.new.id_player ? playerWithUser[0] : p
-                        );
-                        playersRef.current = newPlayers;
-                        
-                        console.log('✅ Player updated successfully with user data. Updated players list:', newPlayers);
-                        
-                        return newPlayers;
-                      });
-                    } else {
-                      // Fallback si la récupération échoue
-                      setPlayers(prev => {
-                        const newPlayers = prev.map(p => 
-                          p.id_player === payload.new.id_player ? payload.new : p
-                        );
-                        playersRef.current = newPlayers;
-                        
-                        console.log('⚠️ Player updated without user data. Updated players list:', newPlayers);
-                        
-                        return newPlayers;
-                      });
-                    }
-                  } catch (error) {
-                    console.error('❌ Error fetching updated player user data:', error);
-                    // Fallback en cas d'erreur
-                    setPlayers(prev => {
-                      const newPlayers = prev.map(p => 
-                        p.id_player === payload.new.id_player ? payload.new : p
-                      );
-                      playersRef.current = newPlayers;
-                      
-                      console.log('⚠️ Player updated without user data (error fallback). Updated players list:', newPlayers);
-                      
-                      return newPlayers;
-                    });
+                    updatePlayerWithUser();
                   }
-                };
-                
-                updatePlayerWithUser();
-              } else {
-                console.log('❓ Unknown event type:', payload.eventType);
-              }
-            }
-          );
+                }
+              )
+            );
+          } catch (error) {
+            // Erreur silencieuse lors de l'établissement de l'abonnement aux changements de joueurs
+          }
 
-          // Subscribe to player deletions
-          const playerDeleteChannel = gameService.subscribeToPlayerDelete(
-            game[0].id_game.toString(),
-            (payload) => {
-              console.log('🗑️ Player DELETE event received:', {
-                eventType: payload.eventType,
-                timestamp: new Date().toISOString(),
-                gameId: game[0].id_game,
-                deletedPlayer: payload.old,
-                playerId: payload.old.id_player,
-                currentPlayersCount: players.length
-              });
-              
-              setPlayers(prev => {
-                const newPlayers = prev.filter(p => p.id_player !== payload.old.id_player);
-                playersRef.current = newPlayers;
-                
-                console.log('✅ Player deleted successfully. Remaining players list:', newPlayers);
-                
-                return newPlayers;
-              });
-            }
-          );
+          // Abonnement aux suppressions de joueurs avec reconnexion
+          try {
+            playerDeleteChannelRef.current = await createSubscriptionWithRetry(
+              `player-delete-${game[0].id_game}`,
+              () => gameService.subscribeToPlayerDelete(
+                game[0].id_game.toString(),
+                (payload) => {
+                  setPlayers(prev => {
+                    const newPlayers = prev.filter(p => p.id_player !== payload.old.id_player);
+                    playersRef.current = newPlayers;
+                    
+                    return newPlayers;
+                  });
+                }
+              )
+            );
+          } catch (error) {
+            // Erreur silencieuse lors de l'établissement de l'abonnement aux suppressions de joueurs
+          }
 
+          // Abonnement aux changements de partie avec reconnexion
+          try {
+            gameChangesChannelRef.current = await createSubscriptionWithRetry(
+              `game-changes-${game[0].code}`,
+              () => gameService.subscribeToGameDataChanges(
+                game[0].code,
+                (payload) => {
+                  
+                  if (payload.eventType === 'UPDATE') {
+                    setGameDetails(prev => {
+                      const newGameDetails = prev ? { ...prev, ...payload.new } : null;
+                      
+                      // Check if the game has started (is_converging_phase is true)
+                      if (payload.new.is_converging_phase === true) {
+                        // Find the current player's role using the ref
+                        const currentPlayer = playersRef.current.find(p => p.users?.email === userEmail);
+                        if (currentPlayer) {
+                          // Redirect based on role
+                          const gameCode = payload.new.code;
+                          if (currentPlayer.role === 'AGENT') {
+                            history.push(`/agent?code=${gameCode}`);
+                          } else if (currentPlayer.role === 'ROGUE') {
+                            history.push(`/rogue?code=${gameCode}`);
+                          }
+                        }
+                      }
+                      
+                      return newGameDetails;
+                    });
+                  } else if (payload.eventType === 'INSERT') {
+                    // Handle new game data if needed
+                                 } else if (payload.eventType === 'DELETE') {
+                     // Handle game deletion if needed
+                     handleErrorWithUser('La partie a été supprimée', payload.old, ERROR_CONTEXTS.GAME_EVENTS);
+                   }
+                }
+              )
+            );
+          } catch (error) {
+            // Erreur silencieuse lors de l'établissement de l'abonnement aux changements de partie
+          }
+          
+          setLoadingProgress(100);
+          setLoadingMessage("Chargement terminé !");
+          
+          // Attendre un peu pour que l'utilisateur voie le 100%
+          await new Promise(resolve => setTimeout(resolve, 500));
+          setIsLoading(false);
+          
           // Cleanup subscriptions
           return () => {
-            console.log('🧹 Cleaning up subscriptions for game:', game[0].id_game);
-            playerChangesChannel.unsubscribe();
-            playerDeleteChannel.unsubscribe();
-            gameChangesChannel.unsubscribe();
-            console.log('✅ All subscriptions cleaned up');
+            // Nettoyer les timeouts de reconnexion
+            clearReconnectTimeouts();
+            
+            // Désabonner les channels s'ils existent
+            if (playerChangesChannelRef.current) {
+              playerChangesChannelRef.current.unsubscribe();
+              playerChangesChannelRef.current = null;
+            }
+            if (playerDeleteChannelRef.current) {
+              playerDeleteChannelRef.current.unsubscribe();
+              playerDeleteChannelRef.current = null;
+            }
+            if (gameChangesChannelRef.current) {
+              gameChangesChannelRef.current.unsubscribe();
+              gameChangesChannelRef.current = null;
+            }
           };
         } else {
           await handleErrorWithUser('Partie non trouvée', null, ERROR_CONTEXTS.LOBBY_INIT);
+          setIsLoading(false);
         }
       } catch (err) {
         await handleErrorWithUser('Erreur lors du chargement de la partie', err, ERROR_CONTEXTS.LOBBY_INIT);
+        setIsLoading(false);
       }
     };
 
@@ -513,7 +589,13 @@ const Lobby: React.FC = () => {
         </IonToolbar>
       </IonHeader>
       <IonContent fullscreen>
-        {error ? (
+        {isLoading ? (
+          <Loading 
+            message={loadingMessage}
+            progress={loadingProgress}
+            showSpinner={true}
+          />
+        ) : error ? (
           <IonCard color="danger" style={{ margin: '1rem' }}>
             <IonCardHeader>
               <IonCardTitle style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>

@@ -195,57 +195,28 @@ class GameService {
 
       // méthodes temps réel 
       subscribeToPlayerChanges(id_game : string, callback:(payload : any) => void){
-        console.log('🔗 Creating subscription to player changes for game:', id_game);
         const channel = supabaseClient.channel(`player-changes-${id_game}`)
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'players', filter: `id_game=eq.${id_game}` },
           (payload) => {
-            console.log('📡 Supabase player change event received:', {
-              channel: `player-changes-${id_game}`,
-              event: payload.eventType,
-              table: payload.table,
-              schema: payload.schema,
-              filter: `id_game=eq.${id_game}`,
-              payload: payload
-            });
             callback(payload);
           }
         )
-        .subscribe((status) => {
-          console.log('📡 Player changes subscription status:', {
-            channel: `player-changes-${id_game}`,
-            status: status,
-            gameId: id_game
-          });
-        });
+        .subscribe();
       return channel;
       }
     
       subscribeToPlayerDelete(id_game : string, callback:(payload : any) => void){
-        console.log('🔗 Creating subscription to player deletions for game:', id_game);
         const channel = supabaseClient.channel(`player-delete-${id_game}`)
         .on(
           'postgres_changes',
           { event: 'DELETE', schema: 'public', table: 'players' },
           (payload) => {
-            console.log('📡 Supabase player DELETE event received:', {
-              channel: `player-delete-${id_game}`,
-              event: payload.eventType,
-              table: payload.table,
-              schema: payload.schema,
-              payload: payload
-            });
             callback(payload);
           }
         )
-        .subscribe((status) => {
-          console.log('📡 Player delete subscription status:', {
-            channel: `player-delete-${id_game}`,
-            status: status,
-            gameId: id_game
-          });
-        });
+        .subscribe();
       return channel;
       }
       
@@ -272,7 +243,6 @@ class GameService {
               filter: `code=eq.${code}` 
             },
             (payload) => {
-              console.log('Game data change event:', payload);
               callback(payload);
             }
           )
@@ -292,7 +262,6 @@ class GameService {
               filter: `id_game=eq.${id_game}` 
             },
             (payload) => {
-              console.log('Props change event:', payload);
               callback(payload);
             }
           )
