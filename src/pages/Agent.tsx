@@ -1,4 +1,4 @@
-import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonButtons, IonLabel } from '@ionic/react';
+import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonButtons, IonLabel, IonModal } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Circle, Marker, useMap, Polyline } from 'react-leaflet';
@@ -25,6 +25,7 @@ import './Agent.css';
 import { GameProp, GameDetails, ObjectiveCircle } from '../components/Interfaces';
 import PopUpMarker from '../components/PopUpMarker';
 import Compass from '../components/Compass';
+import Camera from '../components/Camera';
 import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
 import { useWakeLock } from '../utils/useWakeLock';
@@ -80,6 +81,9 @@ const Agent: React.FC = () => {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isCountdownActive, setIsCountdownActive] = useState<boolean>(false);
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // État pour la modal de la caméra
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState<boolean>(false);
   
   // Référence pour la carte
   const mapRef = useRef<L.Map | null>(null);
@@ -141,10 +145,10 @@ const Agent: React.FC = () => {
   };
 
   const handleThreatDetection = async () => {
-    console.log('Détection de menaces activée');
+    console.log('Détection de menaces activée - Ouverture de la caméra');
     
-    // Fonctionnalité temporairement désactivée
-    toast.info('🔍 Détection de menaces - Fonctionnalité en développement');
+    // Ouvrir la modal avec la caméra
+    setIsCameraModalOpen(true);
     vibrate(patterns.short);
   };
 
@@ -734,6 +738,31 @@ const Agent: React.FC = () => {
           </div>
         </div>
 
+        {/* Modal pour la caméra de détection de menaces */}
+        <IonModal 
+          isOpen={isCameraModalOpen} 
+          onDidDismiss={() => setIsCameraModalOpen(false)}
+          className="camera-modal"
+        >
+          <Camera
+            onCapture={(imageData) => {
+              console.log('Photo capturée pour détection de menaces:', imageData);
+              toast.success('📸 Photo capturée pour analyse de menaces');
+              // Ici vous pouvez ajouter la logique pour analyser la photo
+            }}
+            onQRCodeDetected={(qrCode) => {
+              console.log('QR Code détecté:', qrCode);
+              toast.success(`🔍 QR Code détecté: ${qrCode}`);
+              // Ici vous pouvez ajouter la logique pour traiter le QR code
+              // Par exemple, analyser le contenu, déclencher des actions, etc.
+            }}
+            onClose={() => setIsCameraModalOpen(false)}
+            autoStart={true}
+            showControls={true}
+            defaultMode="capture"
+            className="threat-detection-camera"
+          />
+        </IonModal>
 
       </IonContent>
     </IonPage>

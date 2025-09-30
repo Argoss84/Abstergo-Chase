@@ -1,0 +1,332 @@
+/* Container principal de la caméra */
+.camera-container {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Zone de prévisualisation vidéo */
+.camera-preview {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.camera-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+.camera-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Overlay avec informations */
+.camera-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.camera-info {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  right: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 8px 16px;
+  border-radius: 20px;
+  backdrop-filter: blur(10px);
+}
+
+/* Sélecteur de mode */
+.camera-mode-selector {
+  position: absolute;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  z-index: 15;
+}
+
+.mode-segment {
+  --background: rgba(0, 0, 0, 0.8);
+  --color: #ffffff;
+  --color-checked: #00ff00;
+  --indicator-color: #00ff00;
+  border-radius: 25px;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 255, 0, 0.3);
+}
+
+.mode-segment ion-segment-button {
+  --color: #ffffff;
+  --color-checked: #00ff00;
+  --background-checked: rgba(0, 255, 0, 0.2);
+  font-weight: bold;
+  font-family: 'Courier New', monospace;
+}
+
+/* Indicateur de détection QR */
+.qr-detection-indicator {
+  position: absolute;
+  bottom: 150px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 15;
+}
+
+.qr-scanning {
+  background: rgba(0, 255, 0, 0.9);
+  color: #000;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-family: 'Courier New', monospace;
+  font-weight: bold;
+  font-size: 12px;
+  animation: qrPulse 1.5s ease-in-out infinite;
+  box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
+}
+
+@keyframes qrPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: translateX(-50%) scale(1.05);
+  }
+}
+
+.camera-status {
+  color: #00ff00;
+  font-size: 12px;
+  font-weight: bold;
+  font-family: 'Courier New', monospace;
+  text-shadow: 0 0 5px rgba(0, 255, 0, 0.5);
+}
+
+.camera-type {
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: bold;
+  font-family: 'Courier New', monospace;
+}
+
+/* Contrôles de la caméra */
+.camera-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 120px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+  z-index: 20;
+}
+
+/* Boutons de contrôle */
+.camera-close-btn {
+  --background: rgba(255, 0, 0, 0.8);
+  --background-activated: rgba(255, 0, 0, 1);
+  --color: white;
+  width: 50px;
+  height: 50px;
+  margin: 10px;
+}
+
+.camera-capture-btn {
+  --background: rgba(255, 255, 255, 0.9);
+  --background-activated: rgba(255, 255, 255, 1);
+  --color: #000;
+  width: 70px;
+  height: 70px;
+  margin: 10px;
+  box-shadow: 0 4px 20px rgba(255, 255, 255, 0.3);
+}
+
+.camera-switch-btn {
+  --background: rgba(0, 150, 255, 0.8);
+  --background-activated: rgba(0, 150, 255, 1);
+  --color: white;
+  width: 45px;
+  height: 45px;
+  margin: 5px;
+}
+
+.camera-flash-btn {
+  --background: rgba(255, 255, 0, 0.8);
+  --background-activated: rgba(255, 255, 0, 1);
+  --color: #000;
+  width: 45px;
+  height: 45px;
+  margin: 5px;
+}
+
+.camera-start-btn {
+  --background: rgba(0, 255, 0, 0.8);
+  --background-activated: rgba(0, 255, 0, 1);
+  --color: #000;
+  width: 45px;
+  height: 45px;
+  margin: 5px;
+}
+
+/* Animation pour le bouton de capture */
+.camera-capture-btn:active {
+  transform: scale(0.9);
+  transition: transform 0.1s ease;
+}
+
+/* Style pour les boutons désactivés */
+.camera-controls ion-fab-button[disabled] {
+  --background: rgba(128, 128, 128, 0.5);
+  --color: rgba(255, 255, 255, 0.5);
+  opacity: 0.6;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .camera-info {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    padding: 6px 12px;
+  }
+  
+  .camera-status,
+  .camera-type {
+    font-size: 10px;
+  }
+  
+  .camera-capture-btn {
+    width: 60px;
+    height: 60px;
+  }
+  
+  .camera-close-btn,
+  .camera-switch-btn,
+  .camera-flash-btn,
+  .camera-start-btn {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* Mode paysage */
+@media (orientation: landscape) and (max-height: 500px) {
+  .camera-controls {
+    height: 80px;
+  }
+  
+  .camera-capture-btn {
+    width: 50px;
+    height: 50px;
+  }
+  
+  .camera-close-btn,
+  .camera-switch-btn,
+  .camera-flash-btn,
+  .camera-start-btn {
+    width: 35px;
+    height: 35px;
+  }
+}
+
+/* Effet de scan pour l'overlay */
+.camera-overlay::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 255, 0, 0.1) 50%,
+    transparent 100%
+  );
+  animation: scan 3s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes scan {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Indicateur de focus */
+.camera-focus-indicator {
+  position: absolute;
+  width: 60px;
+  height: 60px;
+  border: 2px solid #00ff00;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 15;
+}
+
+.camera-focus-indicator.active {
+  opacity: 1;
+  animation: focusPulse 0.5s ease-out;
+}
+
+@keyframes focusPulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+/* Style pour les notifications */
+.camera-toast {
+  --background: rgba(0, 0, 0, 0.9);
+  --color: #00ff00;
+  --border-radius: 10px;
+  font-family: 'Courier New', monospace;
+}
+
+/* Thème sombre pour les alertes */
+.camera-alert {
+  --background: #1a1a1a;
+  --color: #ffffff;
+  --border-radius: 15px;
+  font-family: 'Courier New', monospace;
+}

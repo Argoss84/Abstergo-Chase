@@ -38,6 +38,40 @@
   display: none;
 }
 
+/* Styles pour la modal de la caméra */
+.camera-modal {
+  --width: 100%;
+  --height: 100%;
+  --border-radius: 0;
+  --background: #000;
+}
+
+.camera-modal .modal-wrapper {
+  background: #000;
+}
+
+.threat-detection-camera {
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+/* Animation d'ouverture de la modal */
+.camera-modal {
+  animation: cameraModalOpen 0.3s ease-out;
+}
+
+@keyframes cameraModalOpen {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 /* Map container styles */
 .map-container {
   height: calc(100vh - 56px);
