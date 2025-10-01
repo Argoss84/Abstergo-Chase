@@ -28,6 +28,7 @@ export interface GameDetails {
   start_zone_latitude: string | null;
   start_zone_longitude: string | null;
   duration: number | null;
+  remaining_time: number | null;
   started_date: string | null;
   start_zone_rogue_latitude: string | null;
   start_zone_rogue_longitude: string | null;

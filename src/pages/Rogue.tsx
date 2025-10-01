@@ -65,6 +65,8 @@ const Rogue: React.FC = () => {
   // États pour le compte à rebours
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isCountdownActive, setIsCountdownActive] = useState<boolean>(false);
+  const [currentUserIsAdmin, setCurrentUserIsAdmin] = useState<boolean>(false);
+  const [gameCode, setGameCode] = useState<string | null>(null);
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
   // États pour la routine périodique
@@ -267,6 +269,7 @@ const Rogue: React.FC = () => {
       try {
         const params = new URLSearchParams(location.search);
         const code = params.get('code');
+        setGameCode(code);
         
         if (!code) {
           await handleErrorWithUser('Code de partie non trouvé', null, ERROR_CONTEXTS.VALIDATION);
@@ -293,11 +296,13 @@ const Rogue: React.FC = () => {
               setGameDetails(game[0]);
               
               // Récupérer l'ID du joueur actuel en utilisant l'utilisateur connecté
-              if (game[0].players) {
+            if (game[0].players) {
                 const currentPlayer = identifyCurrentPlayer(game[0].players, user.id);
                 if (currentPlayer) {
                   setCurrentPlayerId(currentPlayer.id_player);
                 }
+                const me = game[0].players.find((p: any) => p.user_id === user.id);
+                setCurrentUserIsAdmin(!!me?.is_admin);
               }
               
               // Récupérer les props d'objectifs
@@ -353,10 +358,14 @@ const Rogue: React.FC = () => {
     if (isCurrentPlayerAdmin) {
       console.log('👑 ADMIN - Fin de partie détectée');
       
-      // Mettre à jour le winner_type à "ROGUE" car le temps est écoulé
+      // Mettre à jour remaining_time=0 puis winner_type à "ROGUE" car le temps est écoulé
       const params = new URLSearchParams(location.search);
       const code = params.get('code');
       if (code) {
+        try {
+          const gameService = new GameService();
+          await gameService.updateGameByCode(code, { remaining_time: 0 });
+        } catch (_) {}
         const success = await updateGameWinnerType(code, 'ROGUE');
         if (success) {
           console.log('🏆 Winner_type mis à jour: ROGUE (temps écoulé)');
@@ -460,15 +469,30 @@ const Rogue: React.FC = () => {
     };
   }, [isCountdownActive, countdown]);
 
-  // Effet pour initialiser le compte à rebours quand la partie démarre
+  // Synchroniser remaining_time côté serveur pour l'admin à chaque tick
   useEffect(() => {
-    if (gameDetails?.started && gameDetails?.duration && !isCountdownActive) {
+    const pushRemainingTime = async () => {
+      try {
+        if (currentUserIsAdmin && isCountdownActive && countdown !== null && gameCode) {
+          const gameService = new GameService();
+          await gameService.updateGameByCode(gameCode, { remaining_time: countdown });
+        }
+      } catch (_) {}
+    };
+    pushRemainingTime();
+  }, [countdown, isCountdownActive, currentUserIsAdmin, gameCode]);
+
+  // Effet pour initialiser le compte à rebours quand la partie démarre (privilégier remaining_time)
+  useEffect(() => {
+    if (gameDetails?.started && !isCountdownActive) {
       console.log('🚀 Partie démarrée - Initialisation du compte à rebours');
-      const totalSeconds = gameDetails.duration * 60; // Convertir les minutes en secondes
-      setCountdown(totalSeconds);
-      setIsCountdownActive(true);
+      const totalSeconds = (gameDetails.remaining_time ?? gameDetails.duration) || 0;
+      if (totalSeconds > 0) {
+        setCountdown(totalSeconds);
+        setIsCountdownActive(true);
+      }
     }
-  }, [gameDetails?.started, gameDetails?.duration, isCountdownActive]);
+  }, [gameDetails?.started, gameDetails?.duration, gameDetails?.remaining_time, isCountdownActive]);
 
   // Fonction de routine périodique
   const executeRoutine = useCallback(async () => {
@@ -493,6 +517,20 @@ const Rogue: React.FC = () => {
       const updatedGame = await updateGameData(code);
       if (updatedGame) {
         setGameDetails(updatedGame);
+        // Synchroniser le compte à rebours avec le serveur (UNIQUEMENT pour non-admin)
+        if (!currentUserIsAdmin) {
+          const serverRemaining = updatedGame.remaining_time;
+          if (serverRemaining !== null && serverRemaining !== undefined) {
+            if (isCountdownActive) {
+              if (countdown !== serverRemaining) {
+                setCountdown(serverRemaining);
+              }
+            } else if (updatedGame.started && serverRemaining > 0) {
+              setCountdown(serverRemaining);
+              setIsCountdownActive(true);
+            }
+          }
+        }
       }
     }
     
@@ -640,7 +678,7 @@ const Rogue: React.FC = () => {
             </IonLabel>
           ) : gameDetails?.duration ? (
             <IonLabel slot="primary" className="duration-display">
-              ⏱️ {Math.floor(gameDetails.duration)}:{(Math.round((gameDetails.duration % 1) * 60)).toString().padStart(2, '0')}
+              ⏱️ {Math.floor((gameDetails.duration || 0) / 60)}:{(((gameDetails.duration || 0) % 60)).toString().padStart(2, '0')}
             </IonLabel>
           ) : null}
           {gameDetails?.is_converging_phase && distanceToStartZone !== null && (

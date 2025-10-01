@@ -903,7 +903,7 @@ const Lobby: React.FC = () => {
                   <IonItem>
                     <IonLabel>
                       <h2>Durée</h2>
-                      <p>{gameDetails.duration} minutes</p>
+                      <p>{gameDetails.duration} secondes</p>
                     </IonLabel>
                   </IonItem>
                   <IonItem>

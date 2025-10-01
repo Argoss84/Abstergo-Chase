@@ -72,7 +72,7 @@ const CreateLobby: React.FC = () => {
   const [startZones, setStartZones] = useState<StartZones>({ agent: null, rogue: null });
   const [formData, setFormData] = useState<GameFormData>({
     objectif_number: 3,
-    duration: 15,
+    duration: 900,
     victory_condition_nb_objectivs: 2,
     hack_duration_ms: 10000,
     objectiv_zone_radius: 300,
@@ -432,7 +432,7 @@ const CreateLobby: React.FC = () => {
               </IonItem>
 
               <IonItem>
-                <IonLabel position="stacked">Durée (en minutes)</IonLabel>
+                <IonLabel position="stacked">Durée (en secondes)</IonLabel>
                 <IonInput
                   type="number"
                   value={formData.duration}

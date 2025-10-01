@@ -77,6 +77,8 @@ const Agent: React.FC = () => {
   const [currentPlayerId, setCurrentPlayerId] = useState<number | null>(null);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [objectiveCirclesInitialized, setObjectiveCirclesInitialized] = useState<boolean>(false);
+  const [currentUserIsAdmin, setCurrentUserIsAdmin] = useState<boolean>(false);
+  const [gameCode, setGameCode] = useState<string | null>(null);
   
   // États pour le compte à rebours
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -185,13 +187,17 @@ const Agent: React.FC = () => {
       );
       isCurrentPlayerAdmin = playerByUserId?.is_admin || false;
     }
-    if (isCurrentPlayerAdmin) {
+    if (currentUserIsAdmin) {
       console.log('👑 ADMIN - Fin de partie détectée');
       
-      // Mettre à jour le winner_type à "AGENT" car le temps est écoulé
+      // Mettre à jour remaining_time=0 et winner_type à "AGENT" car le temps est écoulé
       const params = new URLSearchParams(location.search);
       const code = params.get('code');
       if (code) {
+        try {
+          const gameService = new GameService();
+          await gameService.updateGameByCode(code, { remaining_time: 0 });
+        } catch (_) {}
         const success = await updateGameWinnerType(code, 'AGENT');
         if (success) {
           console.log('🏆 Winner_type mis à jour: AGENT (temps écoulé)');
@@ -238,6 +244,20 @@ const Agent: React.FC = () => {
       const updatedGame = await updateGameData(code);
       if (updatedGame) {
         setGameDetails(updatedGame);
+        // Synchroniser le compte à rebours avec le serveur (UNIQUEMENT pour non-admin)
+        if (!currentUserIsAdmin) {
+          const serverRemaining = updatedGame.remaining_time;
+          if (serverRemaining !== null && serverRemaining !== undefined) {
+            if (isCountdownActive) {
+              if (countdown !== serverRemaining) {
+                setCountdown(serverRemaining);
+              }
+            } else if (updatedGame.started && serverRemaining > 0) {
+              setCountdown(serverRemaining);
+              setIsCountdownActive(true);
+            }
+          }
+        }
       }
     }
     
@@ -283,11 +303,13 @@ const Agent: React.FC = () => {
       setRoutePath(route);
     }
     
-    // 6. Gestion du compte à rebours
-    if (gameDetails?.started && gameDetails?.duration && !isCountdownActive) {
-      const totalSeconds = gameDetails.duration * 60; // Convertir les minutes en secondes
-      setCountdown(totalSeconds);
-      setIsCountdownActive(true);
+    // 6. Gestion du compte à rebours (privilégier remaining_time, fallback durée en secondes)
+    if (gameDetails?.started && !isCountdownActive) {
+      const totalSeconds = (gameDetails.remaining_time ?? gameDetails.duration) || 0;
+      if (totalSeconds > 0) {
+        setCountdown(totalSeconds);
+        setIsCountdownActive(true);
+      }
     }
     
     // Console.log unifié avec toutes les informations de la routine
@@ -336,6 +358,7 @@ const Agent: React.FC = () => {
       try {
         const params = new URLSearchParams(location.search);
         const code = params.get('code');
+        setGameCode(code);
         
         if (!code) {
           await handleErrorWithUser('Code de partie non trouvé', null, ERROR_CONTEXTS.VALIDATION);
@@ -403,6 +426,19 @@ const Agent: React.FC = () => {
       fetchGameDetails();
     }
   }, [location.search, session]);
+
+  // Déterminer si l'utilisateur courant est admin
+  useEffect(() => {
+    let isAdmin = false;
+    if (currentPlayerId) {
+      const playerById = gameDetails?.players?.find(p => p.id_player === currentPlayerId);
+      isAdmin = playerById?.is_admin || false;
+    } else if (currentUser) {
+      const playerByUserId = gameDetails?.players?.find(p => p.user_id === currentUser.id);
+      isAdmin = playerByUserId?.is_admin || false;
+    }
+    setCurrentUserIsAdmin(isAdmin);
+  }, [currentPlayerId, currentUser, gameDetails?.players]);
 
   useEffect(() => {
     // Choisir un logo de joueur aléatoirement
@@ -521,6 +557,19 @@ const Agent: React.FC = () => {
     };
   }, [isCountdownActive, countdown]);
 
+  // Synchroniser remaining_time côté serveur pour l'admin à chaque tick
+  useEffect(() => {
+    const pushRemainingTime = async () => {
+      try {
+        if (currentUserIsAdmin && isCountdownActive && countdown !== null && gameCode) {
+          const gameService = new GameService();
+          await gameService.updateGameByCode(gameCode, { remaining_time: countdown });
+        }
+      } catch (_) {}
+    };
+    pushRemainingTime();
+  }, [countdown, isCountdownActive, currentUserIsAdmin, gameCode]);
+
   // Effet pour configurer l'intervalle de routine basé sur le paramètre game_refresh_ms
   useEffect(() => {
     if (appParams) {
@@ -546,7 +595,7 @@ const Agent: React.FC = () => {
             </IonLabel>
           ) : gameDetails?.duration ? (
             <IonLabel slot="primary" className="duration-display">
-              ⏱️ {Math.floor(gameDetails.duration)}:{(Math.round((gameDetails.duration % 1) * 60)).toString().padStart(2, '0')}
+              ⏱️ {Math.floor((gameDetails.duration || 0) / 60)}:{(((gameDetails.duration || 0) % 60)).toString().padStart(2, '0')}
             </IonLabel>
           ) : null}
           {gameDetails?.is_converging_phase && distanceToStartZone !== null && (
