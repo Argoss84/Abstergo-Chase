@@ -264,6 +264,26 @@ const Rogue: React.FC = () => {
     vibrate(patterns.short);
   };
 
+  // Démarrer la partie quand tous les joueurs sont en zone de départ (admin uniquement)
+  const handleAdminStartFromStartZone = async () => {
+    try {
+      const code = gameCode || gameDetails?.code;
+      if (!code) {
+        await handleErrorWithUser('Code de partie introuvable pour démarrer', null, ERROR_CONTEXTS.GAME_START);
+        return;
+      }
+      const gameService = new GameService();
+      await gameService.updateGameByCode(code, {
+        started: true,
+        is_converging_phase: false
+      });
+      setGameDetails(prev => prev ? { ...prev, started: true, is_converging_phase: false } as any : prev);
+      toast.success('🚀 Partie démarrée');
+    } catch (error) {
+      await handleErrorWithUser('Erreur lors du démarrage de la partie', error, ERROR_CONTEXTS.GAME_START);
+    }
+  };
+
   useEffect(() => {
     const fetchGameDetails = async () => {
       try {
@@ -801,6 +821,15 @@ const Rogue: React.FC = () => {
           </div>
         ) : (
           <p>Chargement des détails de la partie...</p>
+        )}
+
+        {/* Bouton flottant centré pour démarrer la partie (admin uniquement) */}
+        {currentUserIsAdmin && !gameDetails?.started && Array.isArray(gameDetails?.players) && gameDetails!.players!.length > 0 && gameDetails!.players!.every(p => p.isInStartZone === true) && (
+          <div style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 1000 }}>
+            <IonButton color="success" size="large" onClick={handleAdminStartFromStartZone}>
+              🚀 Démarrer maintenant
+            </IonButton>
+          </div>
         )}
 
         {/* Composant de test de la boussole */}
