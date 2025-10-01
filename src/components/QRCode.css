@@ -5,10 +5,95 @@
   padding: 1rem;
 }
 
+.qrcode-frame {
+  position: relative;
+  padding: 14px;
+  border-radius: 12px;
+  background: radial-gradient(180px 180px at 50% 50%, rgba(0,255,65,0.15), rgba(0,0,0,0.6) 70%);
+  border: 2px solid rgba(0, 255, 65, 0.5);
+  box-shadow:
+    0 0 12px rgba(0, 255, 65, 0.6),
+    0 0 30px rgba(0, 255, 65, 0.25),
+    inset 0 0 16px rgba(0, 255, 65, 0.15);
+  animation: qrcodeGlow 2.2s ease-in-out infinite;
+}
+
+.qrcode-frame::before,
+.qrcode-frame::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 14px;
+  background: conic-gradient(
+    from 0deg,
+    rgba(0,255,65,0.0) 0deg,
+    rgba(0,255,65,0.35) 120deg,
+    rgba(0,255,65,0.0) 240deg,
+    rgba(0,255,65,0.35) 360deg
+  );
+  filter: blur(12px);
+  z-index: -1;
+  animation: qrcodeAura 5s linear infinite;
+}
+
+.qrcode-frame::after {
+  inset: -10px;
+  filter: blur(24px);
+  opacity: 0.5;
+  animation-duration: 7s;
+}
+
+.qrcode-scanlines {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 255, 65, 0.08) 0px,
+    rgba(0, 255, 65, 0.08) 2px,
+    rgba(0, 0, 0, 0.0) 4px,
+    rgba(0, 0, 0, 0.0) 6px
+  );
+  border-radius: 8px;
+  mix-blend-mode: screen;
+  animation: scanlineSweep 3.5s linear infinite;
+}
+
 .qrcode-container svg {
+  display: block;
   max-width: 100%;
   height: auto;
   border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  box-shadow:
+    0 0 0 2px rgba(0, 255, 65, 0.6),
+    0 0 25px rgba(0, 255, 65, 0.35),
+    0 0 60px rgba(0, 255, 65, 0.2);
+}
+
+@keyframes qrcodeGlow {
+  0%, 100% {
+    box-shadow:
+      0 0 10px rgba(0, 255, 65, 0.5),
+      0 0 24px rgba(0, 255, 65, 0.2),
+      inset 0 0 12px rgba(0, 255, 65, 0.12);
+    transform: translateZ(0);
+  }
+  50% {
+    box-shadow:
+      0 0 18px rgba(0, 255, 65, 0.8),
+      0 0 40px rgba(0, 255, 65, 0.35),
+      inset 0 0 22px rgba(0, 255, 65, 0.2);
+    transform: translateZ(0) scale(1.01);
+  }
+}
+
+@keyframes qrcodeAura {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes scanlineSweep {
+  0% { background-position-y: 0; }
+  100% { background-position-y: 100%; }
 }
 

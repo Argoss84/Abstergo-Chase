@@ -15,20 +15,23 @@ const QRCode: React.FC<QRCodeProps> = ({
   value, 
   size = 256,
   level = 'M',
-  bgColor = '#ffffff',
-  fgColor = '#000000',
+  bgColor = '#0a0a0a',
+  fgColor = '#00ff41',
   includeMargin = true
 }) => {
   return (
     <div className="qrcode-container">
-      <QRCodeSVG
-        value={value}
-        size={size}
-        level={level}
-        bgColor={bgColor}
-        fgColor={fgColor}
-        includeMargin={includeMargin}
-      />
+      <div className="qrcode-frame">
+        <div className="qrcode-scanlines" />
+        <QRCodeSVG
+          value={value}
+          size={size}
+          level={level}
+          bgColor={bgColor}
+          fgColor={fgColor}
+          includeMargin={includeMargin}
+        />
+      </div>
     </div>
   );
 };
