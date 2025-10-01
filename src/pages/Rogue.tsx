@@ -1,4 +1,4 @@
-import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonLabel, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon } from '@ionic/react';
+import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonLabel, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonModal } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Circle, Marker, useMap, Polyline, Popup } from 'react-leaflet';
@@ -24,6 +24,7 @@ import './Rogue.css';
 import { GameProp, GameDetails, ObjectiveCircle } from '../components/Interfaces';
 import PopUpMarker from '../components/PopUpMarker';
 import Compass from '../components/Compass';
+import QRCode from '../components/QRCode';
 import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
 import { useWakeLock } from '../utils/useWakeLock';
@@ -101,6 +102,12 @@ const Rogue: React.FC = () => {
 
   // Hook pour la vibration
   const { vibrate, patterns } = useVibration();
+  
+  // État pour la modal du QR code
+  const [isQRModalOpen, setIsQRModalOpen] = useState(false);
+  
+  // Texte pour le QR code (email + code de partie)
+  const [qrCodeText, setQrCodeText] = useState<string>('');
 
   // Fonction helper pour gérer les erreurs avec l'email de l'utilisateur
   const handleErrorWithUser = async (errorMessage: string, error?: any, context?: string) => {
@@ -140,8 +147,8 @@ const Rogue: React.FC = () => {
   };
 
   const handleHealthCheck = () => {
-    console.log('Vérification de santé activée');
-    toast.warning('💊 Vérification de santé en cours...');
+    console.log('Ouverture de la modal QR code');
+    setIsQRModalOpen(true);
     vibrate(patterns.short);
   };
 
@@ -272,6 +279,11 @@ const Rogue: React.FC = () => {
           if (user) {
             setCurrentUser(user);
             console.log(`Utilisateur connecté: ${user.email} (ID: ${user.id})`);
+            
+            // Générer le texte pour le QR code (email + code de partie)
+            const qrText = `${user.email};${code}`;
+            setQrCodeText(qrText);
+            console.log(`QR Code généré: ${qrText}`);
             
             // Récupérer les données de la partie après avoir obtenu l'utilisateur
             const gameService = new GameService();
@@ -825,18 +837,48 @@ const Rogue: React.FC = () => {
               <IonIcon icon={locateOutline} />
             </IonFabButton>
                          <IonFabButton 
-               color="light" 
-               onClick={handleCaptureObjectiv}
-               className={`${isObjectiveInRange ? 'objective-in-range' : ''} ${isCaptureInProgress ? 'capture-in-progress' : ''}`}
-               disabled={isCaptureInProgress}
-             >
-               <IonIcon icon={radioOutline} />
-             </IonFabButton>
+              color="light" 
+              onClick={handleCaptureObjectiv}
+              className={`${isObjectiveInRange ? 'objective-in-range' : ''} ${isCaptureInProgress ? 'capture-in-progress' : ''}`}
+              disabled={isCaptureInProgress}
+            >
+              <IonIcon icon={radioOutline} />
+            </IonFabButton>
           </div>
         </div>
+
+        {/* Modal pour afficher le QR code */}
+        <IonModal isOpen={isQRModalOpen} onDidDismiss={() => setIsQRModalOpen(false)}>
+          <IonHeader>
+            <IonToolbar>
+              <IonTitle>QR Code Joueur</IonTitle>
+              <IonButton slot="end" onClick={() => setIsQRModalOpen(false)}>
+                Fermer
+              </IonButton>
+            </IonToolbar>
+          </IonHeader>
+          <IonContent className="ion-padding">
+            <div className="qr-modal-content">
+              {qrCodeText ? (
+                <>
+                  <h2 className="qr-modal-title">Votre QR Code</h2>
+                  <QRCode value={qrCodeText} size={300} />
+                  <p className="qr-modal-email">
+                    {currentUser?.email}
+                  </p>
+                  <p className="qr-modal-code">
+                    Code: {gameDetails?.code}
+                  </p>
+                </>
+              ) : (
+                <p>Chargement du QR code...</p>
+              )}
+            </div>
+          </IonContent>
+        </IonModal>
       </IonContent>
     </IonPage>
   );
 };
 
-export default Rogue; 
+export default Rogue;
