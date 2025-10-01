@@ -38,6 +38,21 @@ export async function getUserByAuthId(authUserId: any) {
     return data;
 }
 
+export async function getUserByEmail(email: string) {
+    const { data, error } = await supabaseClient
+        .from('users')
+        .select('*')
+        .eq('email', email)
+        .single();
+
+    if (error) {
+        console.error('Erreur lors de la récupération de l\'utilisateur par email :', error);
+        return null;
+    }
+
+    return data;
+}
+
 // Create a new user
 export const createUser = async (userData: any) => {
   const { data, error } = await supabaseClient

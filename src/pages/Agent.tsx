@@ -28,7 +28,7 @@ import Compass from '../components/Compass';
 import Camera from '../components/Camera';
 import QRCode from '../components/QRCode';
 import { useAuth } from '../contexts/AuthenticationContext';
-import { getUserByAuthId } from '../services/UserServices';
+import { getUserByAuthId, getUserByEmail } from '../services/UserServices';
 import { useWakeLock } from '../utils/useWakeLock';
 import { useVibration } from '../hooks/useVibration';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
@@ -841,10 +841,73 @@ const Agent: React.FC = () => {
               // Ici vous pouvez ajouter la logique pour analyser la photo
             }}
             onQRCodeDetected={(qrCode) => {
-              console.log('QR Code détecté:', qrCode);
-              toast.success(`🔍 QR Code détecté: ${qrCode}`);
-              // Ici vous pouvez ajouter la logique pour traiter le QR code
-              // Par exemple, analyser le contenu, déclencher des actions, etc.
+              (async () => {
+                try {
+                  console.log('QR Code détecté:', qrCode);
+                  toast.success(`🔍 QR Code détecté: ${qrCode}`);
+                  const raw = (qrCode || '').trim();
+                  if (!raw) return;
+
+                  let scannedEmail: string | null = null;
+                  let scannedGameCode: string | null = null;
+                  if (raw.includes(';')) {
+                    const parts = raw.split(';');
+                    scannedEmail = (parts[0] || '').trim();
+                    scannedGameCode = (parts[1] || '').trim() || null;
+                  } else {
+                    scannedEmail = raw;
+                  }
+
+                  if (!scannedEmail) {
+                    await handleErrorWithUser('QR Code invalide: email manquant', null, ERROR_CONTEXTS.VALIDATION);
+                    return;
+                  }
+
+                  if (scannedGameCode && gameDetails?.code && scannedGameCode !== gameDetails.code) {
+                    toast.error('❌ QR Code d\'une autre partie');
+                    return;
+                  }
+
+                  const scannedUser = await getUserByEmail(scannedEmail);
+                  if (!scannedUser) {
+                    await handleErrorWithUser('Utilisateur du QR code introuvable', null, ERROR_CONTEXTS.DATABASE);
+                    return;
+                  }
+
+                  const targetPlayer = gameDetails?.players?.find(p => p.user_id === scannedUser.id);
+                  if (!targetPlayer) {
+                    await handleErrorWithUser('Joueur du QR code introuvable dans cette partie', null, ERROR_CONTEXTS.DATABASE);
+                    return;
+                  }
+
+                  if (targetPlayer.role !== 'ROGUE') {
+                    toast.info('ℹ️ QR scanné: ce joueur n\'est pas un Rogue');
+                    return;
+                  }
+
+                  if (targetPlayer.status === 'CAPTURED') {
+                    toast.info('🔒 Ce Rogue est déjà capturé');
+                    return;
+                  }
+
+                  const gameService = new GameService();
+                  await gameService.updatePlayer(targetPlayer.id_player.toString(), {
+                    status: 'CAPTURED',
+                    updated_at: new Date().toISOString()
+                  });
+
+                  toast.success('✅ Rogue capturé !');
+
+                  if (gameDetails?.code) {
+                    const updated = await updateGameData(gameDetails.code);
+                    if (updated) setGameDetails(updated);
+                  }
+
+                  setIsCameraModalOpen(false);
+                } catch (err) {
+                  await handleErrorWithUser('Erreur lors du traitement du QR code', err, ERROR_CONTEXTS.DATABASE);
+                }
+              })();
             }}
             onClose={() => setIsCameraModalOpen(false)}
             autoStart={true}
