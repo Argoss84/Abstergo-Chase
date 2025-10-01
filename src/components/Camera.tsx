@@ -21,6 +21,7 @@ import {
   settings
 } from 'ionicons/icons';
 import './Camera.css';
+import { Scanner } from '@yudiel/react-qr-scanner';
 
 type CameraMode = 'capture' | 'photo';
 
@@ -58,7 +59,6 @@ const Camera: React.FC<CameraProps> = ({
   // États pour les modes de caméra
   const [currentMode, setCurrentMode] = useState<CameraMode>(defaultMode);
   const [qrDetectionActive, setQrDetectionActive] = useState(false);
-  const qrDetectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Obtenir la liste des caméras disponibles
   const getAvailableCameras = async () => {
@@ -172,93 +172,41 @@ const Camera: React.FC<CameraProps> = ({
     }
   };
 
-  // Fonction simple de détection de QR code (simulation)
-  const detectQRCode = async (imageData: string): Promise<string | null> => {
-    try {
-      // Simulation d'une détection de QR code
-      // Dans une vraie implémentation, vous utiliseriez une librairie comme jsQR
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      const img = new Image();
-      
-      return new Promise((resolve) => {
-        img.onload = () => {
-          canvas.width = img.width;
-          canvas.height = img.height;
-          ctx?.drawImage(img, 0, 0);
-          
-          // Simulation - dans la vraie vie, vous analyseriez l'image
-          // Pour l'instant, on simule une détection aléatoire
-          const hasQRCode = Math.random() > 0.95; // 5% de chance de détecter un QR
-          
-          if (hasQRCode) {
-            const simulatedQRCode = `QR_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            resolve(simulatedQRCode);
-          } else {
-            resolve(null);
-          }
-        };
-        img.src = imageData;
-      });
-    } catch (error) {
-      console.error('Erreur lors de la détection QR:', error);
-      return null;
-    }
-  };
-
-  // Démarrer la détection de QR code en temps réel
-  const startQRDetection = () => {
-    if (!isStreaming || currentMode !== 'capture') return;
-    
-    setQrDetectionActive(true);
-    
-    const detectQR = async () => {
-      if (!videoRef.current || !canvasRef.current) return;
-      
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const context = canvas.getContext('2d');
-      
-      if (!context) return;
-      
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      const imageData = canvas.toDataURL('image/jpeg', 0.8);
-      const qrCode = await detectQRCode(imageData);
-      
-      if (qrCode && onQRCodeDetected) {
-        onQRCodeDetected(qrCode);
-        setToastMessage(`🔍 QR Code détecté: ${qrCode}`);
-        setShowToast(true);
-        // Vibration pour indiquer la détection (à implémenter si nécessaire)
+  // Détection QR via Scanner (mode capture)
+  const handleScan = (detectedCodes: Array<{ rawValue: string }> | undefined) => {
+    if (!detectedCodes || detectedCodes.length === 0) return;
+    const value = detectedCodes[0]?.rawValue;
+    if (value) {
+      if (onQRCodeDetected) {
+        onQRCodeDetected(value);
       }
-    };
-    
-    // Détecter toutes les 500ms
-    qrDetectionIntervalRef.current = setInterval(detectQR, 500);
+      setToastMessage(`🔍 QR Code détecté: ${value}`);
+      setShowToast(true);
+    }
   };
 
-  // Arrêter la détection de QR code
-  const stopQRDetection = () => {
-    setQrDetectionActive(false);
-    if (qrDetectionIntervalRef.current) {
-      clearInterval(qrDetectionIntervalRef.current);
-      qrDetectionIntervalRef.current = null;
-    }
+  const handleScannerError = (err: unknown) => {
+    console.error('Erreur du scanner QR:', err);
+    setAlertMessage('Erreur du scanner QR. Vérifiez les permissions caméra.');
+    setShowAlert(true);
   };
 
   // Basculer entre les modes
   const switchMode = (mode: CameraMode) => {
     setCurrentMode(mode);
-    
-    if (mode === 'capture' && isStreaming) {
-      startQRDetection();
+    if (mode === 'capture') {
+      // Arrêter notre flux vidéo pour laisser le Scanner accéder à la caméra
+      if (isStreaming) {
+        stopCamera();
+      }
+      setQrDetectionActive(true);
     } else {
-      stopQRDetection();
+      // Mode photo: démarrer notre propre flux caméra
+      if (!isStreaming) {
+        startCamera(currentCamera === 'back' ? 'environment' : 'user');
+      }
+      setQrDetectionActive(false);
     }
-    
     setToastMessage(`Mode ${mode === 'capture' ? 'Capture (QR)' : 'Photo'} activé`);
     setShowToast(true);
   };
@@ -266,32 +214,31 @@ const Camera: React.FC<CameraProps> = ({
   // Initialisation
   useEffect(() => {
     getAvailableCameras();
-    
     if (autoStart) {
-      startCamera('environment');
+      if (defaultMode === 'photo') {
+        startCamera('environment');
+      } else {
+        setQrDetectionActive(true);
+      }
     }
-
     return () => {
       stopCamera();
-      stopQRDetection();
     };
   }, [autoStart]);
 
   // Gérer le démarrage de la détection QR quand le mode change
   useEffect(() => {
-    if (currentMode === 'capture' && isStreaming) {
-      startQRDetection();
+    if (currentMode === 'capture') {
+      setQrDetectionActive(true);
     } else {
-      stopQRDetection();
+      setQrDetectionActive(false);
     }
-  }, [currentMode, isStreaming]);
+  }, [currentMode]);
 
   // Nettoyer les intervalles au démontage
   useEffect(() => {
     return () => {
-      if (qrDetectionIntervalRef.current) {
-        clearInterval(qrDetectionIntervalRef.current);
-      }
+      // Cleanup handled by unmounting
     };
   }, []);
 
@@ -299,12 +246,27 @@ const Camera: React.FC<CameraProps> = ({
     <div className={`camera-container ${className}`}>
       {/* Zone de prévisualisation vidéo */}
       <div className="camera-preview">
-        <video
-          ref={videoRef}
-          className="camera-video"
-          playsInline
-          muted
-        />
+        {currentMode === 'photo' ? (
+          <video
+            ref={videoRef}
+            className="camera-video"
+            playsInline
+            muted
+          />
+        ) : (
+          <div className="camera-video">
+            <Scanner
+              onScan={handleScan}
+              onError={handleScannerError}
+              scanDelay={500}
+              paused={false}
+              formats={['qr_code']}
+              constraints={{
+                facingMode: currentCamera === 'back' ? 'environment' : 'user'
+              }}
+            />
+          </div>
+        )}
         
         {/* Canvas caché pour la capture */}
         <canvas
@@ -317,7 +279,7 @@ const Camera: React.FC<CameraProps> = ({
         <div className="camera-overlay">
           <div className="camera-info">
             <span className="camera-status">
-              {isStreaming ? '● ENREGISTREMENT' : '○ ARRÊTÉ'}
+              {isStreaming || currentMode === 'capture' ? '● ENREGISTREMENT' : '○ ARRÊTÉ'}
             </span>
             <span className="camera-type">
               {currentCamera === 'back' ? 'CAMÉRA ARRIÈRE' : 'CAMÉRA AVANT'}
@@ -377,8 +339,14 @@ const Camera: React.FC<CameraProps> = ({
             <IonFabList side="top">
               <IonFabButton 
                 color="medium" 
-                onClick={switchCamera}
-                disabled={!isStreaming}
+              onClick={async () => {
+                const newCamera = currentCamera === 'back' ? 'front' : 'back';
+                setCurrentCamera(newCamera);
+                if (currentMode === 'photo') {
+                  await startCamera(newCamera === 'back' ? 'environment' : 'user');
+                }
+              }}
+              disabled={currentMode === 'photo' ? !isStreaming : false}
                 className="camera-switch-btn"
               >
                 <IonIcon icon={cameraReverse} />
@@ -386,8 +354,8 @@ const Camera: React.FC<CameraProps> = ({
               
               <IonFabButton 
                 color="warning" 
-                onClick={toggleFlash}
-                disabled={!isStreaming}
+              onClick={currentMode === 'photo' ? toggleFlash : undefined}
+              disabled={currentMode === 'photo' ? !isStreaming : true}
                 className="camera-flash-btn"
               >
                 <IonIcon icon={flashEnabled ? flash : flashOff} />
@@ -395,10 +363,10 @@ const Camera: React.FC<CameraProps> = ({
               
               <IonFabButton 
                 color="success" 
-                onClick={isStreaming ? stopCamera : () => startCamera('environment')}
+              onClick={currentMode === 'photo' ? (isStreaming ? stopCamera : () => startCamera('environment')) : undefined}
                 className="camera-start-btn"
               >
-                <IonIcon icon={isStreaming ? stop : play} />
+              <IonIcon icon={currentMode === 'photo' ? (isStreaming ? stop : play) : play} />
               </IonFabButton>
             </IonFabList>
           </IonFab>
