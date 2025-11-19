@@ -27,9 +27,8 @@ import Compass from '../components/Compass';
 import QRCode from '../components/QRCode';
 import { useAuth } from '../contexts/AuthenticationContext';
 import { getUserByAuthId } from '../services/UserServices';
-import { useWakeLock } from '../utils/useWakeLock';
-import { useVibration } from '../hooks/useVibration';
-import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
+import { ERROR_CONTEXTS } from '../utils/ErrorUtils';
+import useGamePageCommon from '../hooks/useGamePageCommon';
 
 const ResizeMap = () => {
   const map = useMap();
@@ -56,116 +55,60 @@ const Rogue: React.FC = () => {
   const history = useHistory();
   const location = useLocation();
   const { session, appParams } = useAuth();
-  const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
-  const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    gameDetails,
+    setGameDetails,
+    currentPosition,
+    error,
+    routePath,
+    setRoutePath,
+    distanceToStartZone,
+    setDistanceToStartZone,
+    routineInterval,
+    isRoutineActive,
+    routineExecutionCount,
+    setRoutineExecutionCount,
+    routineIntervalRef,
+    currentPlayerId,
+    setCurrentPlayerId,
+    currentUser,
+    setCurrentUser,
+    currentUserIsAdmin,
+    setCurrentUserIsAdmin,
+    gameCode,
+    setGameCode,
+    countdown,
+    setCountdown,
+    isCountdownActive,
+    setIsCountdownActive,
+    countdownIntervalRef,
+    mapRef,
+    playerLogo,
+    isFabOpen,
+    setIsFabOpen,
+    vibrate,
+    patterns,
+    isQRModalOpen,
+    setIsQRModalOpen,
+    qrCodeText,
+    setQrCodeText,
+    handleErrorWithUser,
+    handleNetworkScan,
+    handleVisionMode,
+    handleHealthCheck,
+    handleLocationTracker
+  } = useGamePageCommon({ appParams });
   const [objectiveProps, setObjectiveProps] = useState<GameProp[]>([]);
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  
-  // États pour le compte à rebours
-  const [countdown, setCountdown] = useState<number | null>(null);
-  const [isCountdownActive, setIsCountdownActive] = useState<boolean>(false);
-  const [currentUserIsAdmin, setCurrentUserIsAdmin] = useState<boolean>(false);
-  const [gameCode, setGameCode] = useState<string | null>(null);
-  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // États pour la routine périodique
-  const [routineInterval, setRoutineInterval] = useState<number>(2000); // Valeur par défaut
-  const [isRoutineActive, setIsRoutineActive] = useState<boolean>(true);
-  const [routineExecutionCount, setRoutineExecutionCount] = useState<number>(0);
-  const routineIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [currentPlayerId, setCurrentPlayerId] = useState<number | null>(null);
   const [objectivePropsInitialized, setObjectivePropsInitialized] = useState<boolean>(false);
-  
-  // États pour l'itinéraire en phase de convergence
-  const [routePath, setRoutePath] = useState<[number, number][]>([]);
-  const [distanceToStartZone, setDistanceToStartZone] = useState<number | null>(null);
-  
-  // Référence pour la carte
-  const mapRef = useRef<L.Map | null>(null);
-  
-  // Logo du joueur (choisi aléatoirement parmi les 6 disponibles)
-  const [playerLogo, setPlayerLogo] = useState<string>('joueur_1.png');
-  
-  // État pour les boutons FAB
-  const [isFabOpen, setIsFabOpen] = useState(false);
-  
+
   // État pour détecter si un objectif est à portée
   const [isObjectiveInRange, setIsObjectiveInRange] = useState<boolean>(false);
-  
+
   // État pour suivre si une capture est en cours
   const [isCaptureInProgress, setIsCaptureInProgress] = useState<boolean>(false);
-  
+
   // Référence pour stocker l'ID du toast de capture
   const captureToastRef = useRef<string | number | null>(null);
-
-  // Wake Lock pour empêcher l'écran de se mettre en veille
-  const { releaseWakeLock } = useWakeLock(true);
-
-  // Hook pour la vibration
-  const { vibrate, patterns } = useVibration();
-  
-  // État pour la modal du QR code
-  const [isQRModalOpen, setIsQRModalOpen] = useState(false);
-  
-  // Texte pour le QR code (email + code de partie)
-  const [qrCodeText, setQrCodeText] = useState<string>('');
-
-  // Fonction helper pour gérer les erreurs avec l'email de l'utilisateur
-  const handleErrorWithUser = async (errorMessage: string, error?: any, context?: string) => {
-    const errorResult = await handleError(errorMessage, error, {
-      context: context || ERROR_CONTEXTS.GENERAL,
-      userEmail: currentUser?.email || undefined
-    });
-    setError(errorResult.message);
-    return errorResult;
-  };
-
-  // Effet pour configurer l'intervalle de routine basé sur le paramètre game_refresh_ms
-  useEffect(() => {
-    if (appParams) {
-      const gameRefreshParam = appParams.find(param => param.param_name === 'game_refresh_ms');
-      if (gameRefreshParam && gameRefreshParam.param_value) {
-        const refreshMs = parseInt(gameRefreshParam.param_value);
-        if (!isNaN(refreshMs) && refreshMs > 0) {
-          setRoutineInterval(refreshMs);
-          console.log(`🔄 Intervalle de routine configuré: ${refreshMs}ms`);
-        }
-      }
-    }
-  }, [appParams]);
-
-  // Fonctions pour les boutons FAB
-  const handleNetworkScan = () => {
-    console.log('Scan réseau activé');
-    toast.info('🔍 Scan réseau en cours...');
-    vibrate(patterns.short);
-  };
-
-  const handleVisionMode = () => {
-    console.log('Mode vision activé');
-    toast.success('👁️ Mode vision activé');
-    vibrate(patterns.short);
-  };
-
-  const handleHealthCheck = () => {
-    console.log('Ouverture de la modal QR code');
-    setIsQRModalOpen(true);
-    vibrate(patterns.short);
-  };
-
-  const handleLocationTracker = () => {
-    console.log('Traceur de localisation activé');
-    if (currentPosition && mapRef.current) {
-      mapRef.current.setView(currentPosition, 15);
-      toast.success('📍 Carte recentrée sur votre position');
-    } else if (currentPosition) {
-      toast.info(`📍 Position actuelle: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
-    } else {
-      toast.error('❌ Position non disponible');
-    }
-    vibrate(patterns.short);
-  };
 
   const handleCaptureObjectiv = async () => {
     // Vérifier si une capture est déjà en cours
@@ -290,46 +233,50 @@ const Rogue: React.FC = () => {
         const params = new URLSearchParams(location.search);
         const code = params.get('code');
         setGameCode(code);
-        
+
         if (!code) {
           await handleErrorWithUser('Code de partie non trouvé', null, ERROR_CONTEXTS.VALIDATION);
           return;
         }
 
+        let resolvedUser: { id: number } | null = null;
         // Récupérer l'utilisateur connecté
         if (session?.user) {
           const user = await getUserByAuthId(session.user.id);
           if (user) {
             setCurrentUser(user);
+            resolvedUser = user;
             console.log(`Utilisateur connecté: ${user.email} (ID: ${user.id})`);
-            
+
             // Générer le texte pour le QR code (email + code de partie)
             const qrText = `${user.email};${code}`;
             setQrCodeText(qrText);
             console.log(`QR Code généré: ${qrText}`);
-            
+
             // Récupérer les données de la partie après avoir obtenu l'utilisateur
             const gameService = new GameService();
             const game = await gameService.getGameDatasByCode(code);
-            
+
             if (game && game[0]) {
-              setGameDetails(game[0]);
-              
+              const fetchedGame = game[0];
+              setGameDetails(fetchedGame);
+
               // Récupérer l'ID du joueur actuel en utilisant l'utilisateur connecté
-            if (game[0].players) {
-                const currentPlayer = identifyCurrentPlayer(game[0].players, user.id);
+              const resolvedUserId = resolvedUser?.id;
+              if (fetchedGame.players && resolvedUserId) {
+                const currentPlayer = identifyCurrentPlayer(fetchedGame.players, resolvedUserId);
                 if (currentPlayer) {
                   setCurrentPlayerId(currentPlayer.id_player);
                 }
-                const me = game[0].players.find((p: any) => p.user_id === user.id);
+                const me = fetchedGame.players.find((p: any) => p.user_id === resolvedUserId);
                 setCurrentUserIsAdmin(!!me?.is_admin);
               }
-              
+
               // Récupérer les props d'objectifs
-              if (game[0].props) {
-                setObjectiveProps(game[0].props);
+              if (fetchedGame.props) {
+                setObjectiveProps(fetchedGame.props);
                 setObjectivePropsInitialized(true);
-                console.log(`${game[0].props.length} objectifs initialisés`);
+                console.log(`${fetchedGame.props.length} objectifs initialisés`);
               }
             } else {
               await handleErrorWithUser('Partie non trouvée', null, ERROR_CONTEXTS.DATABASE);
@@ -351,6 +298,26 @@ const Rogue: React.FC = () => {
       fetchGameDetails();
     }
   }, [location.search, session]);
+
+  useEffect(() => {
+    if (gameDetails?.props) {
+      setObjectiveProps(gameDetails.props);
+      setObjectivePropsInitialized(gameDetails.props.length > 0);
+    } else {
+      setObjectiveProps([]);
+      setObjectivePropsInitialized(false);
+    }
+  }, [gameDetails?.props]);
+
+  useEffect(() => {
+    if (gameDetails?.players && currentUser) {
+      const currentPlayer = identifyCurrentPlayer(gameDetails.players, currentUser.id);
+      if (currentPlayer) {
+        setCurrentPlayerId(currentPlayer.id_player);
+        setCurrentUserIsAdmin(!!currentPlayer.is_admin);
+      }
+    }
+  }, [gameDetails?.players, currentUser]);
 
   // Handler pour la fin de partie
   const handleGameEnd = async () => {
@@ -401,51 +368,6 @@ const Rogue: React.FC = () => {
     // Rediriger vers la page de fin de partie (pour tous les joueurs)
     history.push('/end-game');
   };
-
-  useEffect(() => {
-    // Choisir un logo de joueur aléatoirement
-    const logoNumber = Math.floor(Math.random() * 6) + 1;
-    setPlayerLogo(`joueur_${logoNumber}.png`);
-    
-    // Get initial position
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setCurrentPosition([position.coords.latitude, position.coords.longitude]);
-        },
-        (error) => {
-          handleError("Erreur lors de la récupération de la position", error, {
-            context: ERROR_CONTEXTS.NETWORK,
-            userEmail: currentUser?.email || undefined,
-            shouldShowError: false
-          });
-        }
-      );
-
-      // Watch position changes
-      const watchId = navigator.geolocation.watchPosition(
-        (position) => {
-          setCurrentPosition([position.coords.latitude, position.coords.longitude]);
-        },
-        (error) => {
-          handleError("Erreur lors de la surveillance de la position", error, {
-            context: ERROR_CONTEXTS.NETWORK,
-            userEmail: currentUser?.email || undefined,
-            shouldShowError: false
-          });
-        },
-        {
-          enableHighAccuracy: true,
-          maximumAge: 0,
-          timeout: 5000
-        }
-      );
-
-      return () => {
-        navigator.geolocation.clearWatch(watchId);
-      };
-    }
-  }, []);
 
   // Effet pour gérer le compte à rebours
   useEffect(() => {
@@ -537,6 +459,12 @@ const Rogue: React.FC = () => {
       const updatedGame = await updateGameData(code);
       if (updatedGame) {
         setGameDetails(updatedGame);
+        if (Array.isArray(updatedGame.props)) {
+          setObjectiveProps(updatedGame.props);
+          if (updatedGame.props.length > 0) {
+            setObjectivePropsInitialized(true);
+          }
+        }
         // Synchroniser le compte à rebours avec le serveur (UNIQUEMENT pour non-admin)
         if (!currentUserIsAdmin) {
           const serverRemaining = updatedGame.remaining_time;
