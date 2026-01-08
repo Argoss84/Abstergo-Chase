@@ -62,6 +62,7 @@ const Lobby: React.FC = () => {
   const [mapKey, setMapKey] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState('Connexion au lobby...');
+  const [isJoining, setIsJoining] = useState(false);
 
   useWakeLock(true);
   const { vibrate, patterns } = useVibration();
@@ -92,12 +93,20 @@ const Lobby: React.FC = () => {
       }
 
       if (!lobbyCode || lobbyCode !== code) {
+        // Éviter les appels multiples simultanés
+        if (isJoining) {
+          return;
+        }
+        
         try {
+          setIsJoining(true);
           setLoadingMessage('Connexion au lobby WebRTC...');
           await joinLobby(code);
           vibrate(patterns.short);
         } catch (err) {
           await handleErrorWithUser('Impossible de rejoindre le lobby', err, ERROR_CONTEXTS.LOBBY_INIT);
+        } finally {
+          setIsJoining(false);
         }
       }
       setIsLoading(false);

@@ -11,11 +11,28 @@ const lobbies = new Map();
 const clients = new Map();
 const socketsById = new Map();
 
+// Helper pour les logs horodatés
+const log = (...args) => {
+  const timestamp = new Date().toLocaleString('fr-FR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+  console.log(`[${timestamp}]`, ...args);
+};
+
 const generateCode = () =>
   Array.from({ length: 8 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('');
 
 const send = (socket, message) => {
   if (socket && socket.readyState === socket.OPEN) {
+    const clientInfo = clients.get(socket);
+    const recipientId = clientInfo?.clientId || 'unknown';
+    log(`[MESSAGE ENVOYÉ] À: ${recipientId}, Type: ${message.type}`);
     socket.send(JSON.stringify(message));
   }
 };
@@ -34,6 +51,8 @@ wss.on('connection', (socket) => {
   const clientId = randomUUID();
   clients.set(socket, { clientId, lobbyCode: null });
   socketsById.set(clientId, socket);
+  
+  log(`[CONNEXION] Nouveau client connecté: ${clientId}`);
 
   socket.on('message', (raw) => {
     let message;
@@ -45,6 +64,7 @@ wss.on('connection', (socket) => {
     }
 
     const { type, payload } = message;
+    log(`[MESSAGE REÇU] ClientId: ${clientId}, Type: ${type}, Payload:`, payload);
 
     if (type === 'lobby:create') {
       let code = generateCode();
@@ -62,6 +82,8 @@ wss.on('connection', (socket) => {
       lobbies.set(code, lobby);
       clients.get(socket).lobbyCode = code;
 
+      log(`[LOBBY CRÉÉ] Code: ${code}, Host: ${clientId}, Nom: ${payload?.playerName || 'Host'}`);
+
       send(socket, {
         type: 'lobby:created',
         payload: {
@@ -78,12 +100,30 @@ wss.on('connection', (socket) => {
       const code = payload?.code?.toUpperCase();
       const lobby = lobbies.get(code);
       if (!lobby) {
+        log(`[ERREUR LOBBY] Client ${clientId} tente de rejoindre un lobby inexistant: ${code}`);
         send(socket, { type: 'lobby:error', payload: { message: 'Lobby introuvable.' } });
+        return;
+      }
+
+      // Vérifier si le joueur est déjà dans le lobby
+      if (lobby.players.has(clientId)) {
+        log(`[AVERTISSEMENT] Client ${clientId} tente de rejoindre le lobby ${code} une seconde fois - ignoré`);
+        send(socket, {
+          type: 'lobby:joined',
+          payload: {
+            code,
+            playerId: clientId,
+            hostId: lobby.hostId,
+            lobby: getLobbySnapshot(lobby)
+          }
+        });
         return;
       }
 
       lobby.players.set(clientId, { id: clientId, name: payload?.playerName || 'Joueur', isHost: false });
       clients.get(socket).lobbyCode = code;
+
+      log(`[LOBBY REJOINT] Code: ${code}, Joueur: ${clientId}, Nom: ${payload?.playerName || 'Joueur'}`);
 
       send(socket, {
         type: 'lobby:joined',
@@ -110,6 +150,7 @@ wss.on('connection', (socket) => {
       const targetId = payload?.targetId;
       const targetSocket = socketsById.get(targetId);
       if (!targetSocket) {
+        log(`[ERREUR WEBRTC] Signal de ${clientId} vers ${targetId} échoué: destinataire introuvable`);
         send(socket, {
           type: 'lobby:error',
           payload: { message: 'Destinataire WebRTC introuvable.' }
@@ -117,6 +158,8 @@ wss.on('connection', (socket) => {
         return;
       }
 
+      log(`[SIGNAL WEBRTC] De: ${clientId}, Vers: ${targetId}, Type signal: ${payload?.signal?.type || 'unknown'}`);
+      
       send(targetSocket, {
         type: 'webrtc:signal',
         payload: {
@@ -132,18 +175,22 @@ wss.on('connection', (socket) => {
     const clientInfo = clients.get(socket);
     if (!clientInfo) return;
 
+    log(`[DÉCONNEXION] Client déconnecté: ${clientInfo.clientId}`);
+    
     const { lobbyCode } = clientInfo;
     if (lobbyCode && lobbies.has(lobbyCode)) {
       const lobby = lobbies.get(lobbyCode);
       lobby.players.delete(clientId);
 
       if (lobby.hostId === clientId) {
+        log(`[LOBBY FERMÉ] Code: ${lobbyCode}, Host déconnecté: ${clientId}`);
         lobbies.delete(lobbyCode);
         lobby.players.forEach((player) => {
           const playerSocket = socketsById.get(player.id);
           send(playerSocket, { type: 'lobby:closed', payload: { code: lobbyCode } });
         });
       } else {
+        log(`[JOUEUR PARTI] Lobby: ${lobbyCode}, Joueur: ${clientId}`);
         const hostSocket = socketsById.get(lobby.hostId);
         send(hostSocket, { type: 'lobby:peer-left', payload: { playerId: clientId } });
       }
@@ -155,5 +202,9 @@ wss.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`WebRTC signaling server listening on :${PORT}`);
+  log('========================================');
+  log(`🚀 Serveur de signalisation WebRTC démarré`);
+  log(`📡 Port: ${PORT}`);
+  log(`📊 Logs des signaux activés`);
+  log('========================================');
 });

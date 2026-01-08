@@ -430,11 +430,13 @@ const Agent: React.FC = () => {
           setCurrentPosition([position.coords.latitude, position.coords.longitude]);
         },
         (error) => {
-          handleError("Erreur lors de la récupération de la position", error, {
-            context: ERROR_CONTEXTS.NETWORK,
-            userEmail: playerName || undefined,
-            shouldShowError: false
-          });
+          console.log("Geolocation error on initial position:", error.code, error.message);
+          // Don't log error - position will be updated by watchPosition
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 15000, // Increased timeout to 15 seconds
+          maximumAge: 10000 // Accept cached position up to 10 seconds old
         }
       );
 
@@ -444,16 +446,13 @@ const Agent: React.FC = () => {
           setCurrentPosition([position.coords.latitude, position.coords.longitude]);
         },
         (error) => {
-          handleError("Erreur lors de la surveillance de la position", error, {
-            context: ERROR_CONTEXTS.NETWORK,
-            userEmail: playerName || undefined,
-            shouldShowError: false
-          });
+          console.log("Geolocation watch error:", error.code, error.message);
+          // Don't log to error handler - watchPosition will keep trying
         },
         {
           enableHighAccuracy: true,
-          maximumAge: 0,
-          timeout: 5000
+          maximumAge: 1000, // Accept position up to 1 second old for smoother tracking
+          timeout: 15000 // Increased timeout to 15 seconds
         }
       );
 

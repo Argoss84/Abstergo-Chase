@@ -51,7 +51,9 @@ class GameSessionService {
   subscribe(listener: (state: SessionState) => void) {
     this.listeners.add(listener);
     listener(this.state);
-    return () => this.listeners.delete(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   getState() {
@@ -275,6 +277,12 @@ class GameSessionService {
   }
 
   private async handlePeerJoined(playerId: string, playerName: string) {
+    // Vérifier si le joueur n'existe pas déjà pour éviter les doublons
+    if (this.state.players.some((player) => player.id_player === playerId)) {
+      console.warn(`Player ${playerId} already exists in the lobby`);
+      return;
+    }
+
     const newPlayer: Player = {
       id_player: playerId,
       user_id: playerId,

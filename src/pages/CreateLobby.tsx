@@ -191,6 +191,8 @@ const CreateLobby: React.FC = () => {
         winner_type: null,
         is_converging_phase: false,
         started: false,
+        city: null,
+        started_date: null,
         props: [],
         players: []
       };
@@ -231,47 +233,10 @@ const CreateLobby: React.FC = () => {
   };
 
   useEffect(() => {
-    console.log('Attempting to get user location...');
-    // Get user's current position
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          console.log('Got user position:', position.coords.latitude, position.coords.longitude);
-          const newPosition: [number, number] = [position.coords.latitude, position.coords.longitude];
-          setUserPosition(newPosition);
-          setMapKey(prev => prev + 1); // Force map re-render
-          // Also update the form data with the initial position
-          setFormData(prev => ({
-            ...prev,
-            map_center_latitude: newPosition[0].toString(),
-            map_center_longitude: newPosition[1].toString()
-          }));
-        },
-        (error) => {
-          handleError('Erreur lors de la récupération de la position', error, {
-            context: ERROR_CONTEXTS.NETWORK,
-            shouldShowError: false
-          });
-          // Fallback to Paris coordinates if geolocation fails
-          const fallbackPosition: [number, number] = [48.8566, 2.3522];
-          setUserPosition(fallbackPosition);
-          setMapKey(prev => prev + 1);
-          setFormData(prev => ({
-            ...prev,
-            map_center_latitude: fallbackPosition[0].toString(),
-            map_center_longitude: fallbackPosition[1].toString()
-          }));
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 5000,
-          maximumAge: 0
-        }
-      );
-    } else {
-      console.log('Geolocation not supported');
-      // Fallback to Paris coordinates if geolocation is not supported
-      const fallbackPosition: [number, number] = [48.8566, 2.3522];
+    const fallbackPosition: [number, number] = [48.8566, 2.3522];
+    
+    const setFallbackPosition = () => {
+      console.log('Using fallback position (Paris)');
       setUserPosition(fallbackPosition);
       setMapKey(prev => prev + 1);
       setFormData(prev => ({
@@ -279,7 +244,70 @@ const CreateLobby: React.FC = () => {
         map_center_latitude: fallbackPosition[0].toString(),
         map_center_longitude: fallbackPosition[1].toString()
       }));
+    };
+
+    const setPosition = (position: GeolocationPosition) => {
+      console.log('Got user position:', position.coords.latitude, position.coords.longitude);
+      const newPosition: [number, number] = [position.coords.latitude, position.coords.longitude];
+      setUserPosition(newPosition);
+      setMapKey(prev => prev + 1);
+      setFormData(prev => ({
+        ...prev,
+        map_center_latitude: newPosition[0].toString(),
+        map_center_longitude: newPosition[1].toString()
+      }));
+    };
+
+    console.log('Attempting to get user location...');
+    
+    if (!navigator.geolocation) {
+      console.log('Geolocation not supported');
+      setFallbackPosition();
+      return;
     }
+
+    // Try with low accuracy first (faster)
+    const timeoutId = setTimeout(() => {
+      console.log('Quick position attempt timed out, using fallback');
+      setFallbackPosition();
+    }, 3000);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        clearTimeout(timeoutId);
+        setPosition(position);
+      },
+      (error) => {
+        clearTimeout(timeoutId);
+        console.log('Geolocation error:', error.code, error.message);
+        
+        // If timeout or position unavailable, try one more time with different settings
+        if (error.code === 3 || error.code === 2) {
+          console.log('Retrying with cached position...');
+          navigator.geolocation.getCurrentPosition(
+            setPosition,
+            (retryError) => {
+              console.log('Retry failed, using fallback position:', retryError.message);
+              setFallbackPosition();
+            },
+            {
+              enableHighAccuracy: false,
+              timeout: 5000,
+              maximumAge: 300000 // Accept position up to 5 minutes old
+            }
+          );
+        } else {
+          // Permission denied or other error - use fallback without error logging
+          console.log('Geolocation not available (code:', error.code, '), using fallback position');
+          setFallbackPosition();
+        }
+      },
+      {
+        enableHighAccuracy: false,
+        timeout: 10000,
+        maximumAge: 60000 // Accept position up to 1 minute old
+      }
+    );
   }, []);
 
   useEffect(() => {
