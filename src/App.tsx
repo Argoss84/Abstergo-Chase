@@ -5,9 +5,6 @@ import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import Home from './pages/Home';
 import NotFound from './pages/NotFound';
-import { useAuth, supabaseClient } from './contexts/AuthenticationContext';
-import { Auth } from '@supabase/auth-ui-react';
-import { ThemeSupa } from '@supabase/auth-ui-shared';
 
 /* Core CSS required for Ionic components to work properly */
 import '@ionic/react/css/core.css';
@@ -48,43 +45,22 @@ import { WakeLockProvider } from './components/WakeLockProvider';
 setupIonicReact();
 
 const App: React.FC = () => {
-  const { session, loading } = useAuth();
-
-  if (loading) {
-    return <div>Loading...</div>; // Vous pouvez remplacer cela par un indicateur de chargement personnalisé
-  }
-
   return (
     <WakeLockProvider enabled={true}>
       <IonApp>
         <IonReactRouter>
           <IonRouterOutlet>
-            {!session ? (
-              <Route exact path="/">
-                <Auth 
-                  supabaseClient={supabaseClient}
-                  appearance={{
-                    theme: ThemeSupa,
-                    style: {
-                      input: { background: 'grey', color: 'white' },
-                      button: { background: 'grey', color: 'white'}
-                    },
-                  }} 
-                />
-              </Route>
-            ) : (
-              <Switch>
-                <Route exact path="/" render={() => <Redirect to="/home" />} />
-                <Route exact path="/home" render={() => <Home />} />
-                <Route exact path="/create-lobby" render={() => <CreateLobby />} />
-                <Route exact path="/join-lobby" render={() => <JoinLobby />} />
-                <Route exact path="/lobby" render={() => <Lobby />} />
-                <Route exact path="/agent" render={() => <Agent />} />
-                <Route exact path="/rogue" render={() => <Rogue />} />
-                <Route exact path="/end-game" render={() => <EndGame />} />
-                <Route path="*" component={NotFound} />
-              </Switch>
-            )}
+            <Switch>
+              <Route exact path="/" render={() => <Redirect to="/home" />} />
+              <Route exact path="/home" render={() => <Home />} />
+              <Route exact path="/create-lobby" render={() => <CreateLobby />} />
+              <Route exact path="/join-lobby" render={() => <JoinLobby />} />
+              <Route exact path="/lobby" render={() => <Lobby />} />
+              <Route exact path="/agent" render={() => <Agent />} />
+              <Route exact path="/rogue" render={() => <Rogue />} />
+              <Route exact path="/end-game" render={() => <EndGame />} />
+              <Route path="*" component={NotFound} />
+            </Switch>
           </IonRouterOutlet>
         </IonReactRouter>
         

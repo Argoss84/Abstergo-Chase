@@ -10,6 +10,7 @@
     "test.e2e": "cypress run",
     "test.unit": "vitest",
     "lint": "eslint",
+    "server": "node server/index.js",
     "ionic:build": "npm run build",
     "ionic:serve": "npm run dev -- --open"
   },
@@ -21,9 +22,6 @@
     "@capacitor/status-bar": "latest",
     "@ionic/react": "^8.7.3",
     "@ionic/react-router": "^8.7.3",
-    "@supabase/auth-ui-react": "^0.4.7",
-    "@supabase/auth-ui-shared": "^0.1.8",
-    "@supabase/supabase-js": "^2.56.0",
     "@types/leaflet": "^1.9.20",
     "@types/react-router": "^5.1.20",
     "@types/react-router-dom": "^5.3.3",
@@ -36,7 +34,8 @@
     "react-leaflet": "^4.2.1",
     "react-router": "^5.3.4",
     "react-router-dom": "^5.3.4",
-    "react-toastify": "^11.0.5"
+    "react-toastify": "^11.0.5",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@capacitor/cli": "latest",

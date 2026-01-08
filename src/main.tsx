@@ -1,14 +1,14 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
-import { AuthProvider } from './contexts/AuthenticationContext';
+import { GameSessionProvider } from './contexts/GameSessionContext';
 
 const container = document.getElementById('root');
 const root = createRoot(container!);
 root.render(
   <React.StrictMode>
-        <AuthProvider>
-          <App />
-        </AuthProvider>
+    <GameSessionProvider>
+      <App />
+    </GameSessionProvider>
   </React.StrictMode>
 );

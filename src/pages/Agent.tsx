@@ -6,19 +6,13 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
 import { toast } from 'react-toastify';
-import GameService from '../services/GameService';
 import { 
   generateRandomPointInCircle, 
   fetchRoute, 
   calculateDistanceToStartZone, 
   isPlayerInStartZone 
 } from '../utils/utils';
-import {
-  updatePlayerPosition,
-  updatePlayerInStartZone,
-  updateGameData,
-  identifyCurrentPlayer
-} from '../utils/PlayerUtils';
+import { updatePlayerPosition, updatePlayerInStartZone, updateGameData } from '../utils/PlayerUtils';
 import { updateGameWinnerType } from '../utils/AdminUtils';
 import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, settings, skullOutline } from 'ionicons/icons';
 import './Agent.css';
@@ -27,8 +21,7 @@ import PopUpMarker from '../components/PopUpMarker';
 import Compass from '../components/Compass';
 import Camera from '../components/Camera';
 import QRCode from '../components/QRCode';
-import { useAuth } from '../contexts/AuthenticationContext';
-import { getUserByAuthId, getUserByEmail } from '../services/UserServices';
+import { useGameSession } from '../contexts/GameSessionContext';
 import { useWakeLock } from '../utils/useWakeLock';
 import { useVibration } from '../hooks/useVibration';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
@@ -59,7 +52,15 @@ const MapController = ({ onMapReady }: { onMapReady: (map: L.Map) => void }) => 
 const Agent: React.FC = () => {
   const history = useHistory();
   const location = useLocation();
-  const { session, userEmail, appParams } = useAuth();
+  const {
+    playerId,
+    playerName,
+    gameDetails: sessionGameDetails,
+    joinLobby,
+    updateGameDetails,
+    updatePlayer,
+    isHost
+  } = useGameSession();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
   const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -74,8 +75,7 @@ const Agent: React.FC = () => {
   const [isRoutineActive, setIsRoutineActive] = useState<boolean>(true);
   const [routineExecutionCount, setRoutineExecutionCount] = useState<number>(0);
   const routineIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [currentPlayerId, setCurrentPlayerId] = useState<number | null>(null);
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   const [objectiveCirclesInitialized, setObjectiveCirclesInitialized] = useState<boolean>(false);
   const [currentUserIsAdmin, setCurrentUserIsAdmin] = useState<boolean>(false);
   const [gameCode, setGameCode] = useState<string | null>(null);
@@ -95,7 +95,7 @@ const Agent: React.FC = () => {
   const [playerLogo, setPlayerLogo] = useState<string>('joueur_1.png');
 
   // Wake Lock pour empêcher l'écran de se mettre en veille
-  const { releaseWakeLock } = useWakeLock(true);
+  useWakeLock(true);
 
   // Hook pour la vibration
   const { vibrate, patterns } = useVibration();
@@ -110,7 +110,7 @@ const Agent: React.FC = () => {
   const handleErrorWithUser = async (errorMessage: string, error?: any, context?: string) => {
     const errorResult = await handleError(errorMessage, error, {
       context: context || ERROR_CONTEXTS.GENERAL,
-      userEmail: userEmail || undefined
+      userEmail: playerName || undefined
     });
     setError(errorResult.message);
     return errorResult;
@@ -175,17 +175,10 @@ const Agent: React.FC = () => {
     let isCurrentPlayerAdmin = false;
     
     if (currentPlayerId) {
-      // Méthode 1: Chercher par currentPlayerId
       const playerById = gameDetails?.players?.find(
         player => player.id_player === currentPlayerId
       );
       isCurrentPlayerAdmin = playerById?.is_admin || false;
-    } else if (currentUser) {
-      // Méthode 2: Chercher par user_id si currentPlayerId n'est pas disponible
-      const playerByUserId = gameDetails?.players?.find(
-        player => player.user_id === currentUser.id
-      );
-      isCurrentPlayerAdmin = playerByUserId?.is_admin || false;
     }
     if (currentUserIsAdmin) {
       console.log('👑 ADMIN - Fin de partie détectée');
@@ -195,8 +188,7 @@ const Agent: React.FC = () => {
       const code = params.get('code');
       if (code) {
         try {
-          const gameService = new GameService();
-          await gameService.updateGameByCode(code, { remaining_time: 0 });
+          await updateGameDetails({ remaining_time: 0 });
         } catch (_) {}
         const success = await updateGameWinnerType(code, 'AGENT');
         if (success) {
@@ -223,8 +215,7 @@ const Agent: React.FC = () => {
         await handleErrorWithUser('Code de partie introuvable pour démarrer', null, ERROR_CONTEXTS.GAME_START);
         return;
       }
-      const gameService = new GameService();
-      await gameService.updateGameByCode(code, {
+      await updateGameDetails({
         started: true,
         is_converging_phase: false
       });
@@ -380,50 +371,24 @@ const Agent: React.FC = () => {
         const params = new URLSearchParams(location.search);
         const code = params.get('code');
         setGameCode(code);
-        
+
         if (!code) {
           await handleErrorWithUser('Code de partie non trouvé', null, ERROR_CONTEXTS.VALIDATION);
           return;
         }
 
-        // Récupérer l'utilisateur connecté
-        if (session?.user) {
-          const user = await getUserByAuthId(session.user.id);
-          if (user) {
-            setCurrentUser(user);
-            console.log(`Utilisateur connecté: ${user.email} (ID: ${user.id})`);
-            
-            // Générer le texte pour le QR code (email + code de partie)
-            const qrText = `${user.email};${code}`;
-            setQrCodeText(qrText);
-            console.log(`QR Code généré: ${qrText}`);
-          } else {
-            await handleErrorWithUser('Utilisateur non trouvé', null, ERROR_CONTEXTS.AUTHENTICATION);
-            return;
-          }
-        } else {
-          await handleErrorWithUser('Utilisateur non connecté', null, ERROR_CONTEXTS.AUTHENTICATION);
-          return;
+        if (!sessionGameDetails || sessionGameDetails.code !== code) {
+          await joinLobby(code);
         }
 
-        const gameService = new GameService();
-        const game = await gameService.getGameDatasByCode(code);
-        
-        if (game && game[0]) {
-          setGameDetails(game[0]);
-          
-          // Récupérer l'ID du joueur actuel en utilisant l'utilisateur connecté
-          if (game[0].players && currentUser) {
-            const currentPlayer = identifyCurrentPlayer(game[0].players, currentUser.id);
-            if (currentPlayer) {
-              setCurrentPlayerId(currentPlayer.id_player);
-              
-            }
-          }
-          
-          // Générer les cercles d'objectifs
-          if (game[0].props) {
-            const circles = game[0].props.map((prop: GameProp) => ({
+        setQrCodeText(`${playerId};${code}`);
+
+        if (sessionGameDetails) {
+          setGameDetails(sessionGameDetails);
+          setCurrentPlayerId(playerId);
+
+          if (sessionGameDetails.props) {
+            const circles = sessionGameDetails.props.map((prop: GameProp) => ({
               id_prop: prop.id_prop,
               center: generateRandomPointInCircle(
                 [parseFloat(prop.latitude || '0'), parseFloat(prop.longitude || '0')],
@@ -435,31 +400,23 @@ const Agent: React.FC = () => {
             setObjectiveCirclesInitialized(true);
             console.log(`${circles.length} cercles d'objectifs initialisés`);
           }
-        } else {
-          await handleErrorWithUser('Partie non trouvée', null, ERROR_CONTEXTS.DATABASE);
         }
       } catch (err) {
         await handleErrorWithUser('Erreur lors du chargement de la partie', err, ERROR_CONTEXTS.DATABASE);
       }
     };
 
-    if (session?.user) {
+    if (playerId) {
       fetchGameDetails();
     }
-  }, [location.search, session]);
+  }, [location.search, playerId, playerName, sessionGameDetails]);
 
   // Déterminer si l'utilisateur courant est admin
   useEffect(() => {
-    let isAdmin = false;
-    if (currentPlayerId) {
-      const playerById = gameDetails?.players?.find(p => p.id_player === currentPlayerId);
-      isAdmin = playerById?.is_admin || false;
-    } else if (currentUser) {
-      const playerByUserId = gameDetails?.players?.find(p => p.user_id === currentUser.id);
-      isAdmin = playerByUserId?.is_admin || false;
-    }
+    const playerById = gameDetails?.players?.find(p => p.id_player === playerId);
+    const isAdmin = playerById?.is_admin || isHost;
     setCurrentUserIsAdmin(isAdmin);
-  }, [currentPlayerId, currentUser, gameDetails?.players]);
+  }, [playerId, gameDetails?.players, isHost]);
 
   useEffect(() => {
     // Choisir un logo de joueur aléatoirement
@@ -475,7 +432,7 @@ const Agent: React.FC = () => {
         (error) => {
           handleError("Erreur lors de la récupération de la position", error, {
             context: ERROR_CONTEXTS.NETWORK,
-            userEmail: userEmail || undefined,
+            userEmail: playerName || undefined,
             shouldShowError: false
           });
         }
@@ -489,7 +446,7 @@ const Agent: React.FC = () => {
         (error) => {
           handleError("Erreur lors de la surveillance de la position", error, {
             context: ERROR_CONTEXTS.NETWORK,
-            userEmail: userEmail || undefined,
+            userEmail: playerName || undefined,
             shouldShowError: false
           });
         },
@@ -583,27 +540,16 @@ const Agent: React.FC = () => {
     const pushRemainingTime = async () => {
       try {
         if (currentUserIsAdmin && isCountdownActive && countdown !== null && gameCode) {
-          const gameService = new GameService();
-          await gameService.updateGameByCode(gameCode, { remaining_time: countdown });
+          await updateGameDetails({ remaining_time: countdown });
         }
       } catch (_) {}
     };
     pushRemainingTime();
   }, [countdown, isCountdownActive, currentUserIsAdmin, gameCode]);
 
-  // Effet pour configurer l'intervalle de routine basé sur le paramètre game_refresh_ms
   useEffect(() => {
-    if (appParams) {
-      const gameRefreshParam = appParams.find(param => param.param_name === 'game_refresh_ms');
-      if (gameRefreshParam && gameRefreshParam.param_value) {
-        const refreshMs = parseInt(gameRefreshParam.param_value);
-        if (!isNaN(refreshMs) && refreshMs > 0) {
-          setRoutineInterval(refreshMs);
-          console.log(`🔄 Intervalle de routine configuré: ${refreshMs}ms`);
-        }
-      }
-    }
-  }, [appParams]);
+    setRoutineInterval(2000);
+  }, []);
 
   return (
     <IonPage>
@@ -848,18 +794,18 @@ const Agent: React.FC = () => {
                   const raw = (qrCode || '').trim();
                   if (!raw) return;
 
-                  let scannedEmail: string | null = null;
+                  let scannedPlayerId: string | null = null;
                   let scannedGameCode: string | null = null;
                   if (raw.includes(';')) {
                     const parts = raw.split(';');
-                    scannedEmail = (parts[0] || '').trim();
+                    scannedPlayerId = (parts[0] || '').trim();
                     scannedGameCode = (parts[1] || '').trim() || null;
                   } else {
-                    scannedEmail = raw;
+                    scannedPlayerId = raw;
                   }
 
-                  if (!scannedEmail) {
-                    await handleErrorWithUser('QR Code invalide: email manquant', null, ERROR_CONTEXTS.VALIDATION);
+                  if (!scannedPlayerId) {
+                    await handleErrorWithUser('QR Code invalide: identifiant manquant', null, ERROR_CONTEXTS.VALIDATION);
                     return;
                   }
 
@@ -868,13 +814,7 @@ const Agent: React.FC = () => {
                     return;
                   }
 
-                  const scannedUser = await getUserByEmail(scannedEmail);
-                  if (!scannedUser) {
-                    await handleErrorWithUser('Utilisateur du QR code introuvable', null, ERROR_CONTEXTS.DATABASE);
-                    return;
-                  }
-
-                  const targetPlayer = gameDetails?.players?.find(p => p.user_id === scannedUser.id);
+                  const targetPlayer = gameDetails?.players?.find(p => p.id_player === scannedPlayerId);
                   if (!targetPlayer) {
                     await handleErrorWithUser('Joueur du QR code introuvable dans cette partie', null, ERROR_CONTEXTS.DATABASE);
                     return;
@@ -890,8 +830,7 @@ const Agent: React.FC = () => {
                     return;
                   }
 
-                  const gameService = new GameService();
-                  await gameService.updatePlayer(targetPlayer.id_player.toString(), {
+                  await updatePlayer(targetPlayer.id_player.toString(), {
                     status: 'CAPTURED',
                     updated_at: new Date().toISOString()
                   });
@@ -934,7 +873,7 @@ const Agent: React.FC = () => {
                   <h2 className="qr-modal-title">Votre QR Code</h2>
                   <QRCode value={qrCodeText} size={300} />
                   <p className="qr-modal-email">
-                    {currentUser?.email}
+                    {playerName}
                   </p>
                   <p className="qr-modal-code">
                     Code: {gameDetails?.code}

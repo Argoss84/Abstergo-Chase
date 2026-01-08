@@ -51,9 +51,9 @@ export interface ObjectiveCircle {
 }
 
 export interface Player {
-  id_player: number;
+  id_player: string;
   created_at: string;
-  user_id: number;
+  user_id: string;
   id_game: number;
   latitude: string | null;
   longitude: string | null;
@@ -64,4 +64,5 @@ export interface Player {
   status: string | null;
   updated_at: string | null;
   is_admin: boolean | null;
+  displayName?: string;
 } 

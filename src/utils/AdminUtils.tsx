@@ -1,4 +1,4 @@
-import GameService from '../services/GameService';
+import { gameSessionService } from '../services/GameSessionService';
 
 /**
  * Met à jour le winner_type d'une partie
@@ -9,20 +9,16 @@ import GameService from '../services/GameService';
 export const updateGameWinnerType = async (gameCode: string, winnerType: string): Promise<boolean> => {
   try {
     console.log(`🏆 Mise à jour du winner_type pour la partie ${gameCode} -> ${winnerType}`);
-    
-    const gameService = new GameService();
-    
-    // Utiliser la méthode updateGameByCode existante
-    const result = await gameService.updateGameByCode(gameCode, { winner_type: winnerType });
-    
-    if (result && result.length > 0) {
-      console.log(`✅ Winner_type mis à jour avec succès: ${winnerType}`);
-      return true;
-    } else {
-      console.error(`❌ Échec de la mise à jour du winner_type pour ${gameCode}`);
+
+    const currentState = gameSessionService.getState();
+    if (!currentState.gameDetails || currentState.gameDetails.code !== gameCode) {
+      console.error(`❌ Partie introuvable pour ${gameCode}`);
       return false;
     }
-    
+
+    await gameSessionService.updateGameDetails({ winner_type: winnerType });
+    console.log(`✅ Winner_type mis à jour avec succès: ${winnerType}`);
+    return true;
   } catch (error) {
     console.error('❌ Erreur lors de la mise à jour du winner_type:', error);
     return false;

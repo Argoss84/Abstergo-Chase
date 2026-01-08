@@ -1,10 +1,9 @@
-import GameService from '../services/GameService';
+import { gameSessionService } from '../services/GameSessionService';
 
 // Fonction pour mettre à jour la position du joueur en base de données
-export const updatePlayerPosition = async (playerId: number, latitude: number, longitude: number) => {
+export const updatePlayerPosition = async (playerId: string, latitude: number, longitude: number) => {
   try {
-    const gameService = new GameService();
-    await gameService.updatePlayer(playerId.toString(), {
+    await gameSessionService.updatePlayer(playerId.toString(), {
       latitude: latitude.toString(),
       longitude: longitude.toString(),
       updated_at: new Date().toISOString()
@@ -16,10 +15,9 @@ export const updatePlayerPosition = async (playerId: number, latitude: number, l
 };
 
 // Fonction pour mettre à jour le statut IsInStartZone du joueur
-export const updatePlayerInStartZone = async (playerId: number, isInStartZone: boolean) => {
+export const updatePlayerInStartZone = async (playerId: string, isInStartZone: boolean) => {
   try {
-    const gameService = new GameService();
-    await gameService.updatePlayer(playerId.toString(), {
+    await gameSessionService.updatePlayer(playerId.toString(), {
       isInStartZone: isInStartZone,
       updated_at: new Date().toISOString()
     });
@@ -37,14 +35,12 @@ export const updateGameData = async (code: string) => {
       return null;
     }
 
-    const gameService = new GameService();
-    const game = await gameService.getGameDatasByCode(code);
-    
-    if (game && game[0]) { 
-      return game[0];
+    const currentState = gameSessionService.getState();
+    if (currentState.gameDetails && currentState.gameDetails.code === code) {
+      return currentState.gameDetails;
     }
-    
-    return null;
+
+    return currentState.gameDetails;
   } catch (error) {
     console.error('Erreur lors de la mise à jour des données de la partie:', error);
     return null;
@@ -52,7 +48,7 @@ export const updateGameData = async (code: string) => {
 };
 
 // Fonction pour identifier le joueur actuel dans une partie
-export const identifyCurrentPlayer = (gamePlayers: any[], currentUserId: number) => {
+export const identifyCurrentPlayer = (gamePlayers: any[], currentUserId: string) => {
   if (gamePlayers && gamePlayers.length > 0 && currentUserId) {
     const currentPlayer = gamePlayers.find((player: any) => player.user_id === currentUserId);
     if (currentPlayer) {

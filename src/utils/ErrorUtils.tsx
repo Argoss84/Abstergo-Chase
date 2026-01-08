@@ -1,4 +1,3 @@
-import { LogService } from '../services/LogService';
 
 /**
  * Interface pour les options de gestion d'erreur
@@ -43,18 +42,9 @@ export const handleError = async (
   // Log dans la console
   console.error(fullMessage, error);
   
-  // Logger l'erreur dans la base de données si demandé et si un email est fourni
+  // Logging distant désactivé (pas de backend Supabase)
   if (shouldLog && userEmail) {
-    try {
-      await LogService.quickLog(
-        userEmail,
-        context,
-        `Erreur: ${errorMessage}`,
-        error ? JSON.stringify(error) : "null"
-      );
-    } catch (logError) {
-      console.error('Erreur lors du logging:', logError);
-    }
+    console.warn('Logging distant désactivé pour', userEmail);
   }
   
   return {

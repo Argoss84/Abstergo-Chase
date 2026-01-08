@@ -5,19 +5,13 @@ import { MapContainer, TileLayer, Circle, Marker, useMap, Polyline, Popup } from
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { toast } from 'react-toastify';
-import GameService from '../services/GameService';
 import { 
   generateRandomPointInCircle, 
   calculateDistanceToStartZone, 
   isPlayerInStartZone,
   fetchRoute
 } from '../utils/utils';
-import { 
-  updatePlayerPosition,
-  updatePlayerInStartZone,
-  updateGameData,
-  identifyCurrentPlayer
-} from '../utils/PlayerUtils';
+import { updatePlayerPosition, updatePlayerInStartZone, updateGameData } from '../utils/PlayerUtils';
 import { updateGameWinnerType } from '../utils/AdminUtils';
 import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, radioOutline, settings, skullOutline } from 'ionicons/icons';
 import './Rogue.css';
@@ -25,8 +19,7 @@ import { GameProp, GameDetails, ObjectiveCircle } from '../components/Interfaces
 import PopUpMarker from '../components/PopUpMarker';
 import Compass from '../components/Compass';
 import QRCode from '../components/QRCode';
-import { useAuth } from '../contexts/AuthenticationContext';
-import { getUserByAuthId } from '../services/UserServices';
+import { useGameSession } from '../contexts/GameSessionContext';
 import { useWakeLock } from '../utils/useWakeLock';
 import { useVibration } from '../hooks/useVibration';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
@@ -55,12 +48,19 @@ const MapController = ({ onMapReady }: { onMapReady: (map: L.Map) => void }) => 
 const Rogue: React.FC = () => {
   const history = useHistory();
   const location = useLocation();
-  const { session, appParams } = useAuth();
+  const {
+    playerId,
+    playerName,
+    gameDetails: sessionGameDetails,
+    joinLobby,
+    updateGameDetails,
+    updateProp,
+    isHost
+  } = useGameSession();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
   const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [objectiveProps, setObjectiveProps] = useState<GameProp[]>([]);
-  const [currentUser, setCurrentUser] = useState<any>(null);
   
   // États pour le compte à rebours
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -74,7 +74,7 @@ const Rogue: React.FC = () => {
   const [isRoutineActive, setIsRoutineActive] = useState<boolean>(true);
   const [routineExecutionCount, setRoutineExecutionCount] = useState<number>(0);
   const routineIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [currentPlayerId, setCurrentPlayerId] = useState<number | null>(null);
+  const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   const [objectivePropsInitialized, setObjectivePropsInitialized] = useState<boolean>(false);
   
   // États pour l'itinéraire en phase de convergence
@@ -100,7 +100,7 @@ const Rogue: React.FC = () => {
   const captureToastRef = useRef<string | number | null>(null);
 
   // Wake Lock pour empêcher l'écran de se mettre en veille
-  const { releaseWakeLock } = useWakeLock(true);
+  useWakeLock(true);
 
   // Hook pour la vibration
   const { vibrate, patterns } = useVibration();
@@ -115,25 +115,15 @@ const Rogue: React.FC = () => {
   const handleErrorWithUser = async (errorMessage: string, error?: any, context?: string) => {
     const errorResult = await handleError(errorMessage, error, {
       context: context || ERROR_CONTEXTS.GENERAL,
-      userEmail: currentUser?.email || undefined
+      userEmail: playerName || undefined
     });
     setError(errorResult.message);
     return errorResult;
   };
 
-  // Effet pour configurer l'intervalle de routine basé sur le paramètre game_refresh_ms
   useEffect(() => {
-    if (appParams) {
-      const gameRefreshParam = appParams.find(param => param.param_name === 'game_refresh_ms');
-      if (gameRefreshParam && gameRefreshParam.param_value) {
-        const refreshMs = parseInt(gameRefreshParam.param_value);
-        if (!isNaN(refreshMs) && refreshMs > 0) {
-          setRoutineInterval(refreshMs);
-          console.log(`🔄 Intervalle de routine configuré: ${refreshMs}ms`);
-        }
-      }
-    }
-  }, [appParams]);
+    setRoutineInterval(2000);
+  }, []);
 
   // Fonctions pour les boutons FAB
   const handleNetworkScan = () => {
@@ -232,8 +222,7 @@ const Rogue: React.FC = () => {
             
             try {
               // Mettre à jour l'objectif capturé
-              const gameService = new GameService();
-              await gameService.updateProp(objectiveInRange.id_prop.toString(), {
+              await updateProp(objectiveInRange.id_prop, {
                 visible: false,
                 state: "CAPTURED"
               });
@@ -272,8 +261,7 @@ const Rogue: React.FC = () => {
         await handleErrorWithUser('Code de partie introuvable pour démarrer', null, ERROR_CONTEXTS.GAME_START);
         return;
       }
-      const gameService = new GameService();
-      await gameService.updateGameByCode(code, {
+      await updateGameDetails({
         started: true,
         is_converging_phase: false
       });
@@ -290,67 +278,39 @@ const Rogue: React.FC = () => {
         const params = new URLSearchParams(location.search);
         const code = params.get('code');
         setGameCode(code);
-        
+
         if (!code) {
           await handleErrorWithUser('Code de partie non trouvé', null, ERROR_CONTEXTS.VALIDATION);
           return;
         }
 
-        // Récupérer l'utilisateur connecté
-        if (session?.user) {
-          const user = await getUserByAuthId(session.user.id);
-          if (user) {
-            setCurrentUser(user);
-            console.log(`Utilisateur connecté: ${user.email} (ID: ${user.id})`);
-            
-            // Générer le texte pour le QR code (email + code de partie)
-            const qrText = `${user.email};${code}`;
-            setQrCodeText(qrText);
-            console.log(`QR Code généré: ${qrText}`);
-            
-            // Récupérer les données de la partie après avoir obtenu l'utilisateur
-            const gameService = new GameService();
-            const game = await gameService.getGameDatasByCode(code);
-            
-            if (game && game[0]) {
-              setGameDetails(game[0]);
-              
-              // Récupérer l'ID du joueur actuel en utilisant l'utilisateur connecté
-            if (game[0].players) {
-                const currentPlayer = identifyCurrentPlayer(game[0].players, user.id);
-                if (currentPlayer) {
-                  setCurrentPlayerId(currentPlayer.id_player);
-                }
-                const me = game[0].players.find((p: any) => p.user_id === user.id);
-                setCurrentUserIsAdmin(!!me?.is_admin);
-              }
-              
-              // Récupérer les props d'objectifs
-              if (game[0].props) {
-                setObjectiveProps(game[0].props);
-                setObjectivePropsInitialized(true);
-                console.log(`${game[0].props.length} objectifs initialisés`);
-              }
-            } else {
-              await handleErrorWithUser('Partie non trouvée', null, ERROR_CONTEXTS.DATABASE);
-            }
-          } else {
-            await handleErrorWithUser('Utilisateur non trouvé', null, ERROR_CONTEXTS.AUTHENTICATION);
-            return;
+        if (!sessionGameDetails || sessionGameDetails.code !== code) {
+          await joinLobby(code);
+        }
+
+        setQrCodeText(`${playerId};${code}`);
+
+        if (sessionGameDetails) {
+          setGameDetails(sessionGameDetails);
+          setCurrentPlayerId(playerId);
+          const me = sessionGameDetails.players?.find((p) => p.id_player === playerId);
+          setCurrentUserIsAdmin(!!me?.is_admin || isHost);
+
+          if (sessionGameDetails.props) {
+            setObjectiveProps(sessionGameDetails.props);
+            setObjectivePropsInitialized(true);
+            console.log(`${sessionGameDetails.props.length} objectifs initialisés`);
           }
-        } else {
-          await handleErrorWithUser('Utilisateur non connecté', null, ERROR_CONTEXTS.AUTHENTICATION);
-          return;
         }
       } catch (err) {
         await handleErrorWithUser('Erreur lors du chargement de la partie', err, ERROR_CONTEXTS.DATABASE);
       }
     };
 
-    if (session?.user) {
+    if (playerId) {
       fetchGameDetails();
     }
-  }, [location.search, session]);
+  }, [location.search, playerId, sessionGameDetails, playerName, isHost]);
 
   // Handler pour la fin de partie
   const handleGameEnd = async () => {
@@ -363,17 +323,10 @@ const Rogue: React.FC = () => {
     let isCurrentPlayerAdmin = false;
     
     if (currentPlayerId) {
-      // Méthode 1: Chercher par currentPlayerId
       const playerById = gameDetails?.players?.find(
         player => player.id_player === currentPlayerId
       );
       isCurrentPlayerAdmin = playerById?.is_admin || false;
-    } else if (currentUser) {
-      // Méthode 2: Chercher par user_id si currentPlayerId n'est pas disponible
-      const playerByUserId = gameDetails?.players?.find(
-        player => player.user_id === currentUser.id
-      );
-      isCurrentPlayerAdmin = playerByUserId?.is_admin || false;
     }
     if (isCurrentPlayerAdmin) {
       console.log('👑 ADMIN - Fin de partie détectée');
@@ -383,8 +336,7 @@ const Rogue: React.FC = () => {
       const code = params.get('code');
       if (code) {
         try {
-          const gameService = new GameService();
-          await gameService.updateGameByCode(code, { remaining_time: 0 });
+          await updateGameDetails({ remaining_time: 0 });
         } catch (_) {}
         const success = await updateGameWinnerType(code, 'ROGUE');
         if (success) {
@@ -416,7 +368,7 @@ const Rogue: React.FC = () => {
         (error) => {
           handleError("Erreur lors de la récupération de la position", error, {
             context: ERROR_CONTEXTS.NETWORK,
-            userEmail: currentUser?.email || undefined,
+            userEmail: playerName || undefined,
             shouldShowError: false
           });
         }
@@ -430,7 +382,7 @@ const Rogue: React.FC = () => {
         (error) => {
           handleError("Erreur lors de la surveillance de la position", error, {
             context: ERROR_CONTEXTS.NETWORK,
-            userEmail: currentUser?.email || undefined,
+            userEmail: playerName || undefined,
             shouldShowError: false
           });
         },
@@ -494,8 +446,7 @@ const Rogue: React.FC = () => {
     const pushRemainingTime = async () => {
       try {
         if (currentUserIsAdmin && isCountdownActive && countdown !== null && gameCode) {
-          const gameService = new GameService();
-          await gameService.updateGameByCode(gameCode, { remaining_time: countdown });
+          await updateGameDetails({ remaining_time: countdown });
         }
       } catch (_) {}
     };
@@ -931,7 +882,7 @@ const Rogue: React.FC = () => {
                   <h2 className="qr-modal-title">Votre QR Code</h2>
                   <QRCode value={qrCodeText} size={300} />
                   <p className="qr-modal-email">
-                    {currentUser?.email}
+                    {playerName}
                   </p>
                   <p className="qr-modal-code">
                     Code: {gameDetails?.code}

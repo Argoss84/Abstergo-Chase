@@ -21,7 +21,7 @@ import {
 } from '@ionic/react';
 import { useEffect, useState } from 'react';
 import { useHistory } from 'react-router-dom';
-import GameService from '../services/GameService';
+import { useGameSession } from '../contexts/GameSessionContext';
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Circle, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -63,6 +63,7 @@ const ResizeMap = () => {
 
 const CreateLobby: React.FC = () => {
   const history = useHistory();
+  const { createLobby } = useGameSession();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<[number, number] | null>(null);
   const [userPosition, setUserPosition] = useState<[number, number] | null>(null);
@@ -171,42 +172,46 @@ const CreateLobby: React.FC = () => {
   const handleSubmit = async () => {
     try {
       setIsLoading(true);
-      const gameService = new GameService();
-      
-      // Generate a random 8-letter code
-      const code = Array.from({ length: 8 }, () => 
-        String.fromCharCode(65 + Math.floor(Math.random() * 26))
-      ).join('');
+      const gameId = Date.now();
 
-      const gameData = {
+      const gameDetails = {
         ...formData,
-        code,
+        id_game: gameId,
+        code: '',
         created_at: new Date().toISOString(),
         map_center_latitude: selectedPosition ? selectedPosition[0].toString() : '',
         map_center_longitude: selectedPosition ? selectedPosition[1].toString() : '',
         start_zone_latitude: startZones.agent ? startZones.agent[0].toString() : null,
         start_zone_longitude: startZones.agent ? startZones.agent[1].toString() : null,
         start_zone_rogue_latitude: startZones.rogue ? startZones.rogue[0].toString() : null,
-        start_zone_rogue_longitude: startZones.rogue ? startZones.rogue[1].toString() : null
+        start_zone_rogue_longitude: startZones.rogue ? startZones.rogue[1].toString() : null,
+        max_agents: 3,
+        max_rogue: 2,
+        remaining_time: formData.duration,
+        winner_type: null,
+        is_converging_phase: false,
+        started: false,
+        props: [],
+        players: []
       };
+      const propsData = objectives.map((obj, index) => ({
+        id_prop: gameId + index,
+        id_game: gameId,
+        latitude: obj.position[0].toString(),
+        longitude: obj.position[1].toString(),
+        type: 'OBJECTIV',
+        created_at: new Date().toISOString(),
+        name: null,
+        description: null,
+        color: null,
+        visible: true,
+        detection_radius: formData.objectiv_zone_radius,
+        visibility_last_change_date: null,
+        state: null
+      }));
 
-      const createdGame = await gameService.createGame(gameData);
-      
-      if (createdGame && createdGame[0]) {
-        // Create props for each objective
-        const propsData = objectives.map(obj => ({
-          id_game: createdGame[0].id_game,
-          latitude: obj.position[0].toString(),
-          longitude: obj.position[1].toString(),
-          type: 'OBJECTIV',
-          created_at: new Date().toISOString()
-        }));
-
-        await gameService.createProps(propsData);
-
-        // Navigate to the lobby with the game code
-        history.push(`/lobby?code=${code}`);
-      }
+      const lobbyCode = await createLobby(gameDetails, propsData);
+      history.push(`/lobby?code=${lobbyCode}`);
     } catch (error) {
       await handleErrorWithContext('Erreur lors de la création de la partie', error, ERROR_CONTEXTS.DATABASE);
     } finally {
