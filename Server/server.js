@@ -202,9 +202,15 @@ wss.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
+  const address = server.address();
+  const host = address.address === '::' ? 'localhost' : address.address;
+  const port = address.port;
+  
   log('========================================');
   log(`🚀 Serveur de signalisation WebRTC démarré`);
-  log(`📡 Port: ${PORT}`);
+  log(`📡 Port: ${port}`);
+  log(`🌐 Adresse: ${host}`);
+  log(`🔗 URL: ws://${host === '::' ? 'localhost' : host}:${port}`);
   log(`📊 Logs des signaux activés`);
   log('========================================');
 });
