@@ -28,7 +28,8 @@ const server = createServer((req, res) => {
         platform: process.platform,
         uptime: process.uptime(),
         memoryUsage: process.memoryUsage()
-      }
+      },
+      logs: logs.slice(-50).reverse() // 50 derniers logs, plus récent en premier
     };
 
     const html = `
@@ -171,6 +172,47 @@ const server = createServer((req, res) => {
       font-size: 0.9em;
       color: #666;
     }
+    .logs-container {
+      background: #1e1e1e;
+      border-radius: 8px;
+      padding: 15px;
+      max-height: 500px;
+      overflow-y: auto;
+      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      font-size: 0.85em;
+    }
+    .log-entry {
+      color: #d4d4d4;
+      padding: 4px 0;
+      border-bottom: 1px solid #333;
+      line-height: 1.6;
+    }
+    .log-entry:last-child {
+      border-bottom: none;
+    }
+    .log-entry:hover {
+      background-color: #2d2d2d;
+    }
+    .log-connexion { color: #4ec9b0; }
+    .log-message { color: #9cdcfe; }
+    .log-lobby { color: #4caf50; }
+    .log-erreur { color: #f44336; }
+    .log-webrtc { color: #ce9178; }
+    .log-deconnexion { color: #ff9800; }
+    .log-avertissement { color: #ffc107; }
+    .logs-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .logs-count {
+      background: #667eea;
+      color: white;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.9em;
+    }
   </style>
 </head>
 <body>
@@ -204,11 +246,11 @@ const server = createServer((req, res) => {
       </div>
       <div class="info-item">
         <span class="info-label">URL WebSocket:</span>
-        <span class="info-value">ws://${req.headers.host}</span>
+        <span class="info-value">wss://${req.headers.host}</span>
       </div>
       <div class="info-item">
         <span class="info-label">URL HTTP:</span>
-        <span class="info-value">http://${req.headers.host}</span>
+        <span class="info-value">https://${req.headers.host}</span>
       </div>
       <div class="info-item">
         <span class="info-label">Version Node.js:</span>
@@ -290,12 +332,41 @@ const server = createServer((req, res) => {
       ` : '<div class="no-data">Aucun lobby actif actuellement</div>'}
     </div>
 
+    <div class="card">
+      <div class="logs-header">
+        <h2>📋 Logs Serveur</h2>
+        <span class="logs-count">${stats.logs.length} logs</span>
+      </div>
+      <div class="logs-container">
+        ${stats.logs.length > 0 ? 
+          stats.logs.map(log => {
+            const message = log.message;
+            let className = 'log-entry';
+            
+            if (message.includes('[CONNEXION]')) className += ' log-connexion';
+            else if (message.includes('[MESSAGE')) className += ' log-message';
+            else if (message.includes('[LOBBY CRÉÉ]') || message.includes('[LOBBY REJOINT]')) className += ' log-lobby';
+            else if (message.includes('[ERREUR]')) className += ' log-erreur';
+            else if (message.includes('[WEBRTC]')) className += ' log-webrtc';
+            else if (message.includes('[DÉCONNEXION]') || message.includes('[LOBBY FERMÉ]') || message.includes('[JOUEUR PARTI]')) className += ' log-deconnexion';
+            else if (message.includes('[AVERTISSEMENT]')) className += ' log-avertissement';
+            
+            return `<div class="${className}">${message}</div>`;
+          }).join('')
+        : '<div class="no-data">Aucun log disponible</div>'}
+      </div>
+    </div>
+
     <button class="refresh-btn" onclick="location.reload()">🔄 Rafraîchir</button>
   </div>
 
   <script>
     // Auto-refresh toutes les 10 secondes
     setTimeout(() => location.reload(), 10000);
+    
+    // Auto-scroll vers le bas des logs (plus récent en haut, donc pas besoin)
+    // Mais on peut ajouter un smooth scroll au chargement
+    document.querySelector('.logs-container')?.scrollTo({ top: 0, behavior: 'smooth' });
   </script>
 </body>
 </html>
@@ -315,6 +386,10 @@ const lobbies = new Map();
 const clients = new Map();
 const socketsById = new Map();
 
+// Stockage des logs en mémoire (derniers 100 logs)
+const logs = [];
+const MAX_LOGS = 100;
+
 // Helper pour les logs horodatés
 const log = (...args) => {
   const timestamp = new Date().toLocaleString('fr-FR', {
@@ -326,7 +401,22 @@ const log = (...args) => {
     second: '2-digit',
     hour12: false
   });
+  const logMessage = `[${timestamp}] ${args.map(arg => 
+    typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+  ).join(' ')}`;
+  
   console.log(`[${timestamp}]`, ...args);
+  
+  // Stocker le log
+  logs.push({
+    timestamp: new Date().toISOString(),
+    message: logMessage
+  });
+  
+  // Garder seulement les MAX_LOGS derniers
+  if (logs.length > MAX_LOGS) {
+    logs.shift();
+  }
 };
 
 const generateCode = () =>
@@ -359,10 +449,13 @@ wss.on('connection', (socket) => {
   log(`[CONNEXION] Nouveau client connecté: ${clientId}`);
 
   socket.on('message', (raw) => {
+    log(`[MESSAGE BRUT REÇU] ClientId: ${clientId}, Taille: ${raw.length} octets, Contenu: ${raw.toString().substring(0, 200)}`);
+    
     let message;
     try {
       message = JSON.parse(raw.toString());
     } catch (error) {
+      log(`[ERREUR PARSING] ClientId: ${clientId}, Erreur: ${error.message}`);
       send(socket, { type: 'error', payload: { message: 'Message JSON invalide.' } });
       return;
     }
@@ -473,6 +566,13 @@ wss.on('connection', (socket) => {
       });
       return;
     }
+
+    // Message non reconnu
+    log(`[AVERTISSEMENT] ClientId: ${clientId}, Type de message non reconnu: ${type}`);
+    send(socket, { 
+      type: 'error', 
+      payload: { message: `Type de message non reconnu: ${type}` } 
+    });
   });
 
   socket.on('close', () => {

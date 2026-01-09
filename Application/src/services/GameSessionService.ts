@@ -67,14 +67,22 @@ class GameSessionService {
   }
 
   async createLobby(gameDetails: GameDetails, props: GameProp[]) {
-    await this.ensureSocket();
-    this.sendSocket('lobby:create', {
-      playerName: this.state.playerName
-    });
+    console.log('[GameSession] Début de la création du lobby', { playerName: this.state.playerName });
+    
+    try {
+      await this.ensureSocket();
+      console.log('[GameSession] Socket prêt, envoi de la requête lobby:create');
+      
+      this.sendSocket('lobby:create', {
+        playerName: this.state.playerName
+      });
 
-    const response = await this.waitFor('lobby:created');
-    const lobbyCode = response.code as string;
-    const playerId = response.playerId as string;
+      console.log('[GameSession] En attente de la réponse lobby:created...');
+      const response = await this.waitFor('lobby:created', 15000);
+      console.log('[GameSession] Réponse lobby:created reçue:', response);
+      
+      const lobbyCode = response.code as string;
+      const playerId = response.playerId as string;
 
     const hostPlayer: Player = {
       id_player: playerId,
@@ -110,7 +118,12 @@ class GameSessionService {
       connectionStatus: 'connected'
     });
 
+    console.log('[GameSession] Lobby créé avec succès:', lobbyCode);
     return lobbyCode;
+    } catch (error) {
+      console.error('[GameSession] Erreur lors de la création du lobby:', error);
+      throw error;
+    }
   }
 
   async joinLobby(code: string) {
@@ -182,14 +195,17 @@ class GameSessionService {
 
   private async ensureSocket() {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      console.log('[GameSession] Socket déjà ouvert');
       return;
     }
 
     if (this.socketReady) {
+      console.log('[GameSession] Socket en cours de connexion, attente...');
       return this.socketReady;
     }
 
     const url = import.meta.env.VITE_SIGNALING_URL || 'ws://localhost:5174';
+    console.log(`[GameSession] Connexion au serveur WebSocket: ${url}`);
     this.updateState({ connectionStatus: 'connecting' });
 
     this.socket = new WebSocket(url);
@@ -197,17 +213,20 @@ class GameSessionService {
       if (!this.socket) return reject();
 
       this.socket.addEventListener('open', () => {
+        console.log('[GameSession] WebSocket connecté avec succès');
         this.updateState({ connectionStatus: 'connected' });
         resolve();
       });
 
-      this.socket.addEventListener('error', () => {
+      this.socket.addEventListener('error', (error) => {
+        console.error('[GameSession] Erreur WebSocket:', error);
         this.updateState({ connectionStatus: 'error' });
-        reject();
+        reject(error);
       });
 
       this.socket.addEventListener('message', (event) => this.handleSocketMessage(event));
       this.socket.addEventListener('close', () => {
+        console.log('[GameSession] WebSocket fermé');
         this.updateState({ connectionStatus: 'idle' });
       });
     });
@@ -215,24 +234,46 @@ class GameSessionService {
     return this.socketReady;
   }
 
-  private waitFor(type: string): Promise<any> {
-    return new Promise((resolve) => {
-      this.pendingActions.set(type, resolve);
+  private waitFor(type: string, timeoutMs: number = 10000): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingActions.delete(type);
+        console.error(`[GameSession] Timeout en attente de: ${type} (${timeoutMs}ms)`);
+        reject(new Error(`Timeout en attente du message: ${type}`));
+      }, timeoutMs);
+
+      this.pendingActions.set(type, (payload: any) => {
+        clearTimeout(timeout);
+        resolve(payload);
+      });
+      
+      console.log(`[GameSession] En attente du message: ${type}`);
     });
   }
 
   private sendSocket(type: string, payload: Record<string, any>) {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+    if (!this.socket) {
+      console.error(`[GameSession] Impossible d'envoyer ${type}: socket null`);
       return;
     }
-    this.socket.send(JSON.stringify({ type, payload }));
+    
+    if (this.socket.readyState !== WebSocket.OPEN) {
+      console.error(`[GameSession] Impossible d'envoyer ${type}: socket pas ouvert (état: ${this.socket.readyState})`);
+      return;
+    }
+    
+    const message = JSON.stringify({ type, payload });
+    console.log(`[GameSession] Envoi message:`, { type, payload });
+    this.socket.send(message);
   }
 
   private handleSocketMessage(event: MessageEvent) {
+    console.log('[GameSession] Message reçu du serveur:', event.data);
     const message = JSON.parse(event.data);
     const { type, payload } = message;
 
     if (this.pendingActions.has(type)) {
+      console.log(`[GameSession] Résolution de l'action en attente: ${type}`, payload);
       const resolve = this.pendingActions.get(type)!;
       this.pendingActions.delete(type);
       resolve(payload);
