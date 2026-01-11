@@ -226,13 +226,13 @@ class GameSessionService {
         resolve();
       });
 
-      this.socket.on('connect_error', (error) => {
+      this.socket.on('connect_error', (error: Error) => {
         console.error('[GameSession] Erreur Socket.io:', error);
         this.updateState({ connectionStatus: 'error' });
         reject(error);
       });
 
-      this.socket.on('message', (message) => this.handleSocketMessage(message));
+      this.socket.on('message', (message: { type: string; payload: any }) => this.handleSocketMessage(message));
       this.socket.on('disconnect', () => {
         console.log('[GameSession] Socket.io fermé');
         this.updateState({ connectionStatus: 'idle' });
