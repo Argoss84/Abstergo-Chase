@@ -207,7 +207,7 @@ class GameSessionService {
 
     const defaultUrl = window.location.hostname === 'localhost'
       ? 'http://localhost:5174'
-      : window.location.origin;
+      : 'https://ws.abstergochase.fr';
     const url = defaultUrl;
     const path = '/socket.io';
     console.log(`[GameSession] Connexion au serveur Socket.io: ${url} (path: ${path})`);
