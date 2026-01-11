@@ -434,7 +434,7 @@ const log = (...args) => {
 };
 
 const generateCode = () =>
-  Array.from({ length: 8 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('');
+  Array.from({ length: 6 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('');
 
 const send = (socket, message) => {
   if (socket && socket.connected) {

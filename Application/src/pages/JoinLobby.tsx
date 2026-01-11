@@ -37,8 +37,8 @@ import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
       return;
     }
     
-    if (gameCode.trim().length !== 8) {
-      await handleError('Le code de partie doit contenir exactement 8 caractères', null, {
+    if (gameCode.trim().length !== 6) {
+      await handleError('Le code de partie doit contenir exactement 6 caractères', null, {
         context: ERROR_CONTEXTS.VALIDATION,
         shouldShowError: false
       });
@@ -73,14 +73,14 @@ import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
                   value={gameCode}
                   onIonInput={handleInputChange}
                   placeholder="Entrez le code de la partie"
-                  maxlength={8}
+                  maxlength={6}
                 />
               </IonItem>
               
               <IonButton 
                 expand="block" 
                 onClick={handleJoinGame}
-                disabled={gameCode.length !== 8}
+                disabled={gameCode.length !== 6}
                 className="ion-margin-top"
               >
                 Rejoindre la partie

@@ -672,8 +672,8 @@ class GameSessionService {
     this.reconnectAttempts.clear();
   }
 
-  private getIceServers() {
-    const servers = [{ urls: 'stun:stun.l.google.com:19302' }];
+  private getIceServers(): RTCIceServer[] {
+    const servers: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
     const turnUrl = import.meta.env?.VITE_TURN_URL;
     const turnUser = import.meta.env?.VITE_TURN_USERNAME;
     const turnCredential = import.meta.env?.VITE_TURN_CREDENTIAL;
