@@ -48,6 +48,21 @@ class GameSessionService {
   private peerConnections = new Map<string, RTCPeerConnection>();
   private dataChannels = new Map<string, RTCDataChannel>();
   private hostChannel: RTCDataChannel | null = null;
+  private reconnectAttempts = new Map<string, number>();
+  private rejoinInFlight = false;
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('visibilitychange', () => {
+        if (!document.hidden && !this.state.isHost) {
+          this.requestResync('visibilitychange');
+        }
+      });
+      window.addEventListener('beforeunload', () => {
+        this.cleanupConnections();
+      });
+    }
+  }
 
   subscribe(listener: (state: SessionState) => void) {
     this.listeners.add(listener);
@@ -215,7 +230,8 @@ class GameSessionService {
 
     this.socket = io(url, {
       path,
-      reconnection: true
+      reconnection: true,
+      transports: ['websocket', 'polling']
     });
     this.socketReady = new Promise((resolve, reject) => {
       if (!this.socket) return reject();
@@ -224,6 +240,7 @@ class GameSessionService {
         console.log('[GameSession] Socket.io connecté avec succès');
         this.updateState({ connectionStatus: 'connected' });
         resolve();
+        this.handleSocketReconnect();
       });
 
       this.socket.on('connect_error', (error: Error) => {
@@ -304,15 +321,26 @@ class GameSessionService {
 
     if (type === 'webrtc:signal') {
       this.handleSignal(payload.fromId, payload.signal);
+      return;
+    }
+
+    if (type === 'lobby:request-resync' && this.state.isHost) {
+      this.handleResyncRequest(payload?.playerId);
+      return;
+    }
+
+    if (type === 'state:sync') {
+      this.handleStateSync(payload);
+      return;
+    }
+
+    if (type === 'action:relay' && this.state.isHost) {
+      this.handleActionMessage(payload?.action);
     }
   }
 
   private resetSession() {
-    this.peerConnections.forEach((pc) => pc.close());
-    this.peerConnections.clear();
-    this.dataChannels.clear();
-    this.hostChannel?.close();
-    this.hostChannel = null;
+    this.cleanupConnections();
     this.updateState({
       lobbyCode: null,
       playerId: null,
@@ -374,7 +402,7 @@ class GameSessionService {
 
   private createPeerConnection(peerId: string, isHost: boolean) {
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      iceServers: this.getIceServers()
     });
 
     pc.onicecandidate = (event) => {
@@ -383,6 +411,20 @@ class GameSessionService {
           targetId: peerId,
           signal: { type: 'ice', candidate: event.candidate }
         });
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      if (state === 'failed' || state === 'disconnected') {
+        this.handlePeerConnectionIssue(peerId, state);
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      const state = pc.iceConnectionState;
+      if (state === 'failed' || state === 'disconnected') {
+        this.handlePeerConnectionIssue(peerId, state);
       }
     };
 
@@ -403,6 +445,7 @@ class GameSessionService {
   private registerDataChannel(peerId: string, channel: RTCDataChannel, isHostChannel = false) {
     channel.onmessage = (event) => this.handleDataChannelMessage(event.data);
     channel.onopen = () => {
+      this.reconnectAttempts.delete(peerId);
       if (this.state.isHost) {
         this.sendStateToChannel(channel);
       } else if (!this.state.isHost && isHostChannel) {
@@ -412,6 +455,9 @@ class GameSessionService {
     channel.onclose = () => {
       if (isHostChannel) {
         this.hostChannel = null;
+        this.requestResync('datachannel-closed');
+      } else if (this.state.isHost) {
+        this.schedulePeerReconnect(peerId);
       }
     };
 
@@ -453,27 +499,12 @@ class GameSessionService {
     }
 
     if (message.type === 'state:sync') {
-      const { gameDetails, players, props } = message.payload;
-      this.updateState({ gameDetails, players, props });
+      this.handleStateSync(message.payload);
       return;
     }
 
     if (this.state.isHost) {
-      if (message.type === 'action:update-game') {
-        this.updateGameDetails(message.payload.changes);
-      }
-
-      if (message.type === 'action:update-player') {
-        this.updatePlayer(message.payload.playerId, message.payload.changes);
-      }
-
-      if (message.type === 'action:update-prop') {
-        this.updateProp(message.payload.propId, message.payload.changes);
-      }
-
-      if (message.type === 'action:request-state') {
-        this.broadcastState();
-      }
+      this.handleActionMessage(message);
     }
   }
 
@@ -506,7 +537,154 @@ class GameSessionService {
     if (this.state.isHost) return;
     if (this.hostChannel && this.hostChannel.readyState === 'open') {
       this.hostChannel.send(JSON.stringify({ type, payload }));
+      return;
     }
+    this.sendSocket('action:relay', { action: { type, payload } });
+  }
+
+  private handleActionMessage(message?: { type?: string; payload?: any }) {
+    if (!message?.type) return;
+    if (message.type === 'action:update-game') {
+      this.updateGameDetails(message.payload.changes);
+    }
+
+    if (message.type === 'action:update-player') {
+      this.updatePlayer(message.payload.playerId, message.payload.changes);
+    }
+
+    if (message.type === 'action:update-prop') {
+      this.updateProp(message.payload.propId, message.payload.changes);
+    }
+
+    if (message.type === 'action:request-state') {
+      this.broadcastState();
+    }
+  }
+
+  private handleStateSync(payload: { gameDetails: GameDetails; players: Player[]; props: GameProp[] }) {
+    if (!payload) return;
+    const { gameDetails, players, props } = payload;
+    this.updateState({ gameDetails, players, props });
+  }
+
+  private handleSocketReconnect() {
+    if (this.state.lobbyCode && !this.state.isHost) {
+      this.attemptRejoin();
+    }
+  }
+
+  private async attemptRejoin() {
+    if (this.rejoinInFlight || !this.state.lobbyCode) return;
+    this.rejoinInFlight = true;
+    try {
+      this.sendSocket('lobby:join', {
+        code: this.state.lobbyCode,
+        playerName: this.state.playerName
+      });
+      const response = await this.waitFor('lobby:joined', 10000);
+      this.updateState({
+        lobbyCode: response.code,
+        playerId: response.playerId,
+        isHost: response.playerId === response.hostId,
+        connectionStatus: 'connected'
+      });
+      this.requestResync('socket-reconnect');
+    } catch (error) {
+      console.error('[GameSession] Échec de reconnexion au lobby:', error);
+    } finally {
+      this.rejoinInFlight = false;
+    }
+  }
+
+  private requestResync(reason: string) {
+    if (this.state.isHost) return;
+    if (!this.state.lobbyCode) return;
+    console.log('[GameSession] Demande de resynchronisation:', reason);
+    this.sendSocket('lobby:request-resync', { reason });
+  }
+
+  private handleResyncRequest(playerId: string) {
+    if (!this.state.isHost) return;
+    if (!playerId) return;
+    const channel = this.dataChannels.get(playerId);
+    if (channel && channel.readyState === 'open') {
+      this.sendStateToChannel(channel);
+    } else {
+      this.sendStateToSocket(playerId);
+      this.schedulePeerReconnect(playerId);
+    }
+  }
+
+  private sendStateToSocket(targetId: string) {
+    if (!this.state.isHost) return;
+    const payload = {
+      gameDetails: this.state.gameDetails,
+      players: this.state.players,
+      props: this.state.props
+    };
+    this.sendSocket('state:sync', { targetId, payload });
+  }
+
+  private schedulePeerReconnect(peerId: string) {
+    if (!this.state.isHost) return;
+    const attempts = this.reconnectAttempts.get(peerId) || 0;
+    if (attempts >= 3) {
+      console.warn(`[GameSession] Reconnexion WebRTC abandonnée pour ${peerId}`);
+      return;
+    }
+    this.reconnectAttempts.set(peerId, attempts + 1);
+    const delay = 1000 * (attempts + 1);
+    setTimeout(() => this.restartPeerConnection(peerId), delay);
+  }
+
+  private async restartPeerConnection(peerId: string) {
+    if (!this.state.isHost) return;
+    const existing = this.peerConnections.get(peerId);
+    existing?.close();
+    this.peerConnections.delete(peerId);
+    this.dataChannels.delete(peerId);
+    const pc = this.createPeerConnection(peerId, true);
+    const offer = await pc.createOffer({ iceRestart: true });
+    await pc.setLocalDescription(offer);
+    this.sendSocket('webrtc:signal', {
+      targetId: peerId,
+      signal: { type: 'offer', sdp: pc.localDescription }
+    });
+  }
+
+  private handlePeerConnectionIssue(peerId: string, state: string) {
+    if (this.state.isHost) {
+      console.warn(`[GameSession] Problème WebRTC (${state}) avec ${peerId}, tentative de reconnexion`);
+      this.schedulePeerReconnect(peerId);
+    } else {
+      console.warn(`[GameSession] Problème WebRTC (${state}) avec l'hôte, demande de resync`);
+      this.requestResync(`webrtc-${state}`);
+    }
+  }
+
+  private cleanupConnections() {
+    this.peerConnections.forEach((pc) => pc.close());
+    this.peerConnections.clear();
+    this.dataChannels.forEach((channel) => channel.close());
+    this.dataChannels.clear();
+    this.hostChannel?.close();
+    this.hostChannel = null;
+    this.reconnectAttempts.clear();
+  }
+
+  private getIceServers() {
+    const servers = [{ urls: 'stun:stun.l.google.com:19302' }];
+    const turnUrl = import.meta.env?.VITE_TURN_URL;
+    const turnUser = import.meta.env?.VITE_TURN_USERNAME;
+    const turnCredential = import.meta.env?.VITE_TURN_CREDENTIAL;
+    if (turnUrl && turnUser && turnCredential) {
+      servers.push({
+        urls: turnUrl,
+        username: turnUser,
+        credential: turnCredential
+      });
+    }
+    return servers;
   }
 }
 
