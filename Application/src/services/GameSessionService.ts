@@ -1,3 +1,4 @@
+import { io, Socket } from 'socket.io-client';
 import { GameDetails, GameProp, Player } from '../components/Interfaces';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error';
@@ -41,7 +42,7 @@ const createInitialState = (): SessionState => ({
 class GameSessionService {
   private state: SessionState = createInitialState();
   private listeners = new Set<(state: SessionState) => void>();
-  private socket: WebSocket | null = null;
+  private socket: Socket | null = null;
   private socketReady: Promise<void> | null = null;
   private pendingActions = new Map<string, (payload: any) => void>();
   private peerConnections = new Map<string, RTCPeerConnection>();
@@ -194,7 +195,7 @@ class GameSessionService {
   }
 
   private async ensureSocket() {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+    if (this.socket?.connected) {
       console.log('[GameSession] Socket déjà ouvert');
       return;
     }
@@ -204,29 +205,36 @@ class GameSessionService {
       return this.socketReady;
     }
 
-    const url = import.meta.env.VITE_SIGNALING_URL || 'ws://localhost:5174';
-    console.log(`[GameSession] Connexion au serveur WebSocket: ${url}`);
+    const defaultUrl = window.location.hostname === 'localhost'
+      ? 'http://localhost:5174'
+      : window.location.origin;
+    const url = defaultUrl;
+    const path = '/socket.io';
+    console.log(`[GameSession] Connexion au serveur Socket.io: ${url} (path: ${path})`);
     this.updateState({ connectionStatus: 'connecting' });
 
-    this.socket = new WebSocket(url);
+    this.socket = io(url, {
+      path,
+      reconnection: true
+    });
     this.socketReady = new Promise((resolve, reject) => {
       if (!this.socket) return reject();
 
-      this.socket.addEventListener('open', () => {
-        console.log('[GameSession] WebSocket connecté avec succès');
+      this.socket.on('connect', () => {
+        console.log('[GameSession] Socket.io connecté avec succès');
         this.updateState({ connectionStatus: 'connected' });
         resolve();
       });
 
-      this.socket.addEventListener('error', (error) => {
-        console.error('[GameSession] Erreur WebSocket:', error);
+      this.socket.on('connect_error', (error) => {
+        console.error('[GameSession] Erreur Socket.io:', error);
         this.updateState({ connectionStatus: 'error' });
         reject(error);
       });
 
-      this.socket.addEventListener('message', (event) => this.handleSocketMessage(event));
-      this.socket.addEventListener('close', () => {
-        console.log('[GameSession] WebSocket fermé');
+      this.socket.on('message', (message) => this.handleSocketMessage(message));
+      this.socket.on('disconnect', () => {
+        console.log('[GameSession] Socket.io fermé');
         this.updateState({ connectionStatus: 'idle' });
       });
     });
@@ -257,19 +265,18 @@ class GameSessionService {
       return;
     }
     
-    if (this.socket.readyState !== WebSocket.OPEN) {
-      console.error(`[GameSession] Impossible d'envoyer ${type}: socket pas ouvert (état: ${this.socket.readyState})`);
+    if (!this.socket.connected) {
+      console.error(`[GameSession] Impossible d'envoyer ${type}: socket pas ouvert`);
       return;
     }
     
-    const message = JSON.stringify({ type, payload });
+    const message = { type, payload };
     console.log(`[GameSession] Envoi message:`, { type, payload });
-    this.socket.send(message);
+    this.socket.emit('message', message);
   }
 
-  private handleSocketMessage(event: MessageEvent) {
-    console.log('[GameSession] Message reçu du serveur:', event.data);
-    const message = JSON.parse(event.data);
+  private handleSocketMessage(message: { type: string; payload: any }) {
+    console.log('[GameSession] Message reçu du serveur:', message);
     const { type, payload } = message;
 
     if (this.pendingActions.has(type)) {
