@@ -389,6 +389,7 @@ const server = createServer((req, res) => {
 
 const io = new SocketIOServer(server, {
   path: SOCKET_IO_PATH,
+  perMessageDeflate: false,
   cors: {
     origin: '*',
     methods: ['GET', 'POST']
