@@ -389,6 +389,7 @@ const server = createServer((req, res) => {
 
 const io = new SocketIOServer(server, {
   path: SOCKET_IO_PATH,
+  perMessageDeflate: false,
   cors: {
     origin: '*',
     methods: ['GET', 'POST']
@@ -585,6 +586,52 @@ io.on('connection', (socket) => {
           fromId: clientId,
           signal: payload?.signal
         }
+      });
+      return;
+    }
+
+    if (type === 'lobby:request-resync') {
+      const { lobbyCode } = clients.get(socket.id) || {};
+      if (!lobbyCode || !lobbies.has(lobbyCode)) {
+        log(`[ERREUR RESYNC] Client ${clientId} demande resync sans lobby actif`);
+        send(socket, { type: 'lobby:error', payload: { message: 'Lobby introuvable pour resync.' } });
+        return;
+      }
+      const lobby = lobbies.get(lobbyCode);
+      const hostSocket = socketsById.get(lobby.hostId);
+      send(hostSocket, {
+        type: 'lobby:request-resync',
+        payload: { playerId: clientId }
+      });
+      return;
+    }
+
+    if (type === 'state:sync') {
+      const targetId = payload?.targetId;
+      const targetSocket = socketsById.get(targetId);
+      if (!targetSocket) {
+        log(`[ERREUR RESYNC] État sync vers ${targetId} échoué: destinataire introuvable`);
+        return;
+      }
+      send(targetSocket, {
+        type: 'state:sync',
+        payload: payload?.payload
+      });
+      return;
+    }
+
+    if (type === 'action:relay') {
+      const { lobbyCode } = clients.get(socket.id) || {};
+      if (!lobbyCode || !lobbies.has(lobbyCode)) {
+        log(`[ERREUR ACTION] Client ${clientId} envoie action sans lobby actif`);
+        send(socket, { type: 'lobby:error', payload: { message: 'Lobby introuvable pour action.' } });
+        return;
+      }
+      const lobby = lobbies.get(lobbyCode);
+      const hostSocket = socketsById.get(lobby.hostId);
+      send(hostSocket, {
+        type: 'action:relay',
+        payload: { fromId: clientId, action: payload?.action }
       });
       return;
     }
