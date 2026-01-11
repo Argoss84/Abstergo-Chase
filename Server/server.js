@@ -1,8 +1,9 @@
 import { createServer } from 'http';
-import { WebSocketServer } from 'ws';
+import { Server as SocketIOServer } from 'socket.io';
 import { randomUUID } from 'crypto';
 
 const PORT = process.env.SIGNALING_PORT || 5174;
+const SOCKET_IO_PATH = process.env.SOCKET_IO_PATH || '/socket.io';
 
 // Créer le serveur HTTP avec un gestionnaire de requêtes
 const server = createServer((req, res) => {
@@ -11,11 +12,14 @@ const server = createServer((req, res) => {
     const stats = {
       connectedClients: clients.size,
       activeLobbies: lobbies.size,
-      clients: Array.from(clients.entries()).map(([socket, info]) => ({
-        clientId: info.clientId,
-        lobbyCode: info.lobbyCode || 'Aucun',
-        connected: socket.readyState === 1
-      })),
+      clients: Array.from(clients.entries()).map(([socketId, info]) => {
+        const socket = io.sockets.sockets.get(socketId);
+        return {
+          clientId: info.clientId,
+          lobbyCode: info.lobbyCode || 'Aucun',
+          connected: Boolean(socket?.connected)
+        };
+      }),
       lobbies: Array.from(lobbies.entries()).map(([code, lobby]) => ({
         code,
         hostId: lobby.hostId,
@@ -31,6 +35,9 @@ const server = createServer((req, res) => {
       },
       logs: logs.slice(-50).reverse() // 50 derniers logs, plus récent en premier
     };
+
+    const protoHeader = req.headers['x-forwarded-proto'];
+    const protocol = Array.isArray(protoHeader) ? protoHeader[0] : protoHeader || 'http';
 
     const html = `
 <!DOCTYPE html>
@@ -245,12 +252,12 @@ const server = createServer((req, res) => {
         <span class="info-value">${stats.serverInfo.port}</span>
       </div>
       <div class="info-item">
-        <span class="info-label">URL WebSocket:</span>
-        <span class="info-value">wss://${req.headers.host}</span>
+        <span class="info-label">URL Socket.io:</span>
+        <span class="info-value">${protocol}://${req.headers.host}${SOCKET_IO_PATH}</span>
       </div>
       <div class="info-item">
         <span class="info-label">URL HTTP:</span>
-        <span class="info-value">https://${req.headers.host}</span>
+        <span class="info-value">${protocol}://${req.headers.host}</span>
       </div>
       <div class="info-item">
         <span class="info-label">Version Node.js:</span>
@@ -275,7 +282,7 @@ const server = createServer((req, res) => {
     </div>
 
     <div class="card">
-      <h2>👥 Clients WebSocket Connectés</h2>
+      <h2>👥 Clients Socket.io Connectés</h2>
       ${stats.clients.length > 0 ? `
         <table>
           <thead>
@@ -380,7 +387,13 @@ const server = createServer((req, res) => {
   }
 });
 
-const wss = new WebSocketServer({ server });
+const io = new SocketIOServer(server, {
+  path: SOCKET_IO_PATH,
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
 
 const lobbies = new Map();
 const clients = new Map();
@@ -423,11 +436,11 @@ const generateCode = () =>
   Array.from({ length: 8 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('');
 
 const send = (socket, message) => {
-  if (socket && socket.readyState === socket.OPEN) {
-    const clientInfo = clients.get(socket);
+  if (socket && socket.connected) {
+    const clientInfo = clients.get(socket.id);
     const recipientId = clientInfo?.clientId || 'unknown';
     log(`[MESSAGE ENVOYÉ] À: ${recipientId}, Type: ${message.type}`);
-    socket.send(JSON.stringify(message));
+    socket.emit('message', message);
   }
 };
 
@@ -441,26 +454,35 @@ const getLobbySnapshot = (lobby) => ({
   }))
 });
 
-wss.on('connection', (socket) => {
+io.on('connection', (socket) => {
   const clientId = randomUUID();
-  clients.set(socket, { clientId, lobbyCode: null });
+  clients.set(socket.id, { clientId, lobbyCode: null });
   socketsById.set(clientId, socket);
   
   log(`[CONNEXION] Nouveau client connecté: ${clientId}`);
 
   socket.on('message', (raw) => {
-    log(`[MESSAGE BRUT REÇU] ClientId: ${clientId}, Taille: ${raw.length} octets, Contenu: ${raw.toString().substring(0, 200)}`);
+    const rawPreview = typeof raw === 'string' ? raw.substring(0, 200) : JSON.stringify(raw).substring(0, 200);
+    log(`[MESSAGE BRUT REÇU] ClientId: ${clientId}, Taille: ${rawPreview.length} caractères, Contenu: ${rawPreview}`);
     
-    let message;
-    try {
-      message = JSON.parse(raw.toString());
-    } catch (error) {
-      log(`[ERREUR PARSING] ClientId: ${clientId}, Erreur: ${error.message}`);
-      send(socket, { type: 'error', payload: { message: 'Message JSON invalide.' } });
+    let message = raw;
+    if (typeof raw === 'string') {
+      try {
+        message = JSON.parse(raw);
+      } catch (error) {
+        log(`[ERREUR PARSING] ClientId: ${clientId}, Erreur: ${error.message}`);
+        send(socket, { type: 'error', payload: { message: 'Message JSON invalide.' } });
+        return;
+      }
+    }
+
+    const { type, payload } = message || {};
+    if (!type) {
+      log(`[ERREUR] ClientId: ${clientId}, Message sans type`, message);
+      send(socket, { type: 'error', payload: { message: 'Type de message manquant.' } });
       return;
     }
 
-    const { type, payload } = message;
     log(`[MESSAGE REÇU] ClientId: ${clientId}, Type: ${type}, Payload:`, payload);
 
     if (type === 'lobby:create') {
@@ -477,7 +499,7 @@ wss.on('connection', (socket) => {
 
       lobby.players.set(clientId, { id: clientId, name: payload?.playerName || 'Host', isHost: true });
       lobbies.set(code, lobby);
-      clients.get(socket).lobbyCode = code;
+      clients.get(socket.id).lobbyCode = code;
 
       log(`[LOBBY CRÉÉ] Code: ${code}, Host: ${clientId}, Nom: ${payload?.playerName || 'Host'}`);
 
@@ -518,7 +540,7 @@ wss.on('connection', (socket) => {
       }
 
       lobby.players.set(clientId, { id: clientId, name: payload?.playerName || 'Joueur', isHost: false });
-      clients.get(socket).lobbyCode = code;
+      clients.get(socket.id).lobbyCode = code;
 
       log(`[LOBBY REJOINT] Code: ${code}, Joueur: ${clientId}, Nom: ${payload?.playerName || 'Joueur'}`);
 
@@ -575,8 +597,8 @@ wss.on('connection', (socket) => {
     });
   });
 
-  socket.on('close', () => {
-    const clientInfo = clients.get(socket);
+  socket.on('disconnect', () => {
+    const clientInfo = clients.get(socket.id);
     if (!clientInfo) return;
 
     log(`[DÉCONNEXION] Client déconnecté: ${clientInfo.clientId}`);
@@ -584,24 +606,24 @@ wss.on('connection', (socket) => {
     const { lobbyCode } = clientInfo;
     if (lobbyCode && lobbies.has(lobbyCode)) {
       const lobby = lobbies.get(lobbyCode);
-      lobby.players.delete(clientId);
+      lobby.players.delete(clientInfo.clientId);
 
-      if (lobby.hostId === clientId) {
-        log(`[LOBBY FERMÉ] Code: ${lobbyCode}, Host déconnecté: ${clientId}`);
+      if (lobby.hostId === clientInfo.clientId) {
+        log(`[LOBBY FERMÉ] Code: ${lobbyCode}, Host déconnecté: ${clientInfo.clientId}`);
         lobbies.delete(lobbyCode);
         lobby.players.forEach((player) => {
           const playerSocket = socketsById.get(player.id);
           send(playerSocket, { type: 'lobby:closed', payload: { code: lobbyCode } });
         });
       } else {
-        log(`[JOUEUR PARTI] Lobby: ${lobbyCode}, Joueur: ${clientId}`);
+        log(`[JOUEUR PARTI] Lobby: ${lobbyCode}, Joueur: ${clientInfo.clientId}`);
         const hostSocket = socketsById.get(lobby.hostId);
-        send(hostSocket, { type: 'lobby:peer-left', payload: { playerId: clientId } });
+        send(hostSocket, { type: 'lobby:peer-left', payload: { playerId: clientInfo.clientId } });
       }
     }
 
-    clients.delete(socket);
-    socketsById.delete(clientId);
+    clients.delete(socket.id);
+    socketsById.delete(clientInfo.clientId);
   });
 });
 
@@ -614,7 +636,8 @@ server.listen(PORT, () => {
   log(`🚀 Serveur de signalisation WebRTC démarré`);
   log(`📡 Port: ${port}`);
   log(`🌐 Adresse: ${host}`);
-  log(`🔗 URL: ws://${host === '::' ? 'localhost' : host}:${port}`);
+  log(`🔗 URL HTTP: http://${host === '::' ? 'localhost' : host}:${port}`);
+  log(`🔗 Socket.io path: ${SOCKET_IO_PATH}`);
   log(`📊 Logs des signaux activés`);
   log('========================================');
 });
