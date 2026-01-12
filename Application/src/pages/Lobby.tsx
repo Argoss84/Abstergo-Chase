@@ -54,7 +54,8 @@ const Lobby: React.FC = () => {
     updateGameDetails,
     props,
     isHost,
-    connectionStatus
+    connectionStatus,
+    clearSession
   } = useGameSession();
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -86,34 +87,63 @@ const Lobby: React.FC = () => {
       const params = new URLSearchParams(location.search);
       const code = params.get('code');
 
-      if (!code) {
+      // Si nous sommes déjà connectés au bon lobby, ne rien faire
+      if (lobbyCode && code && lobbyCode === code && connectionStatus === 'connected') {
+        console.log('[Lobby] Déjà connecté au lobby:', code);
+        setIsLoading(false);
+        return;
+      }
+
+      // Si un code est fourni dans l'URL
+      if (code) {
+        if (!lobbyCode || lobbyCode !== code) {
+          // Éviter les appels multiples simultanés
+          if (isJoining) {
+            return;
+          }
+          
+          try {
+            setIsJoining(true);
+            setLoadingMessage('Connexion au lobby WebRTC...');
+            await joinLobby(code);
+            vibrate(patterns.short);
+          } catch (err) {
+            await handleErrorWithUser('Impossible de rejoindre le lobby', err, ERROR_CONTEXTS.LOBBY_INIT);
+          } finally {
+            setIsJoining(false);
+          }
+        }
+        setIsLoading(false);
+        return;
+      }
+
+      // Si pas de code dans l'URL mais qu'on a une session persistée
+      if (!code && lobbyCode) {
+        console.log('[Lobby] Restauration de session, redirection vers:', lobbyCode);
+        history.replace(`/lobby?code=${lobbyCode}`);
+        return;
+      }
+
+      // Si vraiment aucun code n'est disponible
+      if (!code && !lobbyCode) {
         await handleErrorWithUser('Code de partie non trouvé', null, ERROR_CONTEXTS.LOBBY_INIT);
         setIsLoading(false);
         return;
       }
 
-      if (!lobbyCode || lobbyCode !== code) {
-        // Éviter les appels multiples simultanés
-        if (isJoining) {
-          return;
-        }
-        
-        try {
-          setIsJoining(true);
-          setLoadingMessage('Connexion au lobby WebRTC...');
-          await joinLobby(code);
-          vibrate(patterns.short);
-        } catch (err) {
-          await handleErrorWithUser('Impossible de rejoindre le lobby', err, ERROR_CONTEXTS.LOBBY_INIT);
-        } finally {
-          setIsJoining(false);
-        }
-      }
       setIsLoading(false);
     };
 
     fetchLobby();
-  }, [location.search, lobbyCode]);
+  }, [location.search, lobbyCode, connectionStatus]);
+
+  // Désactiver le loading quand on a les détails du jeu
+  useEffect(() => {
+    if (gameDetails && connectionStatus === 'connected') {
+      setIsLoading(false);
+      setIsJoining(false);
+    }
+  }, [gameDetails, connectionStatus]);
 
   useEffect(() => {
     if (!gameDetails?.code) return;
@@ -193,6 +223,11 @@ const Lobby: React.FC = () => {
     }
   };
 
+  const handleLeaveLobby = () => {
+    clearSession();
+    history.push('/home');
+  };
+
   const handleStartGame = async () => {
     try {
       const requirements = checkRoleRequirements();
@@ -220,6 +255,11 @@ const Lobby: React.FC = () => {
       <IonHeader>
         <IonToolbar>
           <IonTitle>Lobby</IonTitle>
+          <IonButtons slot="end">
+            <IonButton onClick={handleLeaveLobby} color="danger">
+              Quitter
+            </IonButton>
+          </IonButtons>
         </IonToolbar>
       </IonHeader>
       <IonContent fullscreen>

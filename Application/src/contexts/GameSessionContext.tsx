@@ -9,6 +9,8 @@ interface GameSessionContextValue extends SessionState {
   updatePlayer: (playerId: string, partial: Partial<Player>) => Promise<void>;
   updateProp: (propId: number, partial: Partial<GameProp>) => Promise<void>;
   setPlayerName: (name: string) => void;
+  clearSession: () => void;
+  hasPersistedSession: () => boolean;
 }
 
 const GameSessionContext = createContext<GameSessionContextValue | undefined>(undefined);
@@ -29,7 +31,9 @@ export const GameSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     updateGameDetails: async (partial) => gameSessionService.updateGameDetails(partial),
     updatePlayer: async (playerId, partial) => gameSessionService.updatePlayer(playerId, partial),
     updateProp: async (propId, partial) => gameSessionService.updateProp(propId, partial),
-    setPlayerName: (name: string) => gameSessionService.setPlayerName(name)
+    setPlayerName: (name: string) => gameSessionService.setPlayerName(name),
+    clearSession: () => gameSessionService.clearSession(),
+    hasPersistedSession: () => gameSessionService.hasPersistedSession()
   };
 
   return <GameSessionContext.Provider value={value}>{children}</GameSessionContext.Provider>;

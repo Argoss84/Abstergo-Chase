@@ -14,11 +14,25 @@ interface SessionState {
   connectionStatus: ConnectionStatus;
 }
 
+interface PersistedSessionData {
+  lobbyCode: string;
+  playerId: string;
+  playerName: string;
+  isHost: boolean;
+  timestamp: number;
+  gameDetails?: GameDetails | null;
+  players?: Player[];
+  props?: GameProp[];
+}
+
 interface SignalMessage {
   type: 'offer' | 'answer' | 'ice';
   sdp?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit;
 }
+
+const SESSION_STORAGE_KEY = 'abstergo-game-session';
+const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 heures
 
 const defaultPlayerName = () => {
   const stored = localStorage.getItem('abstergo-player-name');
@@ -53,12 +67,22 @@ class GameSessionService {
 
   constructor() {
     if (typeof window !== 'undefined') {
+      // Restaurer la session si elle existe
+      this.restoreSession();
+      
       window.addEventListener('visibilitychange', () => {
-        if (!document.hidden && !this.state.isHost) {
-          this.requestResync('visibilitychange');
+        if (!document.hidden) {
+          // Quand l'utilisateur revient sur la page
+          if (this.state.lobbyCode && !this.socket?.connected) {
+            console.log('[GameSession] Page visible, tentative de reconnexion...');
+            this.reconnectToLobby();
+          } else if (!this.state.isHost) {
+            this.requestResync('visibilitychange');
+          }
         }
       });
       window.addEventListener('beforeunload', () => {
+        // Ne pas nettoyer la session, juste les connexions
         this.cleanupConnections();
       });
     }
@@ -80,6 +104,25 @@ class GameSessionService {
     if (!name.trim()) return;
     localStorage.setItem('abstergo-player-name', name.trim());
     this.updateState({ playerName: name.trim() });
+  }
+
+  clearSession() {
+    console.log('[GameSession] Nettoyage de la session');
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    this.resetSession();
+  }
+
+  hasPersistedSession(): boolean {
+    const stored = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!stored) return false;
+    
+    try {
+      const data: PersistedSessionData = JSON.parse(stored);
+      const age = Date.now() - data.timestamp;
+      return age < SESSION_EXPIRY_MS;
+    } catch {
+      return false;
+    }
   }
 
   async createLobby(gameDetails: GameDetails, props: GameProp[]) {
@@ -199,14 +242,129 @@ class GameSessionService {
   }
 
   async requestLatestState() {
-    if (!this.state.isHost) {
+    if (this.state.isHost) {
+      // Le host a déjà l'état, demander juste un refresh des connexions WebRTC
+      this.broadcastState();
+    } else {
       this.sendAction('action:request-state', {});
+    }
+  }
+
+  private persistSession() {
+    if (!this.state.lobbyCode || !this.state.playerId) {
+      return;
+    }
+
+    const data: PersistedSessionData = {
+      lobbyCode: this.state.lobbyCode,
+      playerId: this.state.playerId,
+      playerName: this.state.playerName,
+      isHost: this.state.isHost,
+      timestamp: Date.now(),
+      gameDetails: this.state.gameDetails,
+      players: this.state.players,
+      props: this.state.props
+    };
+
+    try {
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(data));
+      console.log('[GameSession] Session persistée:', data.lobbyCode);
+    } catch (error) {
+      console.error('[GameSession] Erreur lors de la persistance:', error);
+    }
+  }
+
+  private restoreSession() {
+    const stored = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!stored) return;
+
+    try {
+      const data: PersistedSessionData = JSON.parse(stored);
+      const age = Date.now() - data.timestamp;
+
+      if (age > SESSION_EXPIRY_MS) {
+        console.log('[GameSession] Session expirée, nettoyage');
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+        return;
+      }
+
+      console.log('[GameSession] Restauration de session:', data.lobbyCode);
+      
+      // Restaurer tous les états y compris gameDetails, players et props
+      const stateUpdate: Partial<SessionState> = {
+        lobbyCode: data.lobbyCode,
+        playerId: data.playerId,
+        playerName: data.playerName,
+        isHost: data.isHost
+      };
+
+      // Restaurer les données du jeu si elles existent (important pour le host)
+      if (data.gameDetails) {
+        stateUpdate.gameDetails = data.gameDetails;
+      }
+      if (data.players) {
+        stateUpdate.players = data.players;
+      }
+      if (data.props) {
+        stateUpdate.props = data.props;
+      }
+
+      this.state = { ...this.state, ...stateUpdate };
+      this.listeners.forEach((listener) => listener(this.state));
+    } catch (error) {
+      console.error('[GameSession] Erreur lors de la restauration:', error);
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+  }
+
+  private async reconnectToLobby() {
+    if (!this.state.lobbyCode || !this.state.playerId) return;
+
+    console.log('[GameSession] Reconnexion au lobby:', this.state.lobbyCode);
+    
+    try {
+      await this.ensureSocket();
+      
+      if (this.state.isHost) {
+        // Pour le host, essayer de se reconnecter
+        console.log('[GameSession] Reconnexion en tant que host');
+        this.sendSocket('lobby:rejoin-host', {
+          code: this.state.lobbyCode,
+          playerId: this.state.playerId,
+          playerName: this.state.playerName
+        });
+        
+        // Attendre la réponse de reconnexion
+        try {
+          const response = await this.waitFor('lobby:joined', 10000);
+          console.log('[GameSession] Host reconnecté avec succès:', response);
+          this.updateState({
+            connectionStatus: 'connected'
+          });
+          // Demander une resynchronisation de l'état
+          this.requestLatestState();
+        } catch (error) {
+          console.error('[GameSession] Échec de la reconnexion host:', error);
+          this.updateState({ connectionStatus: 'error' });
+        }
+      } else {
+        // Pour les autres joueurs, rejoindre normalement
+        await this.attemptRejoin();
+      }
+    } catch (error) {
+      console.error('[GameSession] Erreur de reconnexion:', error);
+      this.updateState({ connectionStatus: 'error' });
     }
   }
 
   private updateState(partial: Partial<SessionState>) {
     this.state = { ...this.state, ...partial };
     this.listeners.forEach((listener) => listener(this.state));
+    
+    // Persister la session si on a un lobby actif
+    if (this.state.lobbyCode && this.state.playerId) {
+      this.persistSession();
+    }
   }
 
   private async ensureSocket() {
@@ -341,6 +499,7 @@ class GameSessionService {
 
   private resetSession() {
     this.cleanupConnections();
+    localStorage.removeItem(SESSION_STORAGE_KEY);
     this.updateState({
       lobbyCode: null,
       playerId: null,

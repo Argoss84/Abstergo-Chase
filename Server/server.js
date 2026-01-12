@@ -5,36 +5,56 @@ import { randomUUID } from 'crypto';
 const PORT = process.env.SIGNALING_PORT || 5174;
 const SOCKET_IO_PATH = process.env.SOCKET_IO_PATH || '/socket.io';
 
+// Fonction pour obtenir les statistiques du serveur
+const getServerStats = () => ({
+  connectedClients: clients.size,
+  activeLobbies: lobbies.size,
+  clients: Array.from(clients.entries()).map(([socketId, info]) => {
+    const socket = io.sockets.sockets.get(socketId);
+    return {
+      clientId: info.clientId,
+      lobbyCode: info.lobbyCode || 'Aucun',
+      connected: Boolean(socket?.connected)
+    };
+  }),
+  lobbies: Array.from(lobbies.entries()).map(([code, lobby]) => {
+    const hostDisconnected = disconnectedHosts.has(code);
+    const hostInfo = hostDisconnected ? disconnectedHosts.get(code) : null;
+    return {
+      code,
+      hostId: lobby.hostId,
+      playerCount: lobby.players.size,
+      players: Array.from(lobby.players.values()),
+      hostDisconnected,
+      reconnectionTimeout: hostInfo ? Math.ceil((5 * 60 * 1000 - (Date.now() - hostInfo.disconnectedAt)) / 1000) : null
+    };
+  }),
+  serverInfo: {
+    port: PORT,
+    nodeVersion: process.version,
+    platform: process.platform,
+    uptime: process.uptime(),
+    memoryUsage: process.memoryUsage()
+  },
+  logs: logs.slice(-50).reverse() // 50 derniers logs, plus récent en premier
+});
+
 // Créer le serveur HTTP avec un gestionnaire de requêtes
 const server = createServer((req, res) => {
+  // API endpoint pour les statistiques
+  if (req.method === 'GET' && req.url === '/api/stats') {
+    const stats = getServerStats();
+    res.writeHead(200, { 
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify(stats));
+    return;
+  }
+
   // Page de monitoring accessible via HTTP
   if (req.method === 'GET') {
-    const stats = {
-      connectedClients: clients.size,
-      activeLobbies: lobbies.size,
-      clients: Array.from(clients.entries()).map(([socketId, info]) => {
-        const socket = io.sockets.sockets.get(socketId);
-        return {
-          clientId: info.clientId,
-          lobbyCode: info.lobbyCode || 'Aucun',
-          connected: Boolean(socket?.connected)
-        };
-      }),
-      lobbies: Array.from(lobbies.entries()).map(([code, lobby]) => ({
-        code,
-        hostId: lobby.hostId,
-        playerCount: lobby.players.size,
-        players: Array.from(lobby.players.values())
-      })),
-      serverInfo: {
-        port: PORT,
-        nodeVersion: process.version,
-        platform: process.platform,
-        uptime: process.uptime(),
-        memoryUsage: process.memoryUsage()
-      },
-      logs: logs.slice(-50).reverse() // 50 derniers logs, plus récent en premier
-    };
+    const stats = getServerStats();
 
     const protoHeader = req.headers['x-forwarded-proto'];
     const protocol = Array.isArray(protoHeader) ? protoHeader[0] : protoHeader || 'http';
@@ -108,6 +128,7 @@ const server = createServer((req, res) => {
       padding: 12px;
       text-align: left;
       border-bottom: 1px solid #e0e0e0;
+      color: #000;
     }
     th {
       background-color: #f5f5f5;
@@ -146,7 +167,7 @@ const server = createServer((req, res) => {
       color: #555;
     }
     .info-value {
-      color: #333;
+      color: #000;
     }
     .refresh-btn {
       position: fixed;
@@ -177,7 +198,17 @@ const server = createServer((req, res) => {
     .player-list {
       margin-left: 20px;
       font-size: 0.9em;
-      color: #666;
+      color: #000;
+    }
+    .reconnection-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.85em;
+      font-weight: 600;
+      background-color: #ff9800;
+      color: white;
+      margin-left: 8px;
     }
     .logs-container {
       background: #1e1e1e;
@@ -220,11 +251,26 @@ const server = createServer((req, res) => {
       border-radius: 20px;
       font-size: 0.9em;
     }
+    .live-badge {
+      display: inline-block;
+      background: #f44336;
+      color: white;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 0.9em;
+      font-weight: 600;
+      margin-left: 15px;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>🚀 Serveur de Signalisation WebRTC - Monitoring</h1>
+    <h1>🚀 Serveur de Signalisation WebRTC - Monitoring <span class="live-badge">🔴 LIVE</span></h1>
     
     <div class="stat-grid">
       <div class="stat-box">
@@ -281,7 +327,7 @@ const server = createServer((req, res) => {
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="clientsCard">
       <h2>👥 Clients Socket.io Connectés</h2>
       ${stats.clients.length > 0 ? `
         <table>
@@ -309,7 +355,7 @@ const server = createServer((req, res) => {
       ` : '<div class="no-data">Aucun client connecté actuellement</div>'}
     </div>
 
-    <div class="card">
+    <div class="card" id="lobbiesCard">
       <h2>🎮 Lobbies Actifs</h2>
       ${stats.lobbies.length > 0 ? `
         <table>
@@ -324,7 +370,10 @@ const server = createServer((req, res) => {
           <tbody>
             ${stats.lobbies.map(lobby => `
               <tr>
-                <td><strong>${lobby.code}</strong></td>
+                <td>
+                  <strong>${lobby.code}</strong>
+                  ${lobby.hostDisconnected ? `<span class="reconnection-badge">⏱️ ${lobby.reconnectionTimeout}s</span>` : ''}
+                </td>
                 <td><code>${lobby.hostId.substring(0, 8)}...</code></td>
                 <td>${lobby.playerCount}</td>
                 <td>
@@ -339,7 +388,7 @@ const server = createServer((req, res) => {
       ` : '<div class="no-data">Aucun lobby actif actuellement</div>'}
     </div>
 
-    <div class="card">
+    <div class="card" id="logsCard">
       <div class="logs-header">
         <h2>📋 Logs Serveur</h2>
         <span class="logs-count">${stats.logs.length} logs</span>
@@ -364,16 +413,134 @@ const server = createServer((req, res) => {
       </div>
     </div>
 
-    <button class="refresh-btn" onclick="location.reload()">🔄 Rafraîchir</button>
   </div>
 
   <script>
-    // Auto-refresh toutes les 10 secondes
-    setTimeout(() => location.reload(), 10000);
+    let lastLogCount = 0;
     
-    // Auto-scroll vers le bas des logs (plus récent en haut, donc pas besoin)
-    // Mais on peut ajouter un smooth scroll au chargement
-    document.querySelector('.logs-container')?.scrollTo({ top: 0, behavior: 'smooth' });
+    // Fonction pour mettre à jour les statistiques
+    async function updateStats() {
+      try {
+        const response = await fetch('/api/stats');
+        const stats = await response.json();
+        
+        // Mettre à jour les statistiques principales
+        document.querySelectorAll('.stat-box')[0].querySelector('.number').textContent = stats.connectedClients;
+        document.querySelectorAll('.stat-box')[1].querySelector('.number').textContent = stats.activeLobbies;
+        document.querySelectorAll('.stat-box')[2].querySelector('.number').textContent = Math.floor(stats.serverInfo.uptime / 60) + 'm';
+        document.querySelectorAll('.stat-box')[3].querySelector('.number').textContent = Math.round(stats.serverInfo.memoryUsage.heapUsed / 1024 / 1024) + 'MB';
+        
+        // Mettre à jour les clients
+        const clientsCard = document.getElementById('clientsCard');
+        if (stats.clients.length > 0) {
+          const clientsHTML = \`
+            <table>
+              <thead>
+                <tr>
+                  <th>Client ID</th>
+                  <th>Lobby</th>
+                  <th>Statut</th>
+                </tr>
+              </thead>
+              <tbody>
+                \${stats.clients.map(client => \`
+                  <tr>
+                    <td><code>\${client.clientId.substring(0, 8)}...</code></td>
+                    <td>\${client.lobbyCode}</td>
+                    <td>
+                      <span class="status \${client.connected ? 'connected' : 'disconnected'}">
+                        \${client.connected ? 'Connecté' : 'Déconnecté'}
+                      </span>
+                    </td>
+                  </tr>
+                \`).join('')}
+              </tbody>
+            </table>
+          \`;
+          clientsCard.innerHTML = '<h2>👥 Clients Socket.io Connectés</h2>' + clientsHTML;
+        } else {
+          clientsCard.innerHTML = '<h2>👥 Clients Socket.io Connectés</h2><div class="no-data">Aucun client connecté actuellement</div>';
+        }
+        
+        // Mettre à jour les lobbies
+        const lobbiesCard = document.getElementById('lobbiesCard');
+        if (stats.lobbies.length > 0) {
+          const lobbiesHTML = \`
+            <table>
+              <thead>
+                <tr>
+                  <th>Code Lobby</th>
+                  <th>Host ID</th>
+                  <th>Joueurs</th>
+                  <th>Détails</th>
+                </tr>
+              </thead>
+              <tbody>
+                \${stats.lobbies.map(lobby => \`
+                  <tr>
+                    <td>
+                      <strong>\${lobby.code}</strong>
+                      \${lobby.hostDisconnected ? \`<span class="reconnection-badge">⏱️ \${lobby.reconnectionTimeout}s</span>\` : ''}
+                    </td>
+                    <td><code>\${lobby.hostId.substring(0, 8)}...</code></td>
+                    <td>\${lobby.playerCount}</td>
+                    <td>
+                      <div class="player-list">
+                        \${lobby.players.map(p => \`\${p.name} \${p.isHost ? '👑' : ''}\`).join(', ')}
+                      </div>
+                    </td>
+                  </tr>
+                \`).join('')}
+              </tbody>
+            </table>
+          \`;
+          lobbiesCard.innerHTML = '<h2>🎮 Lobbies Actifs</h2>' + lobbiesHTML;
+        } else {
+          lobbiesCard.innerHTML = '<h2>🎮 Lobbies Actifs</h2><div class="no-data">Aucun lobby actif actuellement</div>';
+        }
+        
+        // Mettre à jour les logs seulement si nécessaire
+        if (stats.logs.length !== lastLogCount) {
+          lastLogCount = stats.logs.length;
+          const logsCard = document.getElementById('logsCard');
+          const logsContainer = logsCard.querySelector('.logs-container');
+          const logsCount = logsCard.querySelector('.logs-count');
+          logsCount.textContent = stats.logs.length + ' logs';
+          
+          if (stats.logs.length > 0) {
+            const logsHTML = stats.logs.map(log => {
+              const message = log.message;
+              let className = 'log-entry';
+              
+              if (message.includes('[CONNEXION]')) className += ' log-connexion';
+              else if (message.includes('[MESSAGE')) className += ' log-message';
+              else if (message.includes('[LOBBY CRÉÉ]') || message.includes('[LOBBY REJOINT]')) className += ' log-lobby';
+              else if (message.includes('[ERREUR]')) className += ' log-erreur';
+              else if (message.includes('[WEBRTC]')) className += ' log-webrtc';
+              else if (message.includes('[DÉCONNEXION]') || message.includes('[LOBBY FERMÉ]') || message.includes('[JOUEUR PARTI]')) className += ' log-deconnexion';
+              else if (message.includes('[AVERTISSEMENT]')) className += ' log-avertissement';
+              
+              return \`<div class="\${className}">\${message}</div>\`;
+            }).join('');
+            
+            logsContainer.innerHTML = logsHTML;
+          } else {
+            logsContainer.innerHTML = '<div class="no-data">Aucun log disponible</div>';
+          }
+          
+          // Auto-scroll vers le haut (plus récent en premier)
+          logsContainer.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      } catch (error) {
+        console.error('Erreur lors de la mise à jour des stats:', error);
+      }
+    }
+    
+    // Mettre à jour toutes les 2 secondes
+    setInterval(updateStats, 2000);
+    
+    // Première mise à jour immédiate
+    updateStats();
   </script>
 </body>
 </html>
@@ -399,6 +566,7 @@ const io = new SocketIOServer(server, {
 const lobbies = new Map();
 const clients = new Map();
 const socketsById = new Map();
+const disconnectedHosts = new Map(); // Stocke temporairement les lobbies dont le host s'est déconnecté
 
 // Stockage des logs en mémoire (derniers 100 logs)
 const logs = [];
@@ -566,6 +734,74 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'lobby:rejoin-host') {
+      const code = payload?.code?.toUpperCase();
+      const oldPlayerId = payload?.playerId;
+      const lobby = lobbies.get(code);
+      
+      if (!lobby) {
+        log(`[ERREUR LOBBY] Host ${clientId} tente de rejoindre un lobby inexistant: ${code}`);
+        send(socket, { type: 'lobby:error', payload: { message: 'Lobby introuvable.' } });
+        return;
+      }
+
+      // Vérifier si c'est bien le host qui tente de se reconnecter
+      if (lobby.hostId === oldPlayerId) {
+        log(`[HOST RECONNEXION] Code: ${code}, Ancien PlayerId: ${oldPlayerId}, Nouveau: ${clientId}`);
+        
+        // Annuler le timeout de suppression du lobby si il existe
+        if (disconnectedHosts.has(code)) {
+          const hostInfo = disconnectedHosts.get(code);
+          clearTimeout(hostInfo.timeoutId);
+          disconnectedHosts.delete(code);
+          log(`[HOST RECONNEXION] Timeout annulé pour le lobby ${code}`);
+        }
+        
+        // Mettre à jour le hostId et la map des joueurs
+        lobby.hostId = clientId;
+        const oldPlayer = lobby.players.get(oldPlayerId);
+        if (oldPlayer) {
+          lobby.players.delete(oldPlayerId);
+          lobby.players.set(clientId, { ...oldPlayer, id: clientId });
+        } else {
+          lobby.players.set(clientId, { id: clientId, name: payload?.playerName || 'Host', isHost: true });
+        }
+        
+        // Mettre à jour les maps globales
+        socketsById.delete(oldPlayerId);
+        socketsById.set(clientId, socket);
+        clients.set(socket.id, { clientId, lobbyCode: code });
+
+        send(socket, {
+          type: 'lobby:joined',
+          payload: {
+            code,
+            playerId: clientId,
+            hostId: clientId,
+            lobby: getLobbySnapshot(lobby)
+          }
+        });
+        
+        // Notifier les autres joueurs de la reconnexion du host
+        lobby.players.forEach((player) => {
+          if (player.id !== clientId) {
+            const playerSocket = socketsById.get(player.id);
+            if (playerSocket) {
+              send(playerSocket, {
+                type: 'lobby:host-reconnected',
+                payload: { newHostId: clientId }
+              });
+            }
+          }
+        });
+        return;
+      } else {
+        log(`[ERREUR LOBBY] Client ${clientId} tente de se reconnecter en tant que host mais n'est pas le host du lobby ${code}`);
+        send(socket, { type: 'lobby:error', payload: { message: 'Non autorisé à rejoindre en tant que host.' } });
+        return;
+      }
+    }
+
     if (type === 'webrtc:signal') {
       const targetId = payload?.targetId;
       const targetSocket = socketsById.get(targetId);
@@ -656,11 +892,31 @@ io.on('connection', (socket) => {
       lobby.players.delete(clientInfo.clientId);
 
       if (lobby.hostId === clientInfo.clientId) {
-        log(`[LOBBY FERMÉ] Code: ${lobbyCode}, Host déconnecté: ${clientInfo.clientId}`);
-        lobbies.delete(lobbyCode);
-        lobby.players.forEach((player) => {
-          const playerSocket = socketsById.get(player.id);
-          send(playerSocket, { type: 'lobby:closed', payload: { code: lobbyCode } });
+        log(`[HOST DÉCONNECTÉ] Code: ${lobbyCode}, Host: ${clientInfo.clientId} - Lobby conservé pendant 5 minutes`);
+        
+        // Marquer le lobby comme en attente de reconnexion
+        const timeoutId = setTimeout(() => {
+          if (lobbies.has(lobbyCode) && lobbies.get(lobbyCode).hostId === clientInfo.clientId) {
+            log(`[LOBBY FERMÉ] Code: ${lobbyCode}, Timeout de reconnexion dépassé`);
+            
+            const currentLobby = lobbies.get(lobbyCode);
+            if (currentLobby) {
+              // Notifier tous les joueurs que le lobby est fermé
+              currentLobby.players.forEach((player) => {
+                const playerSocket = socketsById.get(player.id);
+                send(playerSocket, { type: 'lobby:closed', payload: { code: lobbyCode } });
+              });
+            }
+            
+            lobbies.delete(lobbyCode);
+            disconnectedHosts.delete(lobbyCode);
+          }
+        }, 5 * 60 * 1000); // 5 minutes
+        
+        disconnectedHosts.set(lobbyCode, {
+          hostId: clientInfo.clientId,
+          timeoutId,
+          disconnectedAt: Date.now()
         });
       } else {
         log(`[JOUEUR PARTI] Lobby: ${lobbyCode}, Joueur: ${clientInfo.clientId}`);
