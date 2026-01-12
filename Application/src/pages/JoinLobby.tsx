@@ -16,16 +16,29 @@ import {
     IonLabel,
   } from '@ionic/react';
   import { useHistory } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
+import { useGameSession } from '../contexts/GameSessionContext';
   
   const JoinLobby: React.FC = () => {
     const history = useHistory();
+    const { playerName, setPlayerName } = useGameSession();
     const [gameCode, setGameCode] = useState('');
+    const [displayName, setDisplayName] = useState(playerName);
+
+    useEffect(() => {
+      console.log('JoinLobby: playerName from context:', playerName);
+      setDisplayName(playerName);
+    }, [playerName]);
 
     const handleInputChange = (e: CustomEvent) => {
       const value = e.detail.value || '';
       setGameCode(value.toUpperCase());
+    };
+
+    const handleNameChange = (e: CustomEvent) => {
+      const value = e.detail.value || '';
+      setDisplayName(value);
     };
   
       const handleJoinGame = async () => {
@@ -44,6 +57,19 @@ import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
       });
       return;
     }
+
+    if (!displayName.trim()) {
+      await handleError('Veuillez entrer un nom de joueur', null, {
+        context: ERROR_CONTEXTS.VALIDATION,
+        shouldShowError: false
+      });
+      return;
+    }
+    
+    // Mettre à jour le nom du joueur avant de rejoindre
+    if (displayName.trim() !== playerName) {
+      setPlayerName(displayName.trim());
+    }
     
     history.push(`/lobby?code=${gameCode}`);
   };
@@ -55,7 +81,7 @@ import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
             <IonButtons slot="start">
               <IonBackButton defaultHref="/home" />
             </IonButtons>
-            <IonTitle>JoinLobby</IonTitle>
+            <IonTitle>Rejoindre une partie</IonTitle>
           </IonToolbar>
         </IonHeader>
         <IonContent fullscreen>
@@ -63,10 +89,20 @@ import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
           <IonCard>
             <IonCardHeader>
               <IonCardTitle>
-                JoinLobby
+                Rejoindre une partie
               </IonCardTitle>
             </IonCardHeader>
             <IonCardContent>
+              <IonItem>
+                <IonLabel position="stacked">Votre nom</IonLabel>
+                <IonInput
+                  value={displayName}
+                  onIonInput={handleNameChange}
+                  placeholder="Entrez votre nom"
+                  maxlength={20}
+                />
+              </IonItem>
+
               <IonItem>
                 <IonLabel position="stacked">Code de la partie</IonLabel>
                 <IonInput
@@ -80,7 +116,7 @@ import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
               <IonButton 
                 expand="block" 
                 onClick={handleJoinGame}
-                disabled={gameCode.length !== 6}
+                disabled={gameCode.length !== 6 || !displayName.trim()}
                 className="ion-margin-top"
               >
                 Rejoindre la partie

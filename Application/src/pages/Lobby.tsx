@@ -94,6 +94,12 @@ const Lobby: React.FC = () => {
         return;
       }
 
+      // Si en cours de connexion, attendre
+      if (connectionStatus === 'connecting') {
+        console.log('[Lobby] Connexion en cours, attente...');
+        return;
+      }
+
       // Si un code est fourni dans l'URL
       if (code) {
         if (!lobbyCode || lobbyCode !== code) {

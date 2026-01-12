@@ -63,7 +63,7 @@ const ResizeMap = () => {
 
 const CreateLobby: React.FC = () => {
   const history = useHistory();
-  const { createLobby } = useGameSession();
+  const { createLobby, playerName, setPlayerName } = useGameSession();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<[number, number] | null>(null);
   const [userPosition, setUserPosition] = useState<[number, number] | null>(null);
@@ -71,6 +71,7 @@ const CreateLobby: React.FC = () => {
   const [mapKey, setMapKey] = useState(0);
   const [objectives, setObjectives] = useState<Objective[]>([]);
   const [startZones, setStartZones] = useState<StartZones>({ agent: null, rogue: null });
+  const [displayName, setDisplayName] = useState(playerName);
   const [formData, setFormData] = useState<GameFormData>({
     objectif_number: 3,
     duration: 900,
@@ -86,6 +87,12 @@ const CreateLobby: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
 
+  // Initialize displayName with playerName from context
+  useEffect(() => {
+    console.log('CreateLobby: playerName from context:', playerName);
+    setDisplayName(playerName);
+  }, [playerName]);
+
   // Fonction helper pour gérer les erreurs
   const handleErrorWithContext = async (errorMessage: string, error?: any, context?: string) => {
     await handleError(errorMessage, error, {
@@ -99,6 +106,11 @@ const CreateLobby: React.FC = () => {
       ...prev,
       [field]: value
     }));
+  };
+
+  const handleNameChange = (e: CustomEvent) => {
+    const value = e.detail.value || '';
+    setDisplayName(value);
   };
 
   const fetchStreets = async (lat: number, lng: number) => {
@@ -170,8 +182,19 @@ const CreateLobby: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    if (!displayName.trim()) {
+      await handleErrorWithContext('Veuillez entrer un nom de joueur', null, ERROR_CONTEXTS.VALIDATION);
+      return;
+    }
+
     try {
       setIsLoading(true);
+      
+      // Mettre à jour le nom du joueur avant de créer le lobby
+      if (displayName.trim() !== playerName) {
+        setPlayerName(displayName.trim());
+      }
+
       const gameId = Date.now();
 
       const gameDetails = {
@@ -334,7 +357,17 @@ const CreateLobby: React.FC = () => {
             </IonCardTitle>
           </IonCardHeader>
           <IonCardContent>
-            <div style={{ height: '300px', width: '100%', marginBottom: '1rem' }}>
+            <IonItem>
+              <IonLabel position="stacked">Votre nom</IonLabel>
+              <IonInput
+                value={displayName}
+                onIonInput={handleNameChange}
+                placeholder="Entrez votre nom"
+                maxlength={20}
+              />
+            </IonItem>
+
+            <div style={{ height: '300px', width: '100%', marginTop: '1rem', marginBottom: '1rem' }}>
               {userPosition && (
                 <MapContainer
                   key={mapKey}
@@ -437,7 +470,7 @@ const CreateLobby: React.FC = () => {
             <IonButton 
               expand="block" 
               onClick={handleSubmit} 
-              disabled={isLoading || !selectedPosition || objectives.length === 0}
+              disabled={isLoading || !selectedPosition || objectives.length === 0 || !displayName.trim()}
             >
               {isLoading ? 'Création en cours...' : 'Créer la partie'}
             </IonButton>

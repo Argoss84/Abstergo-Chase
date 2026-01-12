@@ -64,6 +64,7 @@ class GameSessionService {
   private hostChannel: RTCDataChannel | null = null;
   private reconnectAttempts = new Map<string, number>();
   private rejoinInFlight = false;
+  private joinInProgress = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -186,19 +187,36 @@ class GameSessionService {
   }
 
   async joinLobby(code: string) {
-    await this.ensureSocket();
-    this.sendSocket('lobby:join', {
-      code,
-      playerName: this.state.playerName
-    });
+    // Éviter les appels concurrents
+    if (this.joinInProgress || this.rejoinInFlight) {
+      console.log('[GameSession] Jointure déjà en cours, ignoré');
+      return;
+    }
 
-    const response = await this.waitFor('lobby:joined');
-    this.updateState({
-      lobbyCode: response.code,
-      playerId: response.playerId,
-      isHost: response.playerId === response.hostId,
-      connectionStatus: 'connected'
-    });
+    // Si on est déjà connecté au bon lobby, ne rien faire
+    if (this.state.lobbyCode === code && this.state.connectionStatus === 'connected') {
+      console.log('[GameSession] Déjà connecté au lobby:', code);
+      return;
+    }
+
+    this.joinInProgress = true;
+    try {
+      await this.ensureSocket();
+      this.sendSocket('lobby:join', {
+        code,
+        playerName: this.state.playerName
+      });
+
+      const response = await this.waitFor('lobby:joined');
+      this.updateState({
+        lobbyCode: response.code,
+        playerId: response.playerId,
+        isHost: response.playerId === response.hostId,
+        connectionStatus: 'connected'
+      });
+    } finally {
+      this.joinInProgress = false;
+    }
   }
 
   async updateGameDetails(partial: Partial<GameDetails>) {
@@ -733,7 +751,18 @@ class GameSessionService {
   }
 
   private async attemptRejoin() {
-    if (this.rejoinInFlight || !this.state.lobbyCode) return;
+    // Éviter les appels concurrents
+    if (this.rejoinInFlight || this.joinInProgress || !this.state.lobbyCode) {
+      console.log('[GameSession] Rejoin déjà en cours ou lobby vide, ignoré');
+      return;
+    }
+
+    // Si on est déjà connecté, ne pas rejoindre
+    if (this.state.connectionStatus === 'connected') {
+      console.log('[GameSession] Déjà connecté, pas besoin de rejoindre');
+      return;
+    }
+
     this.rejoinInFlight = true;
     try {
       this.sendSocket('lobby:join', {

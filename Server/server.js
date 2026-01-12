@@ -695,7 +695,19 @@ io.on('connection', (socket) => {
 
       // Vérifier si le joueur est déjà dans le lobby
       if (lobby.players.has(clientId)) {
-        log(`[AVERTISSEMENT] Client ${clientId} tente de rejoindre le lobby ${code} une seconde fois - ignoré`);
+        log(`[RECONNEXION] Client ${clientId} déjà dans le lobby ${code} - mise à jour du socket`);
+        
+        // Mettre à jour les informations du joueur (notamment le nom s'il a changé)
+        const existingPlayer = lobby.players.get(clientId);
+        if (existingPlayer && payload?.playerName) {
+          existingPlayer.name = payload.playerName;
+          lobby.players.set(clientId, existingPlayer);
+        }
+        
+        // Mettre à jour le mapping socket
+        clients.get(socket.id).lobbyCode = code;
+        socketsById.set(clientId, socket);
+        
         send(socket, {
           type: 'lobby:joined',
           payload: {
