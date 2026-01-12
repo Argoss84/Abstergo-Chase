@@ -86,6 +86,8 @@ const CreateLobby: React.FC = () => {
   });
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingStreets, setIsLoadingStreets] = useState(false);
+  const [streetsLoadError, setStreetsLoadError] = useState<string | null>(null);
 
   // Initialize displayName with playerName from context
   useEffect(() => {
@@ -114,26 +116,50 @@ const CreateLobby: React.FC = () => {
   };
 
   const fetchStreets = async (lat: number, lng: number) => {
-    const overpassUrl = `https://overpass-api.de/api/interpreter?data=
-                          [out:json];
-                          (
-                            way(around:${formData.map_radius},${lat},${lng})["highway"]["foot"!~"no"];
-                            way(around:${formData.map_radius},${lat},${lng})["amenity"="square"]["foot"!~"no"];
-                          );
-                          (._;>;);
-                          out;`;
+    setIsLoadingStreets(true);
+    setStreetsLoadError(null);
+    setStreets([]);
 
-    const response = await fetch(overpassUrl);
-    const data = await response.json();
-    const ways = data.elements.filter((el: any) => el.type === "way");
-    const nodes = data.elements.filter((el: any) => el.type === "node");
-    const nodeMap = new Map(
-      nodes.map((node: any) => [node.id, [node.lat, node.lon]])
-    );
-    const streetLines = ways.map((way: any) =>
-      way.nodes.map((nodeId: any) => nodeMap.get(nodeId))
-    );
-    setStreets(streetLines);
+    try {
+      const overpassUrl = `https://overpass-api.de/api/interpreter?data=
+                            [out:json];
+                            (
+                              way(around:${formData.map_radius},${lat},${lng})["highway"]["foot"!~"no"];
+                              way(around:${formData.map_radius},${lat},${lng})["amenity"="square"]["foot"!~"no"];
+                            );
+                            (._;>;);
+                            out;`;
+
+      const response = await fetch(overpassUrl);
+      
+      if (!response.ok) {
+        throw new Error(`Erreur ${response.status}: ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        throw new Error("La réponse de l'API n'est pas au format JSON");
+      }
+
+      const data = await response.json();
+      const ways = data.elements.filter((el: any) => el.type === "way");
+      const nodes = data.elements.filter((el: any) => el.type === "node");
+      const nodeMap = new Map(
+        nodes.map((node: any) => [node.id, [node.lat, node.lon]])
+      );
+      const streetLines = ways.map((way: any) =>
+        way.nodes.map((nodeId: any) => nodeMap.get(nodeId))
+      );
+      setStreets(streetLines);
+      setStreetsLoadError(null);
+    } catch (error: any) {
+      console.error('Erreur lors de la récupération des rues:', error);
+      const errorMessage = error.message || 'Erreur de connexion à l\'API Overpass';
+      setStreetsLoadError(errorMessage);
+      await handleErrorWithContext('Erreur lors de la récupération des rues', error, ERROR_CONTEXTS.STREET_FETCH);
+    } finally {
+      setIsLoadingStreets(false);
+    }
   };
 
   const handleGenerateObjectives = async () => {
@@ -250,6 +276,7 @@ const CreateLobby: React.FC = () => {
       click: (e) => {
         setSelectedPosition([e.latlng.lat, e.latlng.lng]);
         setObjectives([]); // Clear objectives when center changes
+        setStartZones({ agent: null, rogue: null }); // Clear start zones
       },
     });
     return null;
@@ -458,13 +485,35 @@ const CreateLobby: React.FC = () => {
               Détails Partie
             </IonButton>
 
+            {isLoadingStreets && (
+              <IonText color="medium" className="ion-text-center ion-margin-bottom">
+                <p style={{ fontSize: '0.9rem' }}>Chargement des rues en cours...</p>
+              </IonText>
+            )}
+
+            {streetsLoadError && (
+              <>
+                <IonText color="danger" className="ion-text-center ion-margin-bottom">
+                  <p style={{ fontSize: '0.9rem' }}>{streetsLoadError}</p>
+                </IonText>
+                <IonButton 
+                  expand="block" 
+                  color="warning"
+                  className="ion-margin-bottom"
+                  onClick={() => selectedPosition && fetchStreets(selectedPosition[0], selectedPosition[1])}
+                >
+                  Réessayer de charger les rues
+                </IonButton>
+              </>
+            )}
+
             <IonButton 
               expand="block" 
               className="ion-margin-bottom"
               onClick={handleGenerateObjectives}
-              disabled={!selectedPosition}
+              disabled={!selectedPosition || isLoadingStreets || !!streetsLoadError}
             >
-              Générer les objectifs
+              {isLoadingStreets ? 'Chargement des rues...' : 'Générer les objectifs'}
             </IonButton>
 
             <IonButton 
