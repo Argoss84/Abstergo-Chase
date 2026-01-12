@@ -231,7 +231,7 @@ class GameSessionService {
     this.socket = io(url, {
       path,
       reconnection: true,
-      transports: ['websocket', 'polling']
+      transports: ['polling', 'websocket']
     });
     this.socketReady = new Promise((resolve, reject) => {
       if (!this.socket) return reject();
