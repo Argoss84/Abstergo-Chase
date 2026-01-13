@@ -107,6 +107,19 @@ class GameSessionService {
         }
       });
       window.addEventListener('beforeunload', () => {
+        // Marquer le joueur comme déconnecté avant de fermer
+        if (this.state.lobbyCode && this.state.playerId) {
+          // Utiliser sendBeacon pour envoyer le message même si la page se ferme
+          const url = window.location.hostname === 'localhost'
+            ? 'http://localhost:5174'
+            : 'https://ws.abstergochase.fr';
+          
+          // Essayer d'envoyer via socket si disponible (synchrone)
+          if (this.socket?.connected) {
+            this.sendSocket('player:status-update', { status: 'disconnected' });
+          }
+        }
+        
         // Ne pas nettoyer la session, juste les connexions
         this.cleanupConnections();
       });
@@ -538,8 +551,17 @@ class GameSessionService {
       });
 
       this.socket.on('message', (message: { type: string; payload: any }) => this.handleSocketMessage(message));
-      this.socket.on('disconnect', () => {
-        this.updateState({ connectionStatus: 'idle' });
+      this.socket.on('disconnect', (reason) => {
+        console.log('Socket déconnecté, raison:', reason);
+        // Ne pas mettre en 'error' si c'est juste une déconnexion normale ou transport
+        // Socket.io va gérer la reconnexion automatique
+        if (reason === 'io server disconnect' || reason === 'io client disconnect') {
+          this.updateState({ connectionStatus: 'idle' });
+        } else {
+          // Pour les autres raisons (transport close, etc), rester en connecting
+          // car socket.io va réessayer automatiquement
+          this.updateState({ connectionStatus: 'connecting' });
+        }
       });
     });
 

@@ -396,11 +396,18 @@ const server = createServer((req, res) => {
                 <td>${lobby.playerCount}</td>
                 <td>
                   <div class="player-list">
-                    ${lobby.players.map(p => `
-                      <div style="margin: 2px 0; opacity: ${p.status === 'away' ? '0.6' : '1'};">
-                        ${p.socketConnected ? (p.status === 'away' ? '🟠' : '🟢') : '🔴'} ${p.name} ${p.isHost ? '👑' : ''} ${p.status === 'away' ? '💤' : ''}
-                      </div>
-                    `).join('')}
+                    ${lobby.players.map(p => {
+                      const isDisconnected = p.status === 'disconnected' || !p.socketConnected;
+                      const isAway = p.status === 'away';
+                      const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
+                      const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
+                      const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
+                      return `
+                        <div style="margin: 2px 0; opacity: ${opacity};">
+                          ${icon} ${p.name} ${p.isHost ? '👑' : ''} ${badge}
+                        </div>
+                      `;
+                    }).join('')}
                   </div>
                 </td>
               </tr>
@@ -509,11 +516,18 @@ const server = createServer((req, res) => {
                     <td>\${lobby.playerCount}</td>
                     <td>
                       <div class="player-list">
-                        \${lobby.players.map(p => \`
-                          <div style="margin: 2px 0; opacity: \${p.status === 'away' ? '0.6' : '1'};">
-                            \${p.socketConnected ? (p.status === 'away' ? '🟠' : '🟢') : '🔴'} \${p.name} \${p.isHost ? '👑' : ''} \${p.status === 'away' ? '💤' : ''}
-                          </div>
-                        \`).join('')}
+                        \${lobby.players.map(p => {
+                          const isDisconnected = p.status === 'disconnected' || !p.socketConnected;
+                          const isAway = p.status === 'away';
+                          const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
+                          const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
+                          const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
+                          return \`
+                            <div style="margin: 2px 0; opacity: \${opacity};">
+                              \${icon} \${p.name} \${p.isHost ? '👑' : ''} \${badge}
+                            </div>
+                          \`;
+                        }).join('')}
                       </div>
                     </td>
                   </tr>

@@ -539,8 +539,12 @@ const Lobby: React.FC = () => {
                   {players.map((player) => {
                     const isCurrentPlayer = player.id_player === playerId;
                     const isPlayerAway = player.status === 'away';
+                    const isPlayerDisconnected = player.status === 'disconnected';
                     
                     const getPlayerConnectionColor = () => {
+                      // Pour les joueurs déconnectés, afficher rouge
+                      if (isPlayerDisconnected) return '#dc3545';
+                      
                       // Pour les joueurs "away", afficher orange
                       if (isPlayerAway) return '#ff9800';
                       
@@ -551,6 +555,9 @@ const Lobby: React.FC = () => {
                     };
                     
                     const getPlayerConnectionTitle = () => {
+                      // Pour les joueurs déconnectés
+                      if (isPlayerDisconnected) return 'Déconnecté (page fermée)';
+                      
                       // Pour les joueurs "away"
                       if (isPlayerAway) return 'Absent (onglet inactif)';
                       
@@ -600,7 +607,7 @@ const Lobby: React.FC = () => {
                           </div>
                         </IonAvatar>
                         <IonLabel>
-                          <h2 style={{ opacity: isPlayerAway ? 0.6 : 1 }}>
+                          <h2 style={{ opacity: isPlayerDisconnected ? 0.4 : (isPlayerAway ? 0.6 : 1) }}>
                             {renderPlayerLabel(player)}
                             {isCurrentPlayer && (
                               <span
@@ -626,7 +633,20 @@ const Lobby: React.FC = () => {
                                 👑 Host
                               </span>
                             )}
-                            {isPlayerAway && (
+                            {isPlayerDisconnected && (
+                              <span
+                                style={{
+                                  color: '#dc3545',
+                                  fontSize: '0.75em',
+                                  marginLeft: '8px',
+                                  fontWeight: 'normal',
+                                  fontStyle: 'italic'
+                                }}
+                              >
+                                ❌ Déconnecté
+                              </span>
+                            )}
+                            {isPlayerAway && !isPlayerDisconnected && (
                               <span
                                 style={{
                                   color: '#ff9800',
