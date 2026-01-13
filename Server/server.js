@@ -24,7 +24,14 @@ const getServerStats = () => ({
       code,
       hostId: lobby.hostId,
       playerCount: lobby.players.size,
-      players: Array.from(lobby.players.values()),
+      players: Array.from(lobby.players.values()).map(player => {
+        const socket = socketsById.get(player.id);
+        return {
+          ...player,
+          socketConnected: Boolean(socket?.connected),
+          status: player.status || 'active' // Inclure le statut du joueur
+        };
+      }),
       hostDisconnected,
       reconnectionTimeout: hostInfo ? Math.ceil((5 * 60 * 1000 - (Date.now() - hostInfo.disconnectedAt)) / 1000) : null
     };
@@ -144,14 +151,20 @@ const server = createServer((req, res) => {
       border-radius: 20px;
       font-size: 0.85em;
       font-weight: 600;
+      animation: fadeIn 0.3s ease-in;
     }
     .status.connected {
       background-color: #4caf50;
       color: white;
+      box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
     }
     .status.disconnected {
       background-color: #f44336;
       color: white;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.8); }
+      to { opacity: 1; transform: scale(1); }
     }
     .info-item {
       display: flex;
@@ -345,7 +358,7 @@ const server = createServer((req, res) => {
                 <td>${client.lobbyCode}</td>
                 <td>
                   <span class="status ${client.connected ? 'connected' : 'disconnected'}">
-                    ${client.connected ? 'Connecté' : 'Déconnecté'}
+                    ${client.connected ? '🟢 Connecté' : '🔴 Déconnecté'}
                   </span>
                 </td>
               </tr>
@@ -378,7 +391,11 @@ const server = createServer((req, res) => {
                 <td>${lobby.playerCount}</td>
                 <td>
                   <div class="player-list">
-                    ${lobby.players.map(p => `${p.name} ${p.isHost ? '👑' : ''}`).join(', ')}
+                    ${lobby.players.map(p => `
+                      <div style="margin: 2px 0; opacity: ${p.status === 'away' ? '0.6' : '1'};">
+                        ${p.socketConnected ? (p.status === 'away' ? '🟠' : '🟢') : '🔴'} ${p.name} ${p.isHost ? '👑' : ''} ${p.status === 'away' ? '💤' : ''}
+                      </div>
+                    `).join('')}
                   </div>
                 </td>
               </tr>
@@ -449,7 +466,7 @@ const server = createServer((req, res) => {
                     <td>\${client.lobbyCode}</td>
                     <td>
                       <span class="status \${client.connected ? 'connected' : 'disconnected'}">
-                        \${client.connected ? 'Connecté' : 'Déconnecté'}
+                        \${client.connected ? '🟢 Connecté' : '🔴 Déconnecté'}
                       </span>
                     </td>
                   </tr>
@@ -486,7 +503,11 @@ const server = createServer((req, res) => {
                     <td>\${lobby.playerCount}</td>
                     <td>
                       <div class="player-list">
-                        \${lobby.players.map(p => \`\${p.name} \${p.isHost ? '👑' : ''}\`).join(', ')}
+                        \${lobby.players.map(p => \`
+                          <div style="margin: 2px 0; opacity: \${p.status === 'away' ? '0.6' : '1'};">
+                            \${p.socketConnected ? (p.status === 'away' ? '🟠' : '🟢') : '🔴'} \${p.name} \${p.isHost ? '👑' : ''} \${p.status === 'away' ? '💤' : ''}
+                          </div>
+                        \`).join('')}
                       </div>
                     </td>
                   </tr>
@@ -959,6 +980,20 @@ io.on('connection', (socket) => {
         type: 'action:relay',
         payload: { fromId: clientId, action: payload?.action }
       });
+      return;
+    }
+
+    if (type === 'player:status-update') {
+      const { lobbyCode } = clients.get(socket.id) || {};
+      if (!lobbyCode || !lobbies.has(lobbyCode)) {
+        return;
+      }
+      const lobby = lobbies.get(lobbyCode);
+      const player = lobby.players.get(clientId);
+      if (player) {
+        player.status = payload?.status || 'active';
+        log(`[STATUT JOUEUR] ${clientId} dans lobby ${lobbyCode}: ${player.status}`);
+      }
       return;
     }
 

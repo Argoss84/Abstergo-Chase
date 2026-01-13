@@ -66,6 +66,7 @@ class GameSessionService {
   private rejoinInFlight = false;
   private joinInProgress = false;
   private hostReconnectInProgress = false;
+  private lastStatusUpdate = 0;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -73,12 +74,35 @@ class GameSessionService {
       this.restoreSession();
       
       window.addEventListener('visibilitychange', () => {
+        // Gérer le changement de visibilité de la page
         if (!document.hidden) {
           // Quand l'utilisateur revient sur la page
-          if (this.state.lobbyCode && !this.socket?.connected) {
-            this.reconnectToLobby();
-          } else if (!this.state.isHost) {
-            this.requestResync('visibilitychange');
+          if (this.state.lobbyCode && this.state.playerId) {
+            // D'abord vérifier la connexion socket avant de mettre à jour le statut
+            if (!this.socket?.connected) {
+              // Ne pas déclencher de reconnexion pour le host si le socket se reconnecte automatiquement
+              // Socket.io va gérer la reconnexion automatiquement
+              console.log('Socket en cours de reconnexion automatique...');
+            } else {
+              // Socket connecté, mettre à jour le statut à "active"
+              this.updatePlayerStatus('active');
+              
+              // Vérifier que tout est synchronisé
+              if (this.state.isHost) {
+                // Pour le host, rétablir les connexions WebRTC si nécessaire
+                if (this.dataChannels.size === 0 && this.state.players.length > 1) {
+                  this.reestablishAllPeerConnections();
+                }
+              } else {
+                this.requestResync('visibilitychange');
+              }
+            }
+          }
+        } else {
+          // Quand l'utilisateur quitte la page - marquer comme away
+          if (this.state.lobbyCode && this.state.playerId) {
+            // Mettre à jour le statut à "away" (via WebRTC ET socket.io)
+            this.updatePlayerStatus('away');
           }
         }
       });
@@ -149,7 +173,7 @@ class GameSessionService {
       role: null,
       isInStartZone: null,
       IsReady: null,
-      status: null,
+      status: 'active', // Host est actif par défaut
       updated_at: null,
       is_admin: true,
       displayName: this.state.playerName
@@ -171,6 +195,9 @@ class GameSessionService {
       props,
       connectionStatus: 'connected'
     });
+
+    // Informer le serveur socket.io que le joueur est actif
+    this.sendSocket('player:status-update', { status: 'active' });
 
     return lobbyCode;
     } catch (error) {
@@ -218,6 +245,9 @@ class GameSessionService {
         isHost: response.playerId === response.hostId,
         connectionStatus: 'connected'
       });
+
+      // Informer le serveur socket.io que le joueur est actif
+      this.sendSocket('player:status-update', { status: 'active' });
     } finally {
       this.joinInProgress = false;
     }
@@ -248,6 +278,48 @@ class GameSessionService {
     } else {
       this.sendAction('action:update-player', { playerId, changes: partial });
     }
+  }
+
+  // Méthode dédiée pour mettre à jour le statut du joueur local
+  private updatePlayerStatus(status: string) {
+    if (!this.state.playerId || !this.state.gameDetails) return;
+    
+    // Throttle: éviter les mises à jour trop fréquentes (max 1 par seconde)
+    const now = Date.now();
+    if (now - this.lastStatusUpdate < 1000) {
+      return;
+    }
+    this.lastStatusUpdate = now;
+    
+    // Vérifier que le statut a vraiment changé
+    const currentPlayer = this.state.players.find(p => p.id_player === this.state.playerId);
+    if (currentPlayer?.status === status) {
+      return; // Pas de changement, ne rien faire
+    }
+    
+    // Mettre à jour localement
+    const players = this.state.players.map((player) =>
+      player.id_player === this.state.playerId ? { ...player, status } : player
+    );
+    
+    this.updateState({ 
+      players, 
+      gameDetails: { ...this.state.gameDetails, players } 
+    });
+    
+    // Si on est le host, broadcaster aux autres
+    if (this.state.isHost) {
+      this.broadcastState();
+    } else {
+      // Si on est un peer, envoyer au host via WebRTC
+      this.sendAction('action:update-player', { 
+        playerId: this.state.playerId, 
+        changes: { status } 
+      });
+    }
+    
+    // Envoyer aussi au serveur socket.io pour le monitoring
+    this.sendSocket('player:status-update', { status });
   }
 
   async updateProp(propId: number, partial: Partial<GameProp>) {
@@ -362,9 +434,25 @@ class GameSessionService {
           const response = await this.waitFor('lobby:joined', 10000);
           
           // Mettre à jour le playerId si changé
+          const oldPlayerId = this.state.playerId;
           const newPlayerId = response.playerId;
+          
+          // Mettre à jour la liste des joueurs pour refléter le changement de playerId du host
+          const updatedPlayers = this.state.players.map((player) => 
+            player.id_player === oldPlayerId 
+              ? { ...player, id_player: newPlayerId, user_id: newPlayerId }
+              : player
+          );
+          
+          // Mettre à jour gameDetails avec la nouvelle liste de joueurs
+          const updatedGameDetails = this.state.gameDetails 
+            ? { ...this.state.gameDetails, players: updatedPlayers }
+            : null;
+          
           this.updateState({
             playerId: newPlayerId,
+            players: updatedPlayers,
+            gameDetails: updatedGameDetails,
             connectionStatus: 'connected'
           });
           
@@ -420,6 +508,10 @@ class GameSessionService {
     this.socket = io(url, {
       path,
       reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
       transports: ['polling', 'websocket']
     });
     this.socketReady = new Promise((resolve, reject) => {
@@ -429,11 +521,20 @@ class GameSessionService {
         this.updateState({ connectionStatus: 'connected' });
         resolve();
         this.handleSocketReconnect();
+        
+        // Si on est sur la page et qu'on a un lobby, mettre à jour le statut à "active"
+        if (!document.hidden && this.state.lobbyCode && this.state.playerId) {
+          // Attendre un peu que la connexion soit stable
+          setTimeout(() => {
+            this.updatePlayerStatus('active');
+          }, 500);
+        }
       });
 
       this.socket.on('connect_error', (error: Error) => {
-        this.updateState({ connectionStatus: 'error' });
-        reject(error);
+        console.warn('Erreur de connexion socket.io (réessai automatique):', error);
+        // Ne pas passer en 'error' immédiatement, laisser socket.io réessayer
+        // On ne met en 'error' que si vraiment toutes les tentatives échouent
       });
 
       this.socket.on('message', (message: { type: string; payload: any }) => this.handleSocketMessage(message));
@@ -558,7 +659,7 @@ class GameSessionService {
       role: null,
       isInStartZone: null,
       IsReady: null,
-      status: null,
+      status: 'active', // Nouveau joueur est actif par défaut
       updated_at: null,
       is_admin: false,
       displayName: playerName
@@ -834,8 +935,12 @@ class GameSessionService {
   }
 
   private handleSocketReconnect() {
-    if (this.state.lobbyCode && !this.state.isHost) {
-      this.attemptRejoin();
+    if (this.state.lobbyCode) {
+      if (this.state.isHost) {
+        this.reconnectToLobby();
+      } else {
+        this.attemptRejoin();
+      }
     }
   }
 

@@ -21,7 +21,7 @@ import {
 } from '@ionic/react';
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useHistory } from 'react-router-dom';
-import { MapContainer, TileLayer, Circle, Marker, Polyline, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Circle, Marker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { GameDetails, GameProp, Player } from '../components/Interfaces';
@@ -59,11 +59,12 @@ const Lobby: React.FC = () => {
   } = useGameSession();
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [streets, setStreets] = useState<L.LatLngTuple[][]>([]);
   const [mapKey, setMapKey] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState('Connexion au lobby...');
   const [isJoining, setIsJoining] = useState(false);
+  const [errorCount, setErrorCount] = useState(0);
+  const [isPageVisible, setIsPageVisible] = useState(!document.hidden);
 
   useWakeLock(true);
   const { vibrate, patterns } = useVibration();
@@ -90,11 +91,34 @@ const Lobby: React.FC = () => {
       // Si nous sommes déjà connectés au bon lobby, ne rien faire
       if (lobbyCode && code && lobbyCode === code && connectionStatus === 'connected') {
         setIsLoading(false);
+        setIsJoining(false);
         return;
       }
 
-      // Si en cours de connexion, attendre
+      // Si en cours de connexion, attendre mais ne pas rester bloqué indéfiniment
       if (connectionStatus === 'connecting') {
+        setLoadingMessage('Connexion en cours...');
+        // Réinitialiser le compteur d'erreurs si on essaie de se connecter
+        setErrorCount(0);
+        // Ne pas bloquer, laisser l'useEffect suivant gérer la fin du chargement
+        return;
+      }
+
+      // Si erreur de connexion, être plus tolérant
+      if (connectionStatus === 'error') {
+        // Ne pas afficher l'erreur immédiatement, attendre plusieurs erreurs
+        const newErrorCount = errorCount + 1;
+        setErrorCount(newErrorCount);
+        
+        // Afficher l'erreur seulement après 3 erreurs consécutives
+        if (newErrorCount >= 3) {
+          setIsLoading(false);
+          setIsJoining(false);
+          setError('Impossible de se connecter au serveur après plusieurs tentatives.');
+          return;
+        }
+        // Sinon, continuer à attendre
+        setLoadingMessage('Nouvelle tentative de connexion...');
         return;
       }
 
@@ -108,21 +132,24 @@ const Lobby: React.FC = () => {
         // Si on a déjà le même lobbyCode et qu'on est déjà connecté, ne rien faire
         if (lobbyCode === code && connectionStatus === 'connected') {
           setIsLoading(false);
+          setIsJoining(false);
           return;
         }
         
         // Si on a le même lobbyCode mais pas encore connecté, rejoindre
-        try {
-          setIsJoining(true);
-          setLoadingMessage('Connexion au lobby WebRTC...');
-          await joinLobby(code);
-          vibrate(patterns.short);
-        } catch (err) {
-          await handleErrorWithUser('Impossible de rejoindre le lobby', err, ERROR_CONTEXTS.LOBBY_INIT);
-        } finally {
-          setIsJoining(false);
+        if (lobbyCode !== code || connectionStatus === 'idle') {
+          try {
+            setIsJoining(true);
+            setLoadingMessage('Connexion au lobby WebRTC...');
+            await joinLobby(code);
+            vibrate(patterns.short);
+          } catch (err) {
+            await handleErrorWithUser('Impossible de rejoindre le lobby', err, ERROR_CONTEXTS.LOBBY_INIT);
+            setIsLoading(false);
+          } finally {
+            setIsJoining(false);
+          }
         }
-        setIsLoading(false);
         return;
       }
 
@@ -136,6 +163,7 @@ const Lobby: React.FC = () => {
       if (!code && !lobbyCode) {
         await handleErrorWithUser('Code de partie non trouvé', null, ERROR_CONTEXTS.LOBBY_INIT);
         setIsLoading(false);
+        setIsJoining(false);
         return;
       }
 
@@ -150,44 +178,43 @@ const Lobby: React.FC = () => {
     if (gameDetails && connectionStatus === 'connected') {
       setIsLoading(false);
       setIsJoining(false);
+      setErrorCount(0); // Réinitialiser le compteur d'erreurs
+      setError(null); // Effacer les erreurs précédentes
     }
   }, [gameDetails, connectionStatus]);
 
+  // Timeout de sécurité pour éviter de rester bloqué en chargement (plus tolérant)
   useEffect(() => {
-    if (!gameDetails?.code) return;
-    const fetchStreets = async () => {
-      if (!gameDetails.map_center_latitude || !gameDetails.map_center_longitude) return;
-      try {
-        const overpassUrl = `https://overpass-api.de/api/interpreter?data=
-          [out:json];
-          (
-            way(around:${gameDetails.map_radius},${gameDetails.map_center_latitude},${gameDetails.map_center_longitude})["highway"]["foot"!~"no"];
-            way(around:${gameDetails.map_radius},${gameDetails.map_center_latitude},${gameDetails.map_center_longitude})["amenity"="square"]["foot"!~"no"];
-          );
-          (._;>;);
-          out;`;
-
-        const response = await fetch(overpassUrl);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
+    if (connectionStatus === 'connecting' || connectionStatus === 'idle') {
+      const timeout = setTimeout(() => {
+        // Vérifier si on est toujours en train de se connecter après le délai
+        if (connectionStatus === 'connecting' || connectionStatus === 'idle') {
+          // Ne pas afficher d'erreur immédiatement si on a déjà des données
+          if (!gameDetails) {
+            setError('La connexion prend plus de temps que prévu. Veuillez patienter ou rafraîchir la page.');
+            setIsLoading(false);
+            setIsJoining(false);
+          }
         }
-        const data = await response.json();
-        const ways = data.elements.filter((el: any) => el.type === 'way');
-        const nodes = data.elements.filter((el: any) => el.type === 'node');
-        const nodeMap = new Map(nodes.map((node: any) => [node.id, [node.lat, node.lon]]));
-        const streetLines = ways.map((way: any) => way.nodes.map((nodeId: any) => nodeMap.get(nodeId)));
-        setStreets(streetLines);
-        setMapKey((prev) => prev + 1);
-      } catch (streetError) {
-        await handleError('Erreur lors de la récupération des rues', streetError, {
-          context: ERROR_CONTEXTS.STREET_FETCH,
-          shouldShowError: false
-        });
-      }
+      }, 60000); // 60 secondes (augmenté de 30 à 60)
+
+      return () => clearTimeout(timeout);
+    }
+  }, [connectionStatus, gameDetails]);
+
+  // Synchroniser l'état de visibilité de la page pour l'affichage local
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsPageVisible(!document.hidden);
     };
 
-    fetchStreets();
-  }, [gameDetails?.code]);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
 
   useEffect(() => {
     if (gameDetails?.is_converging_phase && currentPlayer?.role) {
@@ -257,11 +284,61 @@ const Lobby: React.FC = () => {
     return player.displayName || `Joueur ${player.id_player.slice(0, 4)}`;
   };
 
+  const getConnectionBadge = () => {
+    const badgeStyles = {
+      display: 'inline-block',
+      padding: '4px 12px',
+      borderRadius: '12px',
+      fontSize: '12px',
+      fontWeight: '600',
+      marginLeft: '8px',
+      verticalAlign: 'middle'
+    };
+
+    switch (connectionStatus) {
+      case 'connected':
+        return (
+          <span style={{ ...badgeStyles, backgroundColor: '#28a745', color: 'white' }}>
+            🟢 Connecté
+          </span>
+        );
+      case 'connecting':
+        return (
+          <span style={{ ...badgeStyles, backgroundColor: '#ffc107', color: '#000' }}>
+            🟡 Connexion...
+          </span>
+        );
+      case 'error':
+        return (
+          <span style={{ ...badgeStyles, backgroundColor: '#dc3545', color: 'white' }}>
+            🔴 Erreur
+          </span>
+        );
+      case 'idle':
+        return (
+          <span style={{ ...badgeStyles, backgroundColor: '#6c757d', color: 'white' }}>
+            ⚪ Inactif
+          </span>
+        );
+      default:
+        return (
+          <span style={{ ...badgeStyles, backgroundColor: '#6c757d', color: 'white' }}>
+            ⚪ Inconnu
+          </span>
+        );
+    }
+  };
+
   return (
     <IonPage id="Lobby-page">
       <IonHeader>
         <IonToolbar>
-          <IonTitle>Lobby</IonTitle>
+          <IonTitle>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span>Lobby</span>
+              {getConnectionBadge()}
+            </div>
+          </IonTitle>
           <IonButtons slot="end">
             <IonButton onClick={handleLeaveLobby} color="danger">
               Quitter
@@ -270,25 +347,76 @@ const Lobby: React.FC = () => {
         </IonToolbar>
       </IonHeader>
       <IonContent fullscreen>
-        {isLoading || connectionStatus === 'connecting' ? (
-          <Loading message={loadingMessage} progress={50} showSpinner={true} />
+        {(isLoading || connectionStatus === 'connecting') && !error ? (
+          <Loading 
+            message={
+              connectionStatus === 'connecting' 
+                ? 'Connexion au serveur...' 
+                : connectionStatus === 'error' && errorCount < 3
+                ? `Tentative de reconnexion (${errorCount}/3)...`
+                : loadingMessage
+            } 
+            progress={connectionStatus === 'connecting' ? 60 : 50} 
+            showSpinner={true} 
+          />
         ) : error ? (
-          <IonCard color="danger" style={{ margin: '1rem' }}>
-            <IonCardHeader>
-              <IonCardTitle style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                ⚠️ Erreur
-              </IonCardTitle>
-            </IonCardHeader>
-            <IonCardContent>
-              <IonText color="light">
-                <p>{error}</p>
-              </IonText>
-              <IonButton expand="block" color="light" onClick={() => setError(null)} style={{ marginTop: '1rem' }}>
-                ✕ Fermer l'erreur
-              </IonButton>
-            </IonCardContent>
-          </IonCard>
-        ) : gameDetails ? (
+          <>
+            <IonCard color="warning" style={{ margin: '1rem' }}>
+              <IonCardHeader>
+                <IonCardTitle style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  ⚠️ Problème de connexion
+                </IonCardTitle>
+              </IonCardHeader>
+              <IonCardContent>
+                <IonText color="light">
+                  <p>{error}</p>
+                  <p style={{ marginTop: '8px', fontSize: '0.9em', opacity: 0.9 }}>
+                    Vous pouvez continuer à attendre ou rafraîchir la page.
+                  </p>
+                </IonText>
+                <IonButton 
+                  expand="block" 
+                  color="light" 
+                  onClick={() => {
+                    setError(null);
+                    setErrorCount(0);
+                    setIsLoading(true);
+                  }} 
+                  style={{ marginTop: '1rem' }}
+                >
+                  ⏳ Continuer à attendre
+                </IonButton>
+                <IonButton 
+                  expand="block" 
+                  color="light" 
+                  fill="outline"
+                  onClick={() => {
+                    window.location.reload();
+                  }} 
+                  style={{ marginTop: '0.5rem' }}
+                >
+                  🔄 Rafraîchir la page
+                </IonButton>
+                <IonButton 
+                  expand="block" 
+                  color="light" 
+                  fill="clear"
+                  onClick={() => {
+                    setError(null);
+                    clearSession();
+                    history.push('/home');
+                  }} 
+                  style={{ marginTop: '0.5rem' }}
+                >
+                  🏠 Retour à l'accueil
+                </IonButton>
+              </IonCardContent>
+            </IonCard>
+            
+          </>
+        ) : null}
+        
+        {gameDetails ? (
           <>
             {gameDetails.is_converging_phase && (
               <IonCard color="warning" style={{ margin: '1rem' }}>
@@ -397,11 +525,8 @@ const Lobby: React.FC = () => {
                       radius={50}
                       pathOptions={{ color: 'green', fillColor: 'green', fillOpacity: 0.1 }}
                     />
-                  </>
-                )}
-                {streets.map((street, index) => (
-                  <Polyline key={index} positions={street} pathOptions={{ color: 'gray', weight: 2 }} />
-                ))}
+                    </>
+                  )}
               </MapContainer>
             </div>
 
@@ -411,46 +536,110 @@ const Lobby: React.FC = () => {
               </IonCardHeader>
               <IonCardContent>
                 <IonList>
-                  {players.map((player) => (
-                    <IonItem key={player.id_player}>
-                      <IonAvatar slot="start">
-                        <div
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            backgroundColor:
-                              player.role === 'AGENT'
-                                ? '#3880ff'
-                                : player.role === 'ROGUE'
-                                ? '#ff4961'
-                                : '#6c757d',
-                            borderRadius: '50%',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: 'white',
-                            fontWeight: 'bold'
-                          }}
-                        >
-                          {player.role === 'AGENT' ? 'A' : player.role === 'ROGUE' ? 'R' : '?'}
-                        </div>
-                      </IonAvatar>
-                      <IonLabel>
-                        <h2>
-                          {renderPlayerLabel(player)}
-                          {player.is_admin && (
-                            <span
+                  {players.map((player) => {
+                    const isCurrentPlayer = player.id_player === playerId;
+                    const isPlayerAway = player.status === 'away';
+                    
+                    const getPlayerConnectionColor = () => {
+                      // Pour les joueurs "away", afficher orange
+                      if (isPlayerAway) return '#ff9800';
+                      
+                      if (!isCurrentPlayer) return '#28a745'; // Vert pour les autres joueurs
+                      if (connectionStatus === 'connected') return '#28a745';
+                      if (connectionStatus === 'error') return '#dc3545';
+                      return '#6c757d';
+                    };
+                    
+                    const getPlayerConnectionTitle = () => {
+                      // Pour les joueurs "away"
+                      if (isPlayerAway) return 'Absent (onglet inactif)';
+                      
+                      if (!isCurrentPlayer) return 'Connecté';
+                      if (connectionStatus === 'connected') return 'Connecté';
+                      if (connectionStatus === 'error') return 'Erreur de connexion';
+                      return 'Inactif';
+                    };
+                    
+                    return (
+                      <IonItem key={player.id_player}>
+                        <IonAvatar slot="start">
+                          <div
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              backgroundColor:
+                                player.role === 'AGENT'
+                                  ? '#3880ff'
+                                  : player.role === 'ROGUE'
+                                  ? '#ff4961'
+                                  : '#6c757d',
+                              borderRadius: '50%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: 'white',
+                              fontWeight: 'bold',
+                              position: 'relative'
+                            }}
+                          >
+                            {player.role === 'AGENT' ? 'A' : player.role === 'ROGUE' ? 'R' : '?'}
+                            <div
                               style={{
-                                color: '#ff6b35',
-                                fontSize: '0.8em',
-                                marginLeft: '8px',
-                                fontWeight: 'bold'
+                                position: 'absolute',
+                                bottom: '-2px',
+                                right: '-2px',
+                                width: '14px',
+                                height: '14px',
+                                borderRadius: '50%',
+                                backgroundColor: getPlayerConnectionColor(),
+                                border: '2px solid white',
+                                boxShadow: isCurrentPlayer && connectionStatus === 'connected' ? '0 0 4px rgba(40, 167, 69, 0.6)' : 'none'
                               }}
-                            >
-                              👑 Host
-                            </span>
-                          )}
-                        </h2>
+                              title={getPlayerConnectionTitle()}
+                            />
+                          </div>
+                        </IonAvatar>
+                        <IonLabel>
+                          <h2 style={{ opacity: isPlayerAway ? 0.6 : 1 }}>
+                            {renderPlayerLabel(player)}
+                            {isCurrentPlayer && (
+                              <span
+                                style={{
+                                  color: '#667eea',
+                                  fontSize: '0.8em',
+                                  marginLeft: '8px',
+                                  fontWeight: 'bold'
+                                }}
+                              >
+                                (Vous)
+                              </span>
+                            )}
+                            {player.is_admin && (
+                              <span
+                                style={{
+                                  color: '#ff6b35',
+                                  fontSize: '0.8em',
+                                  marginLeft: '8px',
+                                  fontWeight: 'bold'
+                                }}
+                              >
+                                👑 Host
+                              </span>
+                            )}
+                            {isPlayerAway && (
+                              <span
+                                style={{
+                                  color: '#ff9800',
+                                  fontSize: '0.75em',
+                                  marginLeft: '8px',
+                                  fontWeight: 'normal',
+                                  fontStyle: 'italic'
+                                }}
+                              >
+                                💤 Absent
+                              </span>
+                            )}
+                          </h2>
                         {(currentPlayer?.is_admin || isHost) && (
                           <IonSelect
                             value={player.role || ''}
@@ -469,10 +658,11 @@ const Lobby: React.FC = () => {
                             <IonSelectOption value="ROGUE">Rogue</IonSelectOption>
                             <IonSelectOption value="">Aucun rôle</IonSelectOption>
                           </IonSelect>
-                        )}
-                      </IonLabel>
-                    </IonItem>
-                  ))}
+                          )}
+                        </IonLabel>
+                      </IonItem>
+                    );
+                  })}
                 </IonList>
               </IonCardContent>
             </IonCard>
