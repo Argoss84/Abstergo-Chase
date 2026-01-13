@@ -19,7 +19,9 @@ const getServerStats = () => ({
   }),
   lobbies: Array.from(lobbies.entries()).map(([code, lobby]) => {
     const hostDisconnected = disconnectedHosts.has(code);
+    const hostAway = awayHosts.has(code);
     const hostInfo = hostDisconnected ? disconnectedHosts.get(code) : null;
+    const awayInfo = hostAway ? awayHosts.get(code) : null;
     return {
       code,
       hostId: lobby.hostId,
@@ -33,7 +35,9 @@ const getServerStats = () => ({
         };
       }),
       hostDisconnected,
-      reconnectionTimeout: hostInfo ? Math.ceil((5 * 60 * 1000 - (Date.now() - hostInfo.disconnectedAt)) / 1000) : null
+      hostAway,
+      reconnectionTimeout: hostInfo ? Math.ceil((5 * 60 * 1000 - (Date.now() - hostInfo.disconnectedAt)) / 1000) : null,
+      awayTimeout: awayInfo ? Math.ceil((2 * 60 * 1000 - (Date.now() - awayInfo.awayAt)) / 1000) : null
     };
   }),
   serverInfo: {
@@ -386,6 +390,7 @@ const server = createServer((req, res) => {
                 <td>
                   <strong>${lobby.code}</strong>
                   ${lobby.hostDisconnected ? `<span class="reconnection-badge">⏱️ ${lobby.reconnectionTimeout}s</span>` : ''}
+                  ${lobby.hostAway ? `<span class="reconnection-badge" style="background-color: #dc3545;">🔴 ${lobby.awayTimeout}s</span>` : ''}
                 </td>
                 <td><code>${lobby.hostId.substring(0, 8)}...</code></td>
                 <td>${lobby.playerCount}</td>
@@ -498,6 +503,7 @@ const server = createServer((req, res) => {
                     <td>
                       <strong>\${lobby.code}</strong>
                       \${lobby.hostDisconnected ? \`<span class="reconnection-badge">⏱️ \${lobby.reconnectionTimeout}s</span>\` : ''}
+                      \${lobby.hostAway ? \`<span class="reconnection-badge" style="background-color: #dc3545;">🔴 \${lobby.awayTimeout}s</span>\` : ''}
                     </td>
                     <td><code>\${lobby.hostId.substring(0, 8)}...</code></td>
                     <td>\${lobby.playerCount}</td>
@@ -588,6 +594,7 @@ const lobbies = new Map();
 const clients = new Map();
 const socketsById = new Map();
 const disconnectedHosts = new Map(); // Stocke temporairement les lobbies dont le host s'est déconnecté
+const awayHosts = new Map(); // Stocke les lobbies dont le host est absent (away)
 
 // Stockage des logs en mémoire (derniers 100 logs)
 const logs = [];
@@ -991,8 +998,64 @@ io.on('connection', (socket) => {
       const lobby = lobbies.get(lobbyCode);
       const player = lobby.players.get(clientId);
       if (player) {
+        const oldStatus = player.status;
         player.status = payload?.status || 'active';
         log(`[STATUT JOUEUR] ${clientId} dans lobby ${lobbyCode}: ${player.status}`);
+        
+        // Si c'est le host qui change de statut
+        if (clientId === lobby.hostId) {
+          if (player.status === 'away' && oldStatus !== 'away') {
+            // Host devient absent - démarrer le timer de 2 minutes
+            log(`[HOST ABSENT] Code: ${lobbyCode}, Host: ${clientId} - Timer de 2 minutes démarré`);
+            
+            // Annuler le timer précédent s'il existe
+            if (awayHosts.has(lobbyCode)) {
+              const existingInfo = awayHosts.get(lobbyCode);
+              clearTimeout(existingInfo.timeoutId);
+            }
+            
+            const timeoutId = setTimeout(() => {
+              if (lobbies.has(lobbyCode)) {
+                const currentLobby = lobbies.get(lobbyCode);
+                const currentHostPlayer = currentLobby.players.get(lobby.hostId);
+                
+                // Vérifier si le host est toujours absent
+                if (currentHostPlayer && currentHostPlayer.status === 'away') {
+                  log(`[LOBBY FERMÉ] Code: ${lobbyCode}, Host absent depuis trop longtemps (2 minutes)`);
+                  
+                  // Notifier tous les joueurs que le lobby est fermé
+                  currentLobby.players.forEach((p) => {
+                    const playerSocket = socketsById.get(p.id);
+                    send(playerSocket, { 
+                      type: 'lobby:closed', 
+                      payload: { 
+                        code: lobbyCode, 
+                        reason: 'Host absent depuis trop longtemps'
+                      } 
+                    });
+                  });
+                  
+                  lobbies.delete(lobbyCode);
+                  awayHosts.delete(lobbyCode);
+                }
+              }
+            }, 2 * 60 * 1000); // 2 minutes
+            
+            awayHosts.set(lobbyCode, {
+              hostId: clientId,
+              timeoutId,
+              awayAt: Date.now()
+            });
+          } else if (player.status === 'active' && oldStatus === 'away') {
+            // Host revient - annuler le timer
+            if (awayHosts.has(lobbyCode)) {
+              const awayInfo = awayHosts.get(lobbyCode);
+              clearTimeout(awayInfo.timeoutId);
+              awayHosts.delete(lobbyCode);
+              log(`[HOST RETOUR] Code: ${lobbyCode}, Host: ${clientId} - Timer annulé`);
+            }
+          }
+        }
       }
       return;
     }
@@ -1017,6 +1080,14 @@ io.on('connection', (socket) => {
 
       if (lobby.hostId === clientInfo.clientId) {
         log(`[HOST DÉCONNECTÉ] Code: ${lobbyCode}, Host: ${clientInfo.clientId} - Lobby conservé pendant 5 minutes`);
+        
+        // Annuler le timer "away" si le host se déconnecte
+        if (awayHosts.has(lobbyCode)) {
+          const awayInfo = awayHosts.get(lobbyCode);
+          clearTimeout(awayInfo.timeoutId);
+          awayHosts.delete(lobbyCode);
+          log(`[HOST DÉCONNECTÉ] Timer "away" annulé pour le lobby ${lobbyCode}`);
+        }
         
         // NE PAS supprimer le host de lobby.players pour garder ses infos
         // Il sera supprimé seulement si le timeout expire
