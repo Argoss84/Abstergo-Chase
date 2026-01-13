@@ -65,6 +65,7 @@ class GameSessionService {
   private reconnectAttempts = new Map<string, number>();
   private rejoinInFlight = false;
   private joinInProgress = false;
+  private hostReconnectInProgress = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -75,7 +76,6 @@ class GameSessionService {
         if (!document.hidden) {
           // Quand l'utilisateur revient sur la page
           if (this.state.lobbyCode && !this.socket?.connected) {
-            console.log('[GameSession] Page visible, tentative de reconnexion...');
             this.reconnectToLobby();
           } else if (!this.state.isHost) {
             this.requestResync('visibilitychange');
@@ -108,7 +108,6 @@ class GameSessionService {
   }
 
   clearSession() {
-    console.log('[GameSession] Nettoyage de la session');
     localStorage.removeItem(SESSION_STORAGE_KEY);
     this.resetSession();
   }
@@ -127,19 +126,14 @@ class GameSessionService {
   }
 
   async createLobby(gameDetails: GameDetails, props: GameProp[]) {
-    console.log('[GameSession] Début de la création du lobby', { playerName: this.state.playerName });
-    
     try {
       await this.ensureSocket();
-      console.log('[GameSession] Socket prêt, envoi de la requête lobby:create');
       
       this.sendSocket('lobby:create', {
         playerName: this.state.playerName
       });
 
-      console.log('[GameSession] En attente de la réponse lobby:created...');
       const response = await this.waitFor('lobby:created', 15000);
-      console.log('[GameSession] Réponse lobby:created reçue:', response);
       
       const lobbyCode = response.code as string;
       const playerId = response.playerId as string;
@@ -178,36 +172,46 @@ class GameSessionService {
       connectionStatus: 'connected'
     });
 
-    console.log('[GameSession] Lobby créé avec succès:', lobbyCode);
     return lobbyCode;
     } catch (error) {
-      console.error('[GameSession] Erreur lors de la création du lobby:', error);
       throw error;
     }
   }
 
   async joinLobby(code: string) {
     // Éviter les appels concurrents
-    if (this.joinInProgress || this.rejoinInFlight) {
-      console.log('[GameSession] Jointure déjà en cours, ignoré');
+    if (this.joinInProgress || this.rejoinInFlight || this.hostReconnectInProgress) {
       return;
     }
 
     // Si on est déjà connecté au bon lobby, ne rien faire
     if (this.state.lobbyCode === code && this.state.connectionStatus === 'connected') {
-      console.log('[GameSession] Déjà connecté au lobby:', code);
+      return;
+    }
+
+    // Si c'est le host qui se reconnecte, utiliser la logique de reconnexion du host
+    const isReconnectingHost = this.state.isHost && this.state.lobbyCode === code && this.state.playerId;
+    if (isReconnectingHost) {
+      await this.reconnectToLobby();
       return;
     }
 
     this.joinInProgress = true;
     try {
       await this.ensureSocket();
+      
+      // Si on a un ancien playerId et qu'on rejoint le même lobby, c'est une reconnexion
+      const isReconnecting = this.state.lobbyCode === code && this.state.playerId;
+      
       this.sendSocket('lobby:join', {
         code,
-        playerName: this.state.playerName
+        playerName: this.state.playerName,
+        // Envoyer l'ancien playerId si c'est une reconnexion
+        oldPlayerId: isReconnecting ? this.state.playerId : undefined
       });
 
       const response = await this.waitFor('lobby:joined');
+      
       this.updateState({
         lobbyCode: response.code,
         playerId: response.playerId,
@@ -286,9 +290,8 @@ class GameSessionService {
 
     try {
       localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(data));
-      console.log('[GameSession] Session persistée:', data.lobbyCode);
     } catch (error) {
-      console.error('[GameSession] Erreur lors de la persistance:', error);
+      // Erreur silencieuse
     }
   }
 
@@ -301,12 +304,9 @@ class GameSessionService {
       const age = Date.now() - data.timestamp;
 
       if (age > SESSION_EXPIRY_MS) {
-        console.log('[GameSession] Session expirée, nettoyage');
         localStorage.removeItem(SESSION_STORAGE_KEY);
         return;
       }
-
-      console.log('[GameSession] Restauration de session:', data.lobbyCode);
       
       // Restaurer tous les états y compris gameDetails, players et props
       const stateUpdate: Partial<SessionState> = {
@@ -330,22 +330,27 @@ class GameSessionService {
       this.state = { ...this.state, ...stateUpdate };
       this.listeners.forEach((listener) => listener(this.state));
     } catch (error) {
-      console.error('[GameSession] Erreur lors de la restauration:', error);
       localStorage.removeItem(SESSION_STORAGE_KEY);
     }
   }
 
   private async reconnectToLobby() {
-    if (!this.state.lobbyCode || !this.state.playerId) return;
+    if (!this.state.lobbyCode || !this.state.playerId) {
+      return;
+    }
 
-    console.log('[GameSession] Reconnexion au lobby:', this.state.lobbyCode);
+    // Éviter les reconnexions multiples simultanées
+    if (this.hostReconnectInProgress || this.joinInProgress || this.rejoinInFlight) {
+      return;
+    }
     
     try {
       await this.ensureSocket();
       
       if (this.state.isHost) {
+        this.hostReconnectInProgress = true;
+        
         // Pour le host, essayer de se reconnecter
-        console.log('[GameSession] Reconnexion en tant que host');
         this.sendSocket('lobby:rejoin-host', {
           code: this.state.lobbyCode,
           playerId: this.state.playerId,
@@ -355,23 +360,34 @@ class GameSessionService {
         // Attendre la réponse de reconnexion
         try {
           const response = await this.waitFor('lobby:joined', 10000);
-          console.log('[GameSession] Host reconnecté avec succès:', response);
+          
+          // Mettre à jour le playerId si changé
+          const newPlayerId = response.playerId;
           this.updateState({
+            playerId: newPlayerId,
             connectionStatus: 'connected'
           });
-          // Demander une resynchronisation de l'état
-          this.requestLatestState();
+          
+          // Fermer toutes les anciennes connexions WebRTC
+          this.peerConnections.forEach((pc) => pc.close());
+          this.peerConnections.clear();
+          this.dataChannels.clear();
+          this.reconnectAttempts.clear();
+          
+          // Rétablir les connexions WebRTC avec tous les joueurs existants
+          await this.reestablishAllPeerConnections();
         } catch (error) {
-          console.error('[GameSession] Échec de la reconnexion host:', error);
           this.updateState({ connectionStatus: 'error' });
+        } finally {
+          this.hostReconnectInProgress = false;
         }
       } else {
         // Pour les autres joueurs, rejoindre normalement
         await this.attemptRejoin();
       }
     } catch (error) {
-      console.error('[GameSession] Erreur de reconnexion:', error);
       this.updateState({ connectionStatus: 'error' });
+      this.hostReconnectInProgress = false;
     }
   }
 
@@ -387,12 +403,10 @@ class GameSessionService {
 
   private async ensureSocket() {
     if (this.socket?.connected) {
-      console.log('[GameSession] Socket déjà ouvert');
       return;
     }
 
     if (this.socketReady) {
-      console.log('[GameSession] Socket en cours de connexion, attente...');
       return this.socketReady;
     }
 
@@ -401,7 +415,6 @@ class GameSessionService {
       : 'https://ws.abstergochase.fr';
     const url = defaultUrl;
     const path = '/socket.io';
-    console.log(`[GameSession] Connexion au serveur Socket.io: ${url} (path: ${path})`);
     this.updateState({ connectionStatus: 'connecting' });
 
     this.socket = io(url, {
@@ -413,21 +426,18 @@ class GameSessionService {
       if (!this.socket) return reject();
 
       this.socket.on('connect', () => {
-        console.log('[GameSession] Socket.io connecté avec succès');
         this.updateState({ connectionStatus: 'connected' });
         resolve();
         this.handleSocketReconnect();
       });
 
       this.socket.on('connect_error', (error: Error) => {
-        console.error('[GameSession] Erreur Socket.io:', error);
         this.updateState({ connectionStatus: 'error' });
         reject(error);
       });
 
       this.socket.on('message', (message: { type: string; payload: any }) => this.handleSocketMessage(message));
       this.socket.on('disconnect', () => {
-        console.log('[GameSession] Socket.io fermé');
         this.updateState({ connectionStatus: 'idle' });
       });
     });
@@ -439,7 +449,6 @@ class GameSessionService {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingActions.delete(type);
-        console.error(`[GameSession] Timeout en attente de: ${type} (${timeoutMs}ms)`);
         reject(new Error(`Timeout en attente du message: ${type}`));
       }, timeoutMs);
 
@@ -447,33 +456,26 @@ class GameSessionService {
         clearTimeout(timeout);
         resolve(payload);
       });
-      
-      console.log(`[GameSession] En attente du message: ${type}`);
     });
   }
 
   private sendSocket(type: string, payload: Record<string, any>) {
     if (!this.socket) {
-      console.error(`[GameSession] Impossible d'envoyer ${type}: socket null`);
       return;
     }
     
     if (!this.socket.connected) {
-      console.error(`[GameSession] Impossible d'envoyer ${type}: socket pas ouvert`);
       return;
     }
     
     const message = { type, payload };
-    console.log(`[GameSession] Envoi message:`, { type, payload });
     this.socket.emit('message', message);
   }
 
   private handleSocketMessage(message: { type: string; payload: any }) {
-    console.log('[GameSession] Message reçu du serveur:', message);
     const { type, payload } = message;
 
     if (this.pendingActions.has(type)) {
-      console.log(`[GameSession] Résolution de l'action en attente: ${type}`, payload);
       const resolve = this.pendingActions.get(type)!;
       this.pendingActions.delete(type);
       resolve(payload);
@@ -485,8 +487,18 @@ class GameSessionService {
       return;
     }
 
+    if (type === 'lobby:peer-reconnected' && this.state.isHost) {
+      this.handlePeerReconnected(payload.playerId, payload.playerName);
+      return;
+    }
+
     if (type === 'lobby:peer-left' && this.state.isHost) {
       this.handlePeerLeft(payload.playerId);
+      return;
+    }
+
+    if (type === 'lobby:host-reconnected') {
+      this.handleHostReconnected(payload.newHostId);
       return;
     }
 
@@ -532,7 +544,6 @@ class GameSessionService {
   private async handlePeerJoined(playerId: string, playerName: string) {
     // Vérifier si le joueur n'existe pas déjà pour éviter les doublons
     if (this.state.players.some((player) => player.id_player === playerId)) {
-      console.warn(`Player ${playerId} already exists in the lobby`);
       return;
     }
 
@@ -567,6 +578,41 @@ class GameSessionService {
     this.broadcastState();
   }
 
+  private async handlePeerReconnected(playerId: string, playerName: string) {
+    // Fermer l'ancienne connexion si elle existe
+    const existingPc = this.peerConnections.get(playerId);
+    if (existingPc) {
+      existingPc.close();
+      this.peerConnections.delete(playerId);
+    }
+    const existingChannel = this.dataChannels.get(playerId);
+    if (existingChannel) {
+      existingChannel.close();
+      this.dataChannels.delete(playerId);
+    }
+    this.reconnectAttempts.delete(playerId);
+
+    // Mettre à jour le nom du joueur s'il a changé
+    const players = this.state.players.map((player) =>
+      player.id_player === playerId 
+        ? { ...player, displayName: playerName }
+        : player
+    );
+    this.updateState({ players, gameDetails: { ...this.state.gameDetails!, players } });
+
+    // Créer une nouvelle connexion WebRTC
+    const pc = this.createPeerConnection(playerId, true);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    this.sendSocket('webrtc:signal', {
+      targetId: playerId,
+      signal: { type: 'offer', sdp: pc.localDescription }
+    });
+
+    // Envoyer l'état actuel une fois la connexion établie
+    this.broadcastState();
+  }
+
   private handlePeerLeft(playerId: string) {
     const players = this.state.players.filter((player) => player.id_player !== playerId);
     this.updateState({ players, gameDetails: { ...this.state.gameDetails!, players } });
@@ -575,6 +621,49 @@ class GameSessionService {
     this.peerConnections.delete(playerId);
     this.dataChannels.delete(playerId);
     this.broadcastState();
+  }
+
+  private handleHostReconnected(newHostId: string) {
+    // Fermer les anciennes connexions avec l'ancien host
+    this.peerConnections.forEach((pc) => pc.close());
+    this.peerConnections.clear();
+    this.dataChannels.clear();
+    this.hostChannel?.close();
+    this.hostChannel = null;
+
+    // Mettre à jour le hostId dans gameDetails
+    if (this.state.gameDetails) {
+      this.updateState({
+        gameDetails: { ...this.state.gameDetails }
+      });
+    }
+
+    // Le nouveau host va initier une nouvelle connexion WebRTC avec nous
+    // Nous allons recevoir un signal offer de sa part
+  }
+
+  private async reestablishAllPeerConnections() {
+    if (!this.state.isHost) return;
+    
+    // Pour chaque joueur (sauf le host lui-même)
+    for (const player of this.state.players) {
+      if (player.id_player !== this.state.playerId) {
+        try {
+          const pc = this.createPeerConnection(player.id_player, true);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          this.sendSocket('webrtc:signal', {
+            targetId: player.id_player,
+            signal: { type: 'offer', sdp: pc.localDescription }
+          });
+        } catch (error) {
+          // Erreur silencieuse
+        }
+      }
+    }
+    
+    // Une fois les connexions établies, diffuser l'état
+    setTimeout(() => this.broadcastState(), 2000);
   }
 
   private createPeerConnection(peerId: string, isHost: boolean) {
@@ -753,13 +842,11 @@ class GameSessionService {
   private async attemptRejoin() {
     // Éviter les appels concurrents
     if (this.rejoinInFlight || this.joinInProgress || !this.state.lobbyCode) {
-      console.log('[GameSession] Rejoin déjà en cours ou lobby vide, ignoré');
       return;
     }
 
     // Si on est déjà connecté, ne pas rejoindre
     if (this.state.connectionStatus === 'connected') {
-      console.log('[GameSession] Déjà connecté, pas besoin de rejoindre');
       return;
     }
 
@@ -767,7 +854,9 @@ class GameSessionService {
     try {
       this.sendSocket('lobby:join', {
         code: this.state.lobbyCode,
-        playerName: this.state.playerName
+        playerName: this.state.playerName,
+        // Envoyer l'ancien playerId pour la reconnexion
+        oldPlayerId: this.state.playerId
       });
       const response = await this.waitFor('lobby:joined', 10000);
       this.updateState({
@@ -778,7 +867,7 @@ class GameSessionService {
       });
       this.requestResync('socket-reconnect');
     } catch (error) {
-      console.error('[GameSession] Échec de reconnexion au lobby:', error);
+      // Erreur silencieuse
     } finally {
       this.rejoinInFlight = false;
     }
@@ -787,7 +876,6 @@ class GameSessionService {
   private requestResync(reason: string) {
     if (this.state.isHost) return;
     if (!this.state.lobbyCode) return;
-    console.log('[GameSession] Demande de resynchronisation:', reason);
     this.sendSocket('lobby:request-resync', { reason });
   }
 
@@ -817,7 +905,6 @@ class GameSessionService {
     if (!this.state.isHost) return;
     const attempts = this.reconnectAttempts.get(peerId) || 0;
     if (attempts >= 3) {
-      console.warn(`[GameSession] Reconnexion WebRTC abandonnée pour ${peerId}`);
       return;
     }
     this.reconnectAttempts.set(peerId, attempts + 1);
@@ -842,10 +929,8 @@ class GameSessionService {
 
   private handlePeerConnectionIssue(peerId: string, state: string) {
     if (this.state.isHost) {
-      console.warn(`[GameSession] Problème WebRTC (${state}) avec ${peerId}, tentative de reconnexion`);
       this.schedulePeerReconnect(peerId);
     } else {
-      console.warn(`[GameSession] Problème WebRTC (${state}) avec l'hôte, demande de resync`);
       this.requestResync(`webrtc-${state}`);
     }
   }

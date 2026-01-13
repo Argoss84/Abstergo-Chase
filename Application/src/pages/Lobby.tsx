@@ -89,35 +89,38 @@ const Lobby: React.FC = () => {
 
       // Si nous sommes déjà connectés au bon lobby, ne rien faire
       if (lobbyCode && code && lobbyCode === code && connectionStatus === 'connected') {
-        console.log('[Lobby] Déjà connecté au lobby:', code);
         setIsLoading(false);
         return;
       }
 
       // Si en cours de connexion, attendre
       if (connectionStatus === 'connecting') {
-        console.log('[Lobby] Connexion en cours, attente...');
+        return;
+      }
+
+      // Éviter les appels multiples simultanés
+      if (isJoining) {
         return;
       }
 
       // Si un code est fourni dans l'URL
       if (code) {
-        if (!lobbyCode || lobbyCode !== code) {
-          // Éviter les appels multiples simultanés
-          if (isJoining) {
-            return;
-          }
-          
-          try {
-            setIsJoining(true);
-            setLoadingMessage('Connexion au lobby WebRTC...');
-            await joinLobby(code);
-            vibrate(patterns.short);
-          } catch (err) {
-            await handleErrorWithUser('Impossible de rejoindre le lobby', err, ERROR_CONTEXTS.LOBBY_INIT);
-          } finally {
-            setIsJoining(false);
-          }
+        // Si on a déjà le même lobbyCode et qu'on est déjà connecté, ne rien faire
+        if (lobbyCode === code && connectionStatus === 'connected') {
+          setIsLoading(false);
+          return;
+        }
+        
+        // Si on a le même lobbyCode mais pas encore connecté, rejoindre
+        try {
+          setIsJoining(true);
+          setLoadingMessage('Connexion au lobby WebRTC...');
+          await joinLobby(code);
+          vibrate(patterns.short);
+        } catch (err) {
+          await handleErrorWithUser('Impossible de rejoindre le lobby', err, ERROR_CONTEXTS.LOBBY_INIT);
+        } finally {
+          setIsJoining(false);
         }
         setIsLoading(false);
         return;
@@ -125,7 +128,6 @@ const Lobby: React.FC = () => {
 
       // Si pas de code dans l'URL mais qu'on a une session persistée
       if (!code && lobbyCode) {
-        console.log('[Lobby] Restauration de session, redirection vers:', lobbyCode);
         history.replace(`/lobby?code=${lobbyCode}`);
         return;
       }
@@ -177,7 +179,6 @@ const Lobby: React.FC = () => {
         setStreets(streetLines);
         setMapKey((prev) => prev + 1);
       } catch (streetError) {
-        console.warn('Erreur lors de la récupération des rues:', streetError);
         await handleError('Erreur lors de la récupération des rues', streetError, {
           context: ERROR_CONTEXTS.STREET_FETCH,
           shouldShowError: false

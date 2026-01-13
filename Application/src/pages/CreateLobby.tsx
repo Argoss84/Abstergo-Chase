@@ -91,7 +91,6 @@ const CreateLobby: React.FC = () => {
 
   // Initialize displayName with playerName from context
   useEffect(() => {
-    console.log('CreateLobby: playerName from context:', playerName);
     setDisplayName(playerName);
   }, [playerName]);
 
@@ -153,7 +152,6 @@ const CreateLobby: React.FC = () => {
       setStreets(streetLines);
       setStreetsLoadError(null);
     } catch (error: any) {
-      console.error('Erreur lors de la récupération des rues:', error);
       const errorMessage = error.message || 'Erreur de connexion à l\'API Overpass';
       setStreetsLoadError(errorMessage);
       await handleErrorWithContext('Erreur lors de la récupération des rues', error, ERROR_CONTEXTS.STREET_FETCH);
@@ -286,7 +284,6 @@ const CreateLobby: React.FC = () => {
     const fallbackPosition: [number, number] = [48.8566, 2.3522];
     
     const setFallbackPosition = () => {
-      console.log('Using fallback position (Paris)');
       setUserPosition(fallbackPosition);
       setMapKey(prev => prev + 1);
       setFormData(prev => ({
@@ -297,7 +294,6 @@ const CreateLobby: React.FC = () => {
     };
 
     const setPosition = (position: GeolocationPosition) => {
-      console.log('Got user position:', position.coords.latitude, position.coords.longitude);
       const newPosition: [number, number] = [position.coords.latitude, position.coords.longitude];
       setUserPosition(newPosition);
       setMapKey(prev => prev + 1);
@@ -307,18 +303,14 @@ const CreateLobby: React.FC = () => {
         map_center_longitude: newPosition[1].toString()
       }));
     };
-
-    console.log('Attempting to get user location...');
     
     if (!navigator.geolocation) {
-      console.log('Geolocation not supported');
       setFallbackPosition();
       return;
     }
 
     // Try with low accuracy first (faster)
     const timeoutId = setTimeout(() => {
-      console.log('Quick position attempt timed out, using fallback');
       setFallbackPosition();
     }, 3000);
 
@@ -329,15 +321,12 @@ const CreateLobby: React.FC = () => {
       },
       (error) => {
         clearTimeout(timeoutId);
-        console.log('Geolocation error:', error.code, error.message);
         
         // If timeout or position unavailable, try one more time with different settings
         if (error.code === 3 || error.code === 2) {
-          console.log('Retrying with cached position...');
           navigator.geolocation.getCurrentPosition(
             setPosition,
             (retryError) => {
-              console.log('Retry failed, using fallback position:', retryError.message);
               setFallbackPosition();
             },
             {
@@ -347,8 +336,7 @@ const CreateLobby: React.FC = () => {
             }
           );
         } else {
-          // Permission denied or other error - use fallback without error logging
-          console.log('Geolocation not available (code:', error.code, '), using fallback position');
+          // Permission denied or other error - use fallback
           setFallbackPosition();
         }
       },

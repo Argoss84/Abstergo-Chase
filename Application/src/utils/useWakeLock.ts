@@ -17,17 +17,14 @@ export const useWakeLock = (enabled: boolean = true) => {
         if ('wakeLock' in navigator) {
           // Demander le Wake Lock
           wakeLockRef.current = await navigator.wakeLock.request('screen');
-          console.log('🔒 Wake Lock activé - L\'écran ne se mettra pas en veille');
           
           // Écouter les événements de libération du Wake Lock
           wakeLockRef.current.addEventListener('release', () => {
-            console.log('🔓 Wake Lock libéré');
+            // Wake Lock libéré
           });
-        } else {
-          console.warn('⚠️ Wake Lock API non supportée par ce navigateur');
         }
       } catch (error) {
-        console.error('❌ Erreur lors de l\'activation du Wake Lock:', error);
+        // Erreur silencieuse
       }
     };
 
@@ -36,9 +33,8 @@ export const useWakeLock = (enabled: boolean = true) => {
         try {
           await wakeLockRef.current.release();
           wakeLockRef.current = null;
-          console.log('🔓 Wake Lock libéré manuellement');
         } catch (error) {
-          console.error('❌ Erreur lors de la libération du Wake Lock:', error);
+          // Erreur silencieuse
         }
       }
     };
@@ -75,9 +71,8 @@ export const useWakeLock = (enabled: boolean = true) => {
       try {
         await wakeLockRef.current.release();
         wakeLockRef.current = null;
-        console.log('🔓 Wake Lock libéré manuellement');
       } catch (error) {
-        console.error('❌ Erreur lors de la libération du Wake Lock:', error);
+        // Erreur silencieuse
       }
     }
   };
