@@ -41,6 +41,7 @@ import Lobby from './pages/Lobby';
 import Agent from './pages/Agent';
 import Rogue from './pages/Rogue';
 import EndGame from './pages/EndGame';
+import SessionDiagnostics from './pages/SessionDiagnostics';
 import { WakeLockProvider } from './components/WakeLockProvider';
 setupIonicReact();
 
@@ -59,6 +60,7 @@ const App: React.FC = () => {
               <Route exact path="/agent" render={() => <Agent />} />
               <Route exact path="/rogue" render={() => <Rogue />} />
               <Route exact path="/end-game" render={() => <EndGame />} />
+              <Route exact path="/session-diagnostics" render={() => <SessionDiagnostics />} />
               <Route path="*" component={NotFound} />
             </Switch>
           </IonRouterOutlet>

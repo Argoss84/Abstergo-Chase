@@ -145,8 +145,47 @@ class GameSessionService {
   }
 
   clearSession() {
+    console.log('Nettoyage complet de la session utilisateur');
+    
+    // Informer le serveur qu'on quitte le lobby (si connecté)
+    if (this.state.lobbyCode && this.socket?.connected) {
+      this.sendSocket('player:status-update', { status: 'disconnected' });
+    }
+    
+    // Nettoyer localStorage
     localStorage.removeItem(SESSION_STORAGE_KEY);
+    
+    // Réinitialiser la session
     this.resetSession();
+  }
+  
+  // Nouvelle méthode pour forcer la sortie d'un lobby sans nettoyer le nom du joueur
+  leaveLobby() {
+    console.log('Sortie du lobby actuel');
+    
+    // Informer le serveur qu'on quitte le lobby (si connecté)
+    if (this.state.lobbyCode && this.socket?.connected) {
+      this.sendSocket('player:status-update', { status: 'disconnected' });
+    }
+    
+    // Nettoyer localStorage
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    
+    // Nettoyer les connexions mais garder le socket
+    this.cleanupConnections();
+    
+    // Réinitialiser seulement les données du lobby, pas le nom du joueur
+    const playerName = this.state.playerName;
+    this.updateState({
+      lobbyCode: null,
+      playerId: null,
+      isHost: false,
+      players: [],
+      gameDetails: null,
+      props: [],
+      connectionStatus: this.socket?.connected ? 'connected' : 'idle'
+    });
+    this.state.playerName = playerName;
   }
 
   hasPersistedSession(): boolean {
@@ -164,6 +203,19 @@ class GameSessionService {
 
   async createLobby(gameDetails: GameDetails, props: GameProp[]) {
     try {
+      // Nettoyer toute session existante avant de créer un nouveau lobby
+      if (this.state.lobbyCode || this.state.playerId) {
+        console.log('Nettoyage de la session existante avant création d\'un nouveau lobby');
+        this.cleanupConnections();
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+        // Réinitialiser l'état mais garder le nom du joueur
+        const playerName = this.state.playerName;
+        this.state = {
+          ...createInitialState(),
+          playerName
+        };
+      }
+      
       await this.ensureSocket();
       
       this.sendSocket('lobby:create', {
@@ -242,6 +294,13 @@ class GameSessionService {
       
       // Si on a un ancien playerId et qu'on rejoint le même lobby, c'est une reconnexion
       const isReconnecting = this.state.lobbyCode === code && this.state.playerId;
+      
+      // Si on rejoint un NOUVEAU lobby différent de l'actuel, nettoyer l'ancienne session
+      if (this.state.lobbyCode && this.state.lobbyCode !== code) {
+        console.log(`Nettoyage de l'ancienne session (lobby ${this.state.lobbyCode}) avant de rejoindre le nouveau lobby ${code}`);
+        this.cleanupConnections();
+        // Ne pas supprimer de localStorage pour l'instant, on va le mettre à jour
+      }
       
       this.sendSocket('lobby:join', {
         code,
@@ -388,10 +447,21 @@ class GameSessionService {
       const data: PersistedSessionData = JSON.parse(stored);
       const age = Date.now() - data.timestamp;
 
+      // Vérifier l'expiration
       if (age > SESSION_EXPIRY_MS) {
+        console.log('Session expirée, suppression');
         localStorage.removeItem(SESSION_STORAGE_KEY);
         return;
       }
+      
+      // Validation des données essentielles
+      if (!data.lobbyCode || !data.playerId || !data.playerName) {
+        console.warn('Session invalide (données manquantes), suppression');
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+        return;
+      }
+      
+      console.log(`Restauration de la session: lobby ${data.lobbyCode}, joueur ${data.playerName}`);
       
       // Restaurer tous les états y compris gameDetails, players et props
       const stateUpdate: Partial<SessionState> = {
@@ -405,16 +475,17 @@ class GameSessionService {
       if (data.gameDetails) {
         stateUpdate.gameDetails = data.gameDetails;
       }
-      if (data.players) {
+      if (data.players && Array.isArray(data.players)) {
         stateUpdate.players = data.players;
       }
-      if (data.props) {
+      if (data.props && Array.isArray(data.props)) {
         stateUpdate.props = data.props;
       }
 
       this.state = { ...this.state, ...stateUpdate };
       this.listeners.forEach((listener) => listener(this.state));
     } catch (error) {
+      console.error('Erreur lors de la restauration de la session:', error);
       localStorage.removeItem(SESSION_STORAGE_KEY);
     }
   }

@@ -43,6 +43,11 @@ const Home: React.FC = () => {
               <IonItem button onClick={() => navigateTo('/join-lobby')}>
                 <IonLabel>Rejoindre une partie</IonLabel>
               </IonItem>
+              <IonItem button onClick={() => navigateTo('/session-diagnostics')} lines="none">
+                <IonLabel color="medium">
+                  <p style={{ fontSize: '0.9em' }}>🔧 Diagnostic de session</p>
+                </IonLabel>
+              </IonItem>
             </IonList>
           </IonCardContent>
         </IonCard>

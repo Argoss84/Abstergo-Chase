@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { gameSessionService, SessionState } from '../services/GameSessionService';
 import { GameDetails, GameProp, Player } from '../components/Interfaces';
 
+// Interface du contexte de session de jeu
 interface GameSessionContextValue extends SessionState {
   createLobby: (gameDetails: GameDetails, props: GameProp[]) => Promise<string>;
   joinLobby: (code: string) => Promise<void>;
@@ -10,6 +11,7 @@ interface GameSessionContextValue extends SessionState {
   updateProp: (propId: number, partial: Partial<GameProp>) => Promise<void>;
   setPlayerName: (name: string) => void;
   clearSession: () => void;
+  leaveLobby: () => void;
   hasPersistedSession: () => boolean;
 }
 
@@ -33,6 +35,7 @@ export const GameSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     updateProp: async (propId, partial) => gameSessionService.updateProp(propId, partial),
     setPlayerName: (name: string) => gameSessionService.setPlayerName(name),
     clearSession: () => gameSessionService.clearSession(),
+    leaveLobby: () => gameSessionService.leaveLobby(),
     hasPersistedSession: () => gameSessionService.hasPersistedSession()
   };
 
