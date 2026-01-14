@@ -30,6 +30,7 @@ import { useVibration } from '../hooks/useVibration';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 import Loading from '../components/Loading';
 import { useGameSession } from '../contexts/GameSessionContext';
+import QRCode from '../components/QRCode';
 
 const ResizeMap = () => {
   const map = useMap();
@@ -59,12 +60,14 @@ const Lobby: React.FC = () => {
   } = useGameSession();
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isQRModalOpen, setIsQRModalOpen] = useState(false);
   const [mapKey, setMapKey] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState('Connexion au lobby...');
   const [isJoining, setIsJoining] = useState(false);
   const [errorCount, setErrorCount] = useState(0);
   const [isPageVisible, setIsPageVisible] = useState(!document.hidden);
+  const [copySuccess, setCopySuccess] = useState(false);
 
   useWakeLock(true);
   const { vibrate, patterns } = useVibration();
@@ -81,6 +84,19 @@ const Lobby: React.FC = () => {
     });
     setError(errorResult.message);
     return errorResult;
+  };
+
+  const handleCopyCode = async () => {
+    if (gameDetails?.code) {
+      try {
+        await navigator.clipboard.writeText(gameDetails.code);
+        setCopySuccess(true);
+        vibrate(patterns.short);
+        setTimeout(() => setCopySuccess(false), 2000);
+      } catch (err) {
+        console.error('Erreur lors de la copie du code:', err);
+      }
+    }
   };
 
   useEffect(() => {
@@ -530,6 +546,47 @@ const Lobby: React.FC = () => {
               </MapContainer>
             </div>
 
+            <IonCard style={{ margin: '1rem' }}>
+              <IonCardHeader>
+                <IonCardTitle style={{ fontSize: '16px', textAlign: 'center' }}>
+                  Code de la partie
+                </IonCardTitle>
+              </IonCardHeader>
+              <IonCardContent>
+                <div style={{
+                  textAlign: 'center',
+                  fontSize: '32px',
+                  fontWeight: 'bold',
+                  letterSpacing: '4px',
+                  padding: '16px',
+                  backgroundColor: 'var(--ion-color-light)',
+                  borderRadius: '8px',
+                  fontFamily: 'monospace',
+                  marginBottom: '16px'
+                }}>
+                  {gameDetails.code}
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <IonButton 
+                    expand="block" 
+                    onClick={handleCopyCode}
+                    color={copySuccess ? 'success' : 'primary'}
+                    style={{ flex: 1 }}
+                  >
+                    {copySuccess ? '✅ Copié !' : '📋 Copier le code'}
+                  </IonButton>
+                  <IonButton 
+                    expand="block" 
+                    onClick={() => setIsQRModalOpen(true)}
+                    color="secondary"
+                    style={{ flex: 1 }}
+                  >
+                    📱 QR Code
+                  </IonButton>
+                </div>
+              </IonCardContent>
+            </IonCard>
+
             <IonCard>
               <IonCardHeader>
                 <IonCardTitle>Joueurs ({players.length})</IonCardTitle>
@@ -762,6 +819,63 @@ const Lobby: React.FC = () => {
               Détails Partie
             </IonButton>
 
+            <IonModal isOpen={isQRModalOpen} onDidDismiss={() => setIsQRModalOpen(false)}>
+              <IonHeader>
+                <IonToolbar>
+                  <IonTitle>QR Code - Rejoindre la partie</IonTitle>
+                  <IonButtons slot="end">
+                    <IonButton onClick={() => setIsQRModalOpen(false)}>Fermer</IonButton>
+                  </IonButtons>
+                </IonToolbar>
+              </IonHeader>
+              <IonContent className="ion-padding">
+                <div style={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  minHeight: '100%',
+                  padding: '20px'
+                }}>
+                  <IonText color="medium" style={{ textAlign: 'center', marginBottom: '20px' }}>
+                    <h2>Scannez ce QR Code pour rejoindre la partie</h2>
+                    <p>Le code sera automatiquement pré-rempli</p>
+                  </IonText>
+                  
+                  <QRCode 
+                    value={`${window.location.origin}/join-lobby?code=${gameDetails.code}`}
+                    size={280}
+                    level="H"
+                  />
+                  
+                  <div style={{
+                    marginTop: '30px',
+                    textAlign: 'center',
+                    fontSize: '28px',
+                    fontWeight: 'bold',
+                    letterSpacing: '4px',
+                    fontFamily: 'monospace',
+                    padding: '16px',
+                    backgroundColor: 'var(--ion-color-light)',
+                    borderRadius: '8px',
+                    width: '100%',
+                    maxWidth: '300px'
+                  }}>
+                    {gameDetails.code}
+                  </div>
+
+                  <IonButton 
+                    expand="block" 
+                    onClick={handleCopyCode}
+                    color={copySuccess ? 'success' : 'primary'}
+                    style={{ marginTop: '20px', maxWidth: '300px', width: '100%' }}
+                  >
+                    {copySuccess ? '✅ Code copié !' : '📋 Copier le code'}
+                  </IonButton>
+                </div>
+              </IonContent>
+            </IonModal>
+
             <IonModal isOpen={isModalOpen} onDidDismiss={() => setIsModalOpen(false)}>
               <IonHeader>
                 <IonToolbar>
@@ -776,7 +890,15 @@ const Lobby: React.FC = () => {
                   <IonItem>
                     <IonLabel>
                       <h2>Code de la partie</h2>
-                      <p style={{ fontSize: '24px', fontWeight: 'bold', letterSpacing: '2px' }}>{gameDetails.code}</p>
+                      <div style={{ 
+                        marginTop: '12px',
+                        fontSize: '24px', 
+                        fontWeight: 'bold', 
+                        letterSpacing: '4px',
+                        fontFamily: 'monospace'
+                      }}>
+                        {gameDetails.code}
+                      </div>
                     </IonLabel>
                   </IonItem>
                   <IonItem>

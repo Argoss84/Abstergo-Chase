@@ -15,16 +15,26 @@ import {
     IonInput,
     IonLabel,
   } from '@ionic/react';
-  import { useHistory } from 'react-router-dom';
+  import { useHistory, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 import { useGameSession } from '../contexts/GameSessionContext';
   
   const JoinLobby: React.FC = () => {
     const history = useHistory();
+    const location = useLocation();
     const { playerName, setPlayerName } = useGameSession();
     const [gameCode, setGameCode] = useState('');
     const [displayName, setDisplayName] = useState(playerName);
+
+    // Pré-remplir le code depuis l'URL si présent
+    useEffect(() => {
+      const params = new URLSearchParams(location.search);
+      const codeFromUrl = params.get('code');
+      if (codeFromUrl) {
+        setGameCode(codeFromUrl.toUpperCase());
+      }
+    }, [location.search]);
 
     useEffect(() => {
       console.log('JoinLobby: playerName from context:', playerName);
