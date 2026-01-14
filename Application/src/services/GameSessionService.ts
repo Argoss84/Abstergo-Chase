@@ -53,12 +53,17 @@ const createInitialState = (): SessionState => ({
   connectionStatus: 'idle'
 });
 
+interface PendingAction {
+  resolve: (payload: any) => void;
+  reject: (error: Error) => void;
+}
+
 class GameSessionService {
   private state: SessionState = createInitialState();
   private listeners = new Set<(state: SessionState) => void>();
   private socket: Socket | null = null;
   private socketReady: Promise<void> | null = null;
-  private pendingActions = new Map<string, (payload: any) => void>();
+  private pendingActions = new Map<string, PendingAction>();
   private peerConnections = new Map<string, RTCPeerConnection>();
   private dataChannels = new Map<string, RTCDataChannel>();
   private hostChannel: RTCDataChannel | null = null;
@@ -163,9 +168,12 @@ class GameSessionService {
   leaveLobby() {
     console.log('Sortie du lobby actuel');
     
-    // Informer le serveur qu'on quitte le lobby (si connecté)
+    // Informer le serveur qu'on quitte définitivement le lobby (si connecté)
     if (this.state.lobbyCode && this.socket?.connected) {
-      this.sendSocket('player:status-update', { status: 'disconnected' });
+      this.sendSocket('lobby:leave', { 
+        lobbyCode: this.state.lobbyCode,
+        playerId: this.state.playerId
+      });
     }
     
     // Nettoyer localStorage
@@ -320,6 +328,10 @@ class GameSessionService {
 
       // Informer le serveur socket.io que le joueur est actif
       this.sendSocket('player:status-update', { status: 'active' });
+    } catch (error) {
+      // Propager l'erreur pour qu'elle soit gérée par l'appelant
+      this.joinInProgress = false;
+      throw error;
     } finally {
       this.joinInProgress = false;
     }
@@ -646,9 +658,15 @@ class GameSessionService {
         reject(new Error(`Timeout en attente du message: ${type}`));
       }, timeoutMs);
 
-      this.pendingActions.set(type, (payload: any) => {
-        clearTimeout(timeout);
-        resolve(payload);
+      this.pendingActions.set(type, {
+        resolve: (payload: any) => {
+          clearTimeout(timeout);
+          resolve(payload);
+        },
+        reject: (error: Error) => {
+          clearTimeout(timeout);
+          reject(error);
+        }
       });
     });
   }
@@ -670,9 +688,24 @@ class GameSessionService {
     const { type, payload } = message;
 
     if (this.pendingActions.has(type)) {
-      const resolve = this.pendingActions.get(type)!;
+      const action = this.pendingActions.get(type)!;
       this.pendingActions.delete(type);
-      resolve(payload);
+      action.resolve(payload);
+      return;
+    }
+
+    // Gérer les erreurs de lobby
+    if (type === 'lobby:error') {
+      // Trouver la promise en attente et la rejeter
+      const waitingTypes = ['lobby:joined', 'lobby:created'];
+      for (const waitingType of waitingTypes) {
+        if (this.pendingActions.has(waitingType)) {
+          const action = this.pendingActions.get(waitingType)!;
+          this.pendingActions.delete(waitingType);
+          action.reject(new Error(payload?.message || 'Erreur de lobby'));
+          break;
+        }
+      }
       return;
     }
 

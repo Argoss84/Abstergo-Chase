@@ -56,7 +56,8 @@ const Lobby: React.FC = () => {
     props,
     isHost,
     connectionStatus,
-    clearSession
+    clearSession,
+    leaveLobby
   } = useGameSession();
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -160,7 +161,13 @@ const Lobby: React.FC = () => {
             await joinLobby(code);
             vibrate(patterns.short);
           } catch (err) {
-            await handleErrorWithUser('Impossible de rejoindre le lobby', err, ERROR_CONTEXTS.LOBBY_INIT);
+            // Vérifier si c'est une erreur de lobby inexistant
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            if (errorMessage.includes('Lobby introuvable') || errorMessage.includes('inexistant')) {
+              setError(`Le lobby "${code}" n'existe pas ou a été fermé.`);
+            } else {
+              await handleErrorWithUser('Impossible de rejoindre le lobby', err, ERROR_CONTEXTS.LOBBY_INIT);
+            }
             setIsLoading(false);
           } finally {
             setIsJoining(false);
@@ -274,7 +281,8 @@ const Lobby: React.FC = () => {
   };
 
   const handleLeaveLobby = () => {
-    clearSession();
+    // Appeler leaveLobby pour informer le serveur et nettoyer la session
+    leaveLobby();
     history.push('/home');
   };
 
@@ -377,55 +385,93 @@ const Lobby: React.FC = () => {
           />
         ) : error ? (
           <>
-            <IonCard color="warning" style={{ margin: '1rem' }}>
+            <IonCard color={error.includes("n'existe pas") || error.includes("fermé") ? "danger" : "warning"} style={{ margin: '1rem' }}>
               <IonCardHeader>
                 <IonCardTitle style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  ⚠️ Problème de connexion
+                  {error.includes("n'existe pas") || error.includes("fermé") ? '❌ Lobby introuvable' : '⚠️ Problème de connexion'}
                 </IonCardTitle>
               </IonCardHeader>
               <IonCardContent>
                 <IonText color="light">
                   <p>{error}</p>
-                  <p style={{ marginTop: '8px', fontSize: '0.9em', opacity: 0.9 }}>
-                    Vous pouvez continuer à attendre ou rafraîchir la page.
-                  </p>
+                  {error.includes("n'existe pas") || error.includes("fermé") ? (
+                    <p style={{ marginTop: '8px', fontSize: '0.9em', opacity: 0.9 }}>
+                      Ce lobby n'existe plus ou n'a jamais existé. Vérifiez le code ou demandez un nouveau lien.
+                    </p>
+                  ) : (
+                    <p style={{ marginTop: '8px', fontSize: '0.9em', opacity: 0.9 }}>
+                      Vous pouvez continuer à attendre ou rafraîchir la page.
+                    </p>
+                  )}
                 </IonText>
-                <IonButton 
-                  expand="block" 
-                  color="light" 
-                  onClick={() => {
-                    setError(null);
-                    setErrorCount(0);
-                    setIsLoading(true);
-                  }} 
-                  style={{ marginTop: '1rem' }}
-                >
-                  ⏳ Continuer à attendre
-                </IonButton>
-                <IonButton 
-                  expand="block" 
-                  color="light" 
-                  fill="outline"
-                  onClick={() => {
-                    window.location.reload();
-                  }} 
-                  style={{ marginTop: '0.5rem' }}
-                >
-                  🔄 Rafraîchir la page
-                </IonButton>
-                <IonButton 
-                  expand="block" 
-                  color="light" 
-                  fill="clear"
-                  onClick={() => {
-                    setError(null);
-                    clearSession();
-                    history.push('/home');
-                  }} 
-                  style={{ marginTop: '0.5rem' }}
-                >
-                  🏠 Retour à l'accueil
-                </IonButton>
+                {error.includes("n'existe pas") || error.includes("fermé") ? (
+                  <>
+                    <IonButton 
+                      expand="block" 
+                      color="light" 
+                      onClick={() => {
+                        setError(null);
+                        clearSession();
+                        history.push('/join-lobby');
+                      }} 
+                      style={{ marginTop: '1rem' }}
+                    >
+                      🔍 Essayer un autre code
+                    </IonButton>
+                    <IonButton 
+                      expand="block" 
+                      color="light" 
+                      fill="outline"
+                      onClick={() => {
+                        setError(null);
+                        clearSession();
+                        history.push('/home');
+                      }} 
+                      style={{ marginTop: '0.5rem' }}
+                    >
+                      🏠 Retour à l'accueil
+                    </IonButton>
+                  </>
+                ) : (
+                  <>
+                    <IonButton 
+                      expand="block" 
+                      color="light" 
+                      onClick={() => {
+                        setError(null);
+                        setErrorCount(0);
+                        setIsLoading(true);
+                      }} 
+                      style={{ marginTop: '1rem' }}
+                    >
+                      ⏳ Continuer à attendre
+                    </IonButton>
+                    <IonButton 
+                      expand="block" 
+                      color="light" 
+                      fill="outline"
+                      onClick={() => {
+                        window.location.reload();
+                      }} 
+                      style={{ marginTop: '0.5rem' }}
+                    >
+                      🔄 Rafraîchir la page
+                    </IonButton>
+                    <IonButton 
+                      expand="block" 
+                      color="light" 
+                      fill="clear"
+                      onClick={() => {
+                        setError(null);
+                        clearSession();
+                        history.push('/home');
+                      }} 
+                      style={{ marginTop: '0.5rem' }}
+                    >
+                      🏠 Retour à l'accueil
+                    </IonButton>
+                  </>
+                )}
               </IonCardContent>
             </IonCard>
             
@@ -960,11 +1006,7 @@ const Lobby: React.FC = () => {
               </IonContent>
             </IonModal>
           </>
-        ) : (
-          <IonText>
-            <p>Chargement des détails de la partie...</p>
-          </IonText>
-        )}
+        ) : null}
       </IonContent>
     </IonPage>
   );

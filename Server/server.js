@@ -1004,6 +1004,80 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'lobby:leave') {
+      const code = payload?.lobbyCode;
+      const playerId = payload?.playerId || clientId;
+      
+      if (!code || !lobbies.has(code)) {
+        log(`[ERREUR LEAVE] Client ${clientId} tente de quitter un lobby inexistant: ${code}`);
+        return;
+      }
+
+      const lobby = lobbies.get(code);
+      
+      // Vérifier que le joueur fait bien partie du lobby
+      if (!lobby.players.has(playerId)) {
+        log(`[ERREUR LEAVE] Client ${clientId} n'est pas dans le lobby ${code}`);
+        return;
+      }
+
+      log(`[JOUEUR QUITTE] Lobby: ${code}, Joueur: ${playerId}`);
+
+      // Si c'est le host qui quitte, fermer le lobby
+      if (lobby.hostId === playerId) {
+        log(`[HOST QUITTE] Code: ${code}, Host: ${playerId} - Fermeture du lobby`);
+        
+        // Annuler les timers si ils existent
+        if (disconnectedHosts.has(code)) {
+          const hostInfo = disconnectedHosts.get(code);
+          clearTimeout(hostInfo.timeoutId);
+          disconnectedHosts.delete(code);
+        }
+        if (awayHosts.has(code)) {
+          const awayInfo = awayHosts.get(code);
+          clearTimeout(awayInfo.timeoutId);
+          awayHosts.delete(code);
+        }
+        
+        // Notifier tous les joueurs que le lobby est fermé
+        lobby.players.forEach((player) => {
+          if (player.id !== playerId) {
+            const playerSocket = socketsById.get(player.id);
+            send(playerSocket, { 
+              type: 'lobby:closed', 
+              payload: { 
+                code, 
+                reason: 'Le host a quitté le lobby'
+              } 
+            });
+          }
+        });
+        
+        // Supprimer le lobby
+        lobbies.delete(code);
+      } else {
+        // Joueur normal qui quitte
+        lobby.players.delete(playerId);
+        
+        // Notifier le host que le joueur a quitté
+        const hostSocket = socketsById.get(lobby.hostId);
+        if (hostSocket) {
+          send(hostSocket, { 
+            type: 'lobby:peer-left', 
+            payload: { playerId } 
+          });
+        }
+      }
+
+      // Mettre à jour les infos du client
+      const clientInfo = clients.get(socket.id);
+      if (clientInfo) {
+        clientInfo.lobbyCode = null;
+      }
+      
+      return;
+    }
+
     if (type === 'player:status-update') {
       const { lobbyCode } = clients.get(socket.id) || {};
       if (!lobbyCode || !lobbies.has(lobbyCode)) {
