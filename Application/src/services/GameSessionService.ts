@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { GameDetails, GameProp, Player } from '../components/Interfaces';
+import { authService } from './AuthService';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
@@ -608,7 +609,10 @@ class GameSessionService {
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       timeout: 20000,
-      transports: ['polling', 'websocket']
+      transports: ['polling', 'websocket'],
+      auth: {
+        password: authService.getPassword()
+      }
     });
     this.socketReady = new Promise((resolve, reject) => {
       if (!this.socket) return reject();

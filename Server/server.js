@@ -1,9 +1,14 @@
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { randomUUID } from 'crypto';
+import dotenv from 'dotenv';
+
+// Charger les variables d'environnement depuis le fichier .env
+dotenv.config();
 
 const PORT = process.env.SIGNALING_PORT || 5174;
 const SOCKET_IO_PATH = process.env.SOCKET_IO_PATH || '/socket.io';
+const SERVER_PASSWORD = process.env.mdp || '';
 
 // Fonction pour obtenir les statistiques du serveur
 const getServerStats = () => ({
@@ -52,6 +57,43 @@ const getServerStats = () => ({
 
 // Créer le serveur HTTP avec un gestionnaire de requêtes
 const server = createServer((req, res) => {
+  // API endpoint pour vérifier le mot de passe
+  if (req.method === 'POST' && req.url === '/api/auth') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', () => {
+      try {
+        const { password } = JSON.parse(body);
+        const isValid = !SERVER_PASSWORD || password === SERVER_PASSWORD;
+        res.writeHead(200, { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify({ valid: isValid }));
+      } catch (error) {
+        res.writeHead(400, { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify({ valid: false, error: 'Invalid request' }));
+      }
+    });
+    return;
+  }
+
+  // Gérer les requêtes OPTIONS pour CORS
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type'
+    });
+    res.end();
+    return;
+  }
+
   // API endpoint pour les statistiques
   if (req.method === 'GET' && req.url === '/api/stats') {
     const stats = getServerStats();
@@ -602,6 +644,26 @@ const io = new SocketIOServer(server, {
     origin: '*',
     methods: ['GET', 'POST']
   }
+});
+
+// Middleware pour vérifier le mot de passe
+io.use((socket, next) => {
+  const password = socket.handshake.auth.password;
+  
+  // Si aucun mot de passe n'est configuré sur le serveur, autoriser l'accès
+  if (!SERVER_PASSWORD) {
+    return next();
+  }
+  
+  // Vérifier le mot de passe
+  if (password === SERVER_PASSWORD) {
+    return next();
+  }
+  
+  // Mot de passe invalide
+  const error = new Error('Mot de passe invalide');
+  error.data = { code: 'INVALID_PASSWORD' };
+  next(error);
 });
 
 const lobbies = new Map();

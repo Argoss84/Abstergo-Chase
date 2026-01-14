@@ -19,6 +19,7 @@ import {
 import { useState, useEffect } from 'react';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 import { useGameSession } from '../contexts/GameSessionContext';
+import { authService } from '../services/AuthService';
   
   const JoinLobby: React.FC = () => {
     const history = useHistory();
@@ -26,6 +27,13 @@ import { useGameSession } from '../contexts/GameSessionContext';
     const { playerName, setPlayerName } = useGameSession();
     const [gameCode, setGameCode] = useState('');
     const [displayName, setDisplayName] = useState(playerName);
+
+    // Vérifier l'authentification
+    useEffect(() => {
+      if (!authService.isAuthenticated()) {
+        history.replace('/home');
+      }
+    }, [history]);
 
     // Pré-remplir le code depuis l'URL si présent
     useEffect(() => {

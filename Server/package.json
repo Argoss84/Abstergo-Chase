@@ -8,10 +8,16 @@
     "start": "node server.js",
     "dev": "node --watch server.js"
   },
-  "keywords": ["websocket", "webrtc", "signaling", "server"],
+  "keywords": [
+    "websocket",
+    "webrtc",
+    "signaling",
+    "server"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "dotenv": "^16.6.1",
     "socket.io": "^4.8.1"
   },
   "engines": {
