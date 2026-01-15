@@ -24,7 +24,7 @@ import { authService } from '../services/AuthService';
   const JoinLobby: React.FC = () => {
     const history = useHistory();
     const location = useLocation();
-    const { playerName, setPlayerName } = useGameSession();
+    const { playerName, setPlayerName, lobbyCode, clearSession } = useGameSession();
     const [gameCode, setGameCode] = useState('');
     const [displayName, setDisplayName] = useState(playerName);
 
@@ -60,7 +60,9 @@ import { authService } from '../services/AuthService';
     };
   
       const handleJoinGame = async () => {
-    if (!gameCode.trim()) {
+    const normalizedCode = gameCode.trim().toUpperCase();
+
+    if (!normalizedCode) {
       await handleError('Veuillez entrer un code de partie', null, {
         context: ERROR_CONTEXTS.VALIDATION,
         shouldShowError: false
@@ -68,7 +70,7 @@ import { authService } from '../services/AuthService';
       return;
     }
     
-    if (gameCode.trim().length !== 6) {
+    if (normalizedCode.length !== 6) {
       await handleError('Le code de partie doit contenir exactement 6 caractères', null, {
         context: ERROR_CONTEXTS.VALIDATION,
         shouldShowError: false
@@ -89,7 +91,11 @@ import { authService } from '../services/AuthService';
       setPlayerName(displayName.trim());
     }
     
-    history.push(`/lobby?code=${gameCode}`);
+    if (lobbyCode && lobbyCode.toUpperCase() !== normalizedCode) {
+      clearSession();
+    }
+
+    history.push(`/lobby?code=${normalizedCode}`);
   };
   
     return (

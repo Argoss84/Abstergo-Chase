@@ -218,6 +218,16 @@ class GameSessionService {
     }
   }
 
+  disconnectSocket() {
+    if (this.socket) {
+      this.socket.removeAllListeners();
+      this.socket.disconnect();
+      this.socket = null;
+      this.socketReady = null;
+    }
+    this.updateState({ connectionStatus: 'idle' });
+  }
+
   async createLobby(gameDetails: GameDetails, props: GameProp[]) {
     try {
       // Nettoyer toute session existante avant de créer un nouveau lobby

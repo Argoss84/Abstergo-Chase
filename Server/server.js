@@ -14,6 +14,7 @@ const SERVER_PASSWORD = process.env.mdp || '';
 const getServerStats = () => ({
   connectedClients: clients.size,
   activeLobbies: lobbies.size,
+  totalSocketMessages,
   clients: Array.from(clients.entries()).map(([socketId, info]) => {
     const socket = io.sockets.sockets.get(socketId);
     return {
@@ -31,6 +32,7 @@ const getServerStats = () => ({
       code,
       hostId: lobby.hostId,
       playerCount: lobby.players.size,
+      socketMessageCount: lobbySocketMessageCounts.get(code) || 0,
       players: Array.from(lobby.players.values()).map(player => {
         const socket = socketsById.get(player.id);
         return {
@@ -341,6 +343,10 @@ const server = createServer((req, res) => {
         <div class="label">Lobbies Actifs</div>
       </div>
       <div class="stat-box">
+        <div class="number">${stats.totalSocketMessages}</div>
+        <div class="label">Messages Socket Totaux</div>
+      </div>
+      <div class="stat-box">
         <div class="number">${Math.floor(stats.serverInfo.uptime / 60)}m</div>
         <div class="label">Temps d'Activité</div>
       </div>
@@ -423,6 +429,7 @@ const server = createServer((req, res) => {
               <th>Code Lobby</th>
               <th>Host ID</th>
               <th>Joueurs</th>
+              <th>Messages</th>
               <th>Détails</th>
             </tr>
           </thead>
@@ -436,6 +443,7 @@ const server = createServer((req, res) => {
                 </td>
                 <td><code>${lobby.hostId.substring(0, 8)}...</code></td>
                 <td>${lobby.playerCount}</td>
+                <td>${lobby.socketMessageCount}</td>
                 <td>
                   <div class="player-list">
                     ${lobby.players.map(p => {
@@ -498,8 +506,9 @@ const server = createServer((req, res) => {
         // Mettre à jour les statistiques principales
         document.querySelectorAll('.stat-box')[0].querySelector('.number').textContent = stats.connectedClients;
         document.querySelectorAll('.stat-box')[1].querySelector('.number').textContent = stats.activeLobbies;
-        document.querySelectorAll('.stat-box')[2].querySelector('.number').textContent = Math.floor(stats.serverInfo.uptime / 60) + 'm';
-        document.querySelectorAll('.stat-box')[3].querySelector('.number').textContent = Math.round(stats.serverInfo.memoryUsage.heapUsed / 1024 / 1024) + 'MB';
+        document.querySelectorAll('.stat-box')[2].querySelector('.number').textContent = stats.totalSocketMessages;
+        document.querySelectorAll('.stat-box')[3].querySelector('.number').textContent = Math.floor(stats.serverInfo.uptime / 60) + 'm';
+        document.querySelectorAll('.stat-box')[4].querySelector('.number').textContent = Math.round(stats.serverInfo.memoryUsage.heapUsed / 1024 / 1024) + 'MB';
         
         // Mettre à jour les clients
         const clientsCard = document.getElementById('clientsCard');
@@ -543,6 +552,7 @@ const server = createServer((req, res) => {
                   <th>Code Lobby</th>
                   <th>Host ID</th>
                   <th>Joueurs</th>
+                  <th>Messages</th>
                   <th>Détails</th>
                 </tr>
               </thead>
@@ -556,6 +566,7 @@ const server = createServer((req, res) => {
                     </td>
                     <td><code>\${lobby.hostId.substring(0, 8)}...</code></td>
                     <td>\${lobby.playerCount}</td>
+                    <td>\${lobby.socketMessageCount}</td>
                     <td>
                       <div class="player-list">
                         \${lobby.players.map(p => {
@@ -671,6 +682,8 @@ const clients = new Map();
 const socketsById = new Map();
 const disconnectedHosts = new Map(); // Stocke temporairement les lobbies dont le host s'est déconnecté
 const awayHosts = new Map(); // Stocke les lobbies dont le host est absent (away)
+const lobbySocketMessageCounts = new Map();
+let totalSocketMessages = 0;
 
 // Stockage des logs en mémoire (derniers 100 logs)
 const logs = [];
@@ -708,9 +721,34 @@ const log = (...args) => {
 const generateCode = () =>
   Array.from({ length: 6 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('');
 
+const incrementTotalSocketMessages = () => {
+  totalSocketMessages += 1;
+};
+
+const incrementLobbySocketMessages = (lobbyCode) => {
+  if (!lobbyCode) return;
+  const current = lobbySocketMessageCounts.get(lobbyCode) || 0;
+  lobbySocketMessageCounts.set(lobbyCode, current + 1);
+};
+
+const getLobbyCodeFromMessage = (type, payload, clientInfo) => {
+  if (type === 'lobby:join' || type === 'lobby:rejoin-host') {
+    return payload?.code?.toUpperCase() || null;
+  }
+  if (type === 'lobby:leave') {
+    return payload?.lobbyCode?.toUpperCase() || clientInfo?.lobbyCode || null;
+  }
+  if (payload?.code && typeof payload.code === 'string') {
+    return payload.code.toUpperCase();
+  }
+  return clientInfo?.lobbyCode || null;
+};
+
 const send = (socket, message) => {
   if (socket && socket.connected) {
+    incrementTotalSocketMessages();
     const clientInfo = clients.get(socket.id);
+    incrementLobbySocketMessages(clientInfo?.lobbyCode || null);
     const recipientId = clientInfo?.clientId || 'unknown';
     log(`[MESSAGE ENVOYÉ] À: ${recipientId}, Type: ${message.type}`);
     socket.emit('message', message);
@@ -735,6 +773,7 @@ io.on('connection', (socket) => {
   log(`[CONNEXION] Nouveau client connecté: ${clientId}`);
 
   socket.on('message', (raw) => {
+    incrementTotalSocketMessages();
     const rawPreview = typeof raw === 'string' ? raw.substring(0, 200) : JSON.stringify(raw).substring(0, 200);
     log(`[MESSAGE BRUT REÇU] ClientId: ${clientId}, Taille: ${rawPreview.length} caractères, Contenu: ${rawPreview}`);
     
@@ -757,6 +796,9 @@ io.on('connection', (socket) => {
     }
 
     log(`[MESSAGE REÇU] ClientId: ${clientId}, Type: ${type}, Payload:`, payload);
+    const clientInfo = clients.get(socket.id);
+    const lobbyCodeForMessage = getLobbyCodeFromMessage(type, payload, clientInfo);
+    incrementLobbySocketMessages(lobbyCodeForMessage);
 
     if (type === 'lobby:create') {
       let code = generateCode();
@@ -772,9 +814,11 @@ io.on('connection', (socket) => {
 
       lobby.players.set(clientId, { id: clientId, name: payload?.playerName || 'Host', isHost: true });
       lobbies.set(code, lobby);
+      lobbySocketMessageCounts.set(code, lobbySocketMessageCounts.get(code) || 0);
       clients.get(socket.id).lobbyCode = code;
 
       log(`[LOBBY CRÉÉ] Code: ${code}, Host: ${clientId}, Nom: ${payload?.playerName || 'Host'}`);
+      incrementLobbySocketMessages(code);
 
       send(socket, {
         type: 'lobby:created',
@@ -1117,6 +1161,7 @@ io.on('connection', (socket) => {
         
         // Supprimer le lobby
         lobbies.delete(code);
+      lobbySocketMessageCounts.delete(code);
       } else {
         // Joueur normal qui quitte
         lobby.players.delete(playerId);
@@ -1186,6 +1231,7 @@ io.on('connection', (socket) => {
                   });
                   
                   lobbies.delete(lobbyCode);
+                  lobbySocketMessageCounts.delete(lobbyCode);
                   awayHosts.delete(lobbyCode);
                 }
               }
@@ -1257,6 +1303,7 @@ io.on('connection', (socket) => {
             }
             
             lobbies.delete(lobbyCode);
+            lobbySocketMessageCounts.delete(lobbyCode);
             disconnectedHosts.delete(lobbyCode);
           }
         }, 5 * 60 * 1000); // 5 minutes

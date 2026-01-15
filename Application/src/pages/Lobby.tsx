@@ -532,21 +532,6 @@ const Lobby: React.FC = () => {
                   radius={gameDetails.map_radius || 1000}
                   pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
                 />
-                {props.map((objective: GameProp) => (
-                  <Marker
-                    key={objective.id_prop}
-                    position={[
-                      parseFloat(objective.latitude || '0'),
-                      parseFloat(objective.longitude || '0')
-                    ]}
-                    icon={L.divIcon({
-                      className: 'custom-div-icon',
-                      html: `<div style="background-color: red; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-                      iconSize: [20, 20],
-                      iconAnchor: [10, 10]
-                    })}
-                  />
-                ))}
                 {gameDetails.start_zone_latitude && gameDetails.start_zone_longitude && (
                   <>
                     <Marker

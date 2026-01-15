@@ -19,7 +19,7 @@ import {
     IonToast,
     IonModal,
 } from '@ionic/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { useGameSession } from '../contexts/GameSessionContext';
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Circle, Polyline } from 'react-leaflet';
@@ -64,7 +64,8 @@ const ResizeMap = () => {
 
 const CreateLobby: React.FC = () => {
   const history = useHistory();
-  const { createLobby, playerName, setPlayerName } = useGameSession();
+  const { createLobby, playerName, setPlayerName, lobbyCode, disconnectSocket } = useGameSession();
+  const hasDisconnectedSocketRef = useRef(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<[number, number] | null>(null);
   const [userPosition, setUserPosition] = useState<[number, number] | null>(null);
@@ -96,6 +97,13 @@ const CreateLobby: React.FC = () => {
       history.replace('/home');
     }
   }, [history]);
+
+  useEffect(() => {
+    if (!lobbyCode && !hasDisconnectedSocketRef.current) {
+      hasDisconnectedSocketRef.current = true;
+      disconnectSocket();
+    }
+  }, [disconnectSocket, lobbyCode]);
 
   // Initialize displayName with playerName from context
   useEffect(() => {
