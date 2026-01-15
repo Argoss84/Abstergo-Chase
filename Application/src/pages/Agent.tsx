@@ -59,7 +59,8 @@ const Agent: React.FC = () => {
     joinLobby,
     updateGameDetails,
     updatePlayer,
-    isHost
+    isHost,
+    requestLatestState
   } = useGameSession();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
   const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
@@ -77,6 +78,7 @@ const Agent: React.FC = () => {
   const routineIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   const [objectiveCirclesInitialized, setObjectiveCirclesInitialized] = useState<boolean>(false);
+  const objectiveCirclesSyncRef = useRef<number | null>(null);
   const [gameCode, setGameCode] = useState<string | null>(() => {
     try {
       const params = new URLSearchParams(location.search);
@@ -416,8 +418,9 @@ const Agent: React.FC = () => {
     const storedCircles = getStoredObjectiveCircles(gameCode);
     if (!storedCircles) return;
     applyObjectiveCircles(storedCircles, gameCode);
+    updateGameDetails({ objective_circles: storedCircles });
     console.log(`${storedCircles.length} cercles d'objectifs restaurés depuis la session de jeu`);
-  }, [isHost, gameCode, objectiveCirclesInitialized, applyObjectiveCircles]);
+  }, [isHost, gameCode, objectiveCirclesInitialized, applyObjectiveCircles, updateGameDetails]);
 
   // Synchroniser les cercles depuis l'host si disponibles
   useEffect(() => {
@@ -426,6 +429,26 @@ const Agent: React.FC = () => {
       applyObjectiveCircles(gameDetails.objective_circles, gameCode);
     }
   }, [gameDetails?.objective_circles, objectiveCirclesInitialized, applyObjectiveCircles, gameCode]);
+
+  // Si on est un joueur non-host, demander un resync si les cercles manquent
+  useEffect(() => {
+    if (isHost) return;
+    if (objectiveCirclesInitialized) return;
+    if (!gameDetails?.started) return;
+    if (gameDetails?.objective_circles && gameDetails.objective_circles.length > 0) return;
+
+    const now = Date.now();
+    const lastRequest = objectiveCirclesSyncRef.current;
+    if (lastRequest && now - lastRequest < 5000) return;
+    objectiveCirclesSyncRef.current = now;
+    requestLatestState();
+  }, [
+    isHost,
+    objectiveCirclesInitialized,
+    gameDetails?.started,
+    gameDetails?.objective_circles,
+    requestLatestState
+  ]);
 
   // Calculer les cercles d'objectifs une seule fois au démarrage de la partie (host)
   useEffect(() => {
@@ -440,6 +463,7 @@ const Agent: React.FC = () => {
     const storedCircles = getStoredObjectiveCircles(gameCode);
     if (storedCircles) {
       applyObjectiveCircles(storedCircles, gameCode);
+      updateGameDetails({ objective_circles: storedCircles });
       console.log(`${storedCircles.length} cercles d'objectifs restaurés depuis la session de jeu`);
       return;
     }

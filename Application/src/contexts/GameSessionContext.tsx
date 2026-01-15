@@ -9,6 +9,7 @@ interface GameSessionContextValue extends SessionState {
   updateGameDetails: (partial: Partial<GameDetails>) => Promise<void>;
   updatePlayer: (playerId: string, partial: Partial<Player>) => Promise<void>;
   updateProp: (propId: number, partial: Partial<GameProp>) => Promise<void>;
+  requestLatestState: () => Promise<void>;
   setPlayerName: (name: string) => void;
   clearSession: () => void;
   leaveLobby: () => void;
@@ -34,6 +35,7 @@ export const GameSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     updateGameDetails: async (partial) => gameSessionService.updateGameDetails(partial),
     updatePlayer: async (playerId, partial) => gameSessionService.updatePlayer(playerId, partial),
     updateProp: async (propId, partial) => gameSessionService.updateProp(propId, partial),
+    requestLatestState: async () => gameSessionService.requestLatestState(),
     setPlayerName: (name: string) => gameSessionService.setPlayerName(name),
     clearSession: () => gameSessionService.clearSession(),
     leaveLobby: () => gameSessionService.leaveLobby(),

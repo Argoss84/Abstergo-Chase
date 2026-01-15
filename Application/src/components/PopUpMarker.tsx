@@ -3,6 +3,15 @@ import { Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import { GameProp } from './Interfaces';
 
+const logoAssets = import.meta.glob('../ressources/logo/*.png', {
+  eager: true,
+  import: 'default',
+}) as Record<string, string>;
+
+const getLogoUrl = (filename: string) =>
+  logoAssets[`../ressources/logo/${filename}`] ||
+  logoAssets['../ressources/logo/joueur_1.png'];
+
 interface PopUpMarkerProps {
   position: [number, number];
   type: 'objective' | 'start-zone' | 'start-zone-rogue' | 'player';
@@ -47,12 +56,14 @@ const PopUpMarker: React.FC<PopUpMarkerProps> = ({
           size: [20, 20],
           anchor: [10, 10],
         };
-      case 'player':
+      case 'player': {
+        const logoUrl = getLogoUrl(playerLogo);
         return {
-          html: `<img src="/src/ressources/logo/${playerLogo}" style="width: 30px; height: 30px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);" />`,
+          html: `<img src="${logoUrl}" style="width: 30px; height: 30px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);" />`,
           size: [30, 30],
           anchor: [15, 15],
         };
+      }
       default:
         return {
           html: `<div style="background-color: gray; width: 15px; height: 15px; border-radius: 50%; border: 2px solid white;"></div>`,
@@ -152,4 +163,24 @@ const PopUpMarker: React.FC<PopUpMarkerProps> = ({
   );
 };
 
-export default PopUpMarker; 
+const arePlayerMarkersEqual = (
+  prev: PopUpMarkerProps,
+  next: PopUpMarkerProps,
+) => {
+  if (prev.type !== 'player' || next.type !== 'player') {
+    return false;
+  }
+
+  return (
+    prev.position[0] === next.position[0] &&
+    prev.position[1] === next.position[1] &&
+    prev.playerLogo === next.playerLogo &&
+    prev.id === next.id &&
+    prev.label === next.label &&
+    prev.role === next.role &&
+    prev.status === next.status &&
+    prev.isSelf === next.isSelf
+  );
+};
+
+export default React.memo(PopUpMarker, arePlayerMarkersEqual); 

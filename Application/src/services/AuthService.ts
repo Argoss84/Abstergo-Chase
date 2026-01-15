@@ -17,7 +17,7 @@ class AuthService {
     // Restaurer le mot de passe depuis sessionStorage au démarrage
     this.restorePassword();
     if (this.IS_LOCALHOST) {
-      this.password = 'test123'|| 'local';
+      this.password = this.ENV_PASSWORD ?? 'test123';
       this.persistPassword();
       return;
     }
@@ -27,7 +27,7 @@ class AuthService {
   async verifyPassword(password: string): Promise<boolean> {
     try {
       if (this.IS_LOCALHOST) {
-        this.password = "test123" || 'local';
+        this.password = this.ENV_PASSWORD ?? 'test123';
         this.persistPassword();
         return true;
       }

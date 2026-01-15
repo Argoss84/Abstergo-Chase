@@ -444,6 +444,8 @@ class GameSessionService {
       // Le host a déjà l'état, demander juste un refresh des connexions WebRTC
       this.broadcastState();
     } else {
+      // Demande un resync via socket pour garantir un fallback
+      this.requestResync('manual-state-request');
       this.sendAction('action:request-state', {});
     }
   }
