@@ -78,7 +78,14 @@ const Agent: React.FC = () => {
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   const [objectiveCirclesInitialized, setObjectiveCirclesInitialized] = useState<boolean>(false);
   const [currentUserIsAdmin, setCurrentUserIsAdmin] = useState<boolean>(false);
-  const [gameCode, setGameCode] = useState<string | null>(null);
+  const [gameCode, setGameCode] = useState<string | null>(() => {
+    try {
+      const params = new URLSearchParams(location.search);
+      return params.get('code');
+    } catch {
+      return null;
+    }
+  });
   
   // États pour le compte à rebours
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -105,6 +112,19 @@ const Agent: React.FC = () => {
   
   // Texte pour le QR code (email + code de partie)
   const [qrCodeText, setQrCodeText] = useState<string>('');
+
+  const buildObjectiveCirclesKey = (code: string) => `objectiveCircles:${code}`;
+  const objectiveCirclesBootstrapRef = useRef(false);
+  const getStoredObjectiveCircles = (code: string): ObjectiveCircle[] | null => {
+    try {
+      const stored = localStorage.getItem(buildObjectiveCirclesKey(code));
+      if (!stored) return null;
+      const parsed = JSON.parse(stored) as ObjectiveCircle[];
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
 
   // Fonction helper pour gérer les erreurs avec l'email de l'utilisateur
   const handleErrorWithUser = async (errorMessage: string, error?: any, context?: string) => {
@@ -386,20 +406,6 @@ const Agent: React.FC = () => {
         if (sessionGameDetails) {
           setGameDetails(sessionGameDetails);
           setCurrentPlayerId(playerId);
-
-          if (sessionGameDetails.props) {
-            const circles = sessionGameDetails.props.map((prop: GameProp) => ({
-              id_prop: prop.id_prop,
-              center: generateRandomPointInCircle(
-                [parseFloat(prop.latitude || '0'), parseFloat(prop.longitude || '0')],
-                prop.detection_radius || 0
-              ),
-              radius: prop.detection_radius || 0
-            }));
-            setObjectiveCircles(circles);
-            setObjectiveCirclesInitialized(true);
-            console.log(`${circles.length} cercles d'objectifs initialisés`);
-          }
         }
       } catch (err) {
         await handleErrorWithUser('Erreur lors du chargement de la partie', err, ERROR_CONTEXTS.DATABASE);
@@ -410,6 +416,49 @@ const Agent: React.FC = () => {
       fetchGameDetails();
     }
   }, [location.search, playerId, playerName, sessionGameDetails]);
+
+  // Récupérer les cercles stockés pour un rafraîchissement de page
+  useEffect(() => {
+    if (!gameCode || objectiveCirclesInitialized) return;
+
+    const storedCircles = getStoredObjectiveCircles(gameCode);
+    if (!storedCircles) return;
+    setObjectiveCircles(storedCircles);
+    setObjectiveCirclesInitialized(true);
+    console.log(`${storedCircles.length} cercles d'objectifs restaurés depuis la session de jeu`);
+  }, [gameCode, objectiveCirclesInitialized]);
+
+  // Calculer les cercles d'objectifs une seule fois au démarrage de la partie
+  useEffect(() => {
+    if (!gameDetails?.started || !gameDetails.props || !gameCode || objectiveCirclesInitialized) {
+      return;
+    }
+    if (objectiveCirclesBootstrapRef.current) {
+      return;
+    }
+    objectiveCirclesBootstrapRef.current = true;
+
+    const storedCircles = getStoredObjectiveCircles(gameCode);
+    if (storedCircles) {
+      setObjectiveCircles(storedCircles);
+      setObjectiveCirclesInitialized(true);
+      console.log(`${storedCircles.length} cercles d'objectifs restaurés depuis la session de jeu`);
+      return;
+    }
+
+    const circles = gameDetails.props.map((prop: GameProp) => ({
+      id_prop: prop.id_prop,
+      center: generateRandomPointInCircle(
+        [parseFloat(prop.latitude || '0'), parseFloat(prop.longitude || '0')],
+        prop.detection_radius || 0
+      ),
+      radius: prop.detection_radius || 0
+    }));
+    setObjectiveCircles(circles);
+    setObjectiveCirclesInitialized(true);
+    localStorage.setItem(buildObjectiveCirclesKey(gameCode), JSON.stringify(circles));
+    console.log(`${circles.length} cercles d'objectifs initialisés`);
+  }, [gameDetails?.started, gameDetails?.props, objectiveCirclesInitialized, gameCode]);
 
   // Déterminer si l'utilisateur courant est admin
   useEffect(() => {
@@ -668,11 +717,10 @@ const Agent: React.FC = () => {
                 <Polyline
                   positions={routePath}
                   pathOptions={{
-                    color: '#00ff41',
+                    color: 'blue',
                     weight: 4,
                     opacity: 0.9,
-                    dashArray: '10, 5',
-                    className: 'neon-pulse-route'
+                    className: 'neon-pulse-route-agent'
                   }}
                 />
               )}

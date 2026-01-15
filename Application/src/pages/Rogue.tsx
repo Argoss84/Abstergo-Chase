@@ -750,10 +750,9 @@ const Rogue: React.FC = () => {
                  <Polyline
                    positions={routePath}
                    pathOptions={{
-                     color: '#00ff41',
+                     color: 'green',
                      weight: 4,
                      opacity: 0.9,
-                     dashArray: '10, 5',
                      className: 'neon-pulse-route'
                    }}
                  />

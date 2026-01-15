@@ -160,6 +160,7 @@ class GameSessionService {
     
     // Nettoyer localStorage
     localStorage.removeItem(SESSION_STORAGE_KEY);
+    this.clearObjectiveCirclesSession();
     
     // Réinitialiser la session
     this.resetSession();
@@ -179,6 +180,7 @@ class GameSessionService {
     
     // Nettoyer localStorage
     localStorage.removeItem(SESSION_STORAGE_KEY);
+    this.clearObjectiveCirclesSession();
     
     // Nettoyer les connexions mais garder le socket
     this.cleanupConnections();
@@ -217,6 +219,7 @@ class GameSessionService {
         console.log('Nettoyage de la session existante avant création d\'un nouveau lobby');
         this.cleanupConnections();
         localStorage.removeItem(SESSION_STORAGE_KEY);
+        this.clearObjectiveCirclesSession();
         // Réinitialiser l'état mais garder le nom du joueur
         const playerName = this.state.playerName;
         this.state = {
@@ -761,6 +764,7 @@ class GameSessionService {
   private resetSession() {
     this.cleanupConnections();
     localStorage.removeItem(SESSION_STORAGE_KEY);
+    this.clearObjectiveCirclesSession();
     this.updateState({
       lobbyCode: null,
       playerId: null,
@@ -1178,6 +1182,28 @@ class GameSessionService {
     this.hostChannel?.close();
     this.hostChannel = null;
     this.reconnectAttempts.clear();
+  }
+
+  private clearObjectiveCirclesSession() {
+    if (typeof window === 'undefined') return;
+    try {
+      const prefixes = ['objectiveCircles:'];
+      const purge = (storage: Storage) => {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < storage.length; i += 1) {
+          const key = storage.key(i);
+          if (key && prefixes.some((prefix) => key.startsWith(prefix))) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach((key) => storage.removeItem(key));
+      };
+
+      purge(localStorage);
+      purge(sessionStorage);
+    } catch (_) {
+      // Erreur silencieuse
+    }
   }
 
   private getIceServers(): RTCIceServer[] {

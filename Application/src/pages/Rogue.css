@@ -228,15 +228,15 @@
 @keyframes neonPulse {
   0% {
     opacity: 0.3;
-    filter: drop-shadow(0 0 5px #00ff41) drop-shadow(0 0 10px #00ff41);
+    filter: drop-shadow(0 0 5px #008000) drop-shadow(0 0 10px #008000);
   }
   50% {
     opacity: 1;
-    filter: drop-shadow(0 0 10px #00ff41) drop-shadow(0 0 20px #00ff41) drop-shadow(0 0 30px #00ff41);
+    filter: drop-shadow(0 0 10px #008000) drop-shadow(0 0 20px #008000) drop-shadow(0 0 30px #008000);
   }
   100% {
     opacity: 0.3;
-    filter: drop-shadow(0 0 5px #00ff41) drop-shadow(0 0 10px #00ff41);
+    filter: drop-shadow(0 0 5px #008000) drop-shadow(0 0 10px #008000);
   }
 }
 
@@ -246,9 +246,9 @@
 
 /* Style spécifique pour la ligne de route avec effet néon */
 .leaflet-interactive.neon-pulse-route {
-  stroke: #00ff41 !important;
+  stroke: #008000 !important;
   stroke-width: 2px !important;
-  filter: drop-shadow(0 0 3px #00ff41);
+  filter: drop-shadow(0 0 3px #008000);
 }
 
 /* Routine controls styles */

@@ -178,30 +178,30 @@
 }
 
 /* Animation pour l'effet néon pulsant sur la route */
-@keyframes neonPulse {
+@keyframes neonPulseAgent {
   0% {
     opacity: 0.3;
-    filter: drop-shadow(0 0 5px #0004ff) drop-shadow(0 0 10px #0004ff);
+    filter: drop-shadow(0 0 5px #0000ff) drop-shadow(0 0 10px #0000ff);
   }
   50% {
     opacity: 1;
-    filter: drop-shadow(0 0 10px #0004ff) drop-shadow(0 0 20px #0004ff) drop-shadow(0 0 30px #0004ff);
+    filter: drop-shadow(0 0 10px #0000ff) drop-shadow(0 0 20px #0000ff) drop-shadow(0 0 30px #0000ff);
   }
   100% {
     opacity: 0.3;
-    filter: drop-shadow(0 0 5px #0004ff) drop-shadow(0 0 10px #0004ff);
+    filter: drop-shadow(0 0 5px #0000ff) drop-shadow(0 0 10px #0000ff);
   }
 }
 
-.neon-pulse-route {
-  animation: neonPulse 2s ease-in-out infinite;
+.neon-pulse-route-agent {
+  animation: neonPulseAgent 2s ease-in-out infinite;
 }
 
 /* Style spécifique pour la ligne de route avec effet néon */
-.leaflet-interactive.neon-pulse-route {
-  stroke: #0004ff !important;
+.leaflet-interactive.neon-pulse-route-agent {
+  stroke: #0000ff !important;
   stroke-width: 2px !important;
-  filter: drop-shadow(0 0 3px #0004ff);
+  filter: drop-shadow(0 0 3px #0000ff);
 }
 
 /* Style pour le compteur de distance dans le header */
