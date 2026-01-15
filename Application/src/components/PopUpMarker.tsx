@@ -9,6 +9,10 @@ interface PopUpMarkerProps {
   data?: GameProp;
   playerLogo?: string;
   id?: string | number;
+  label?: string;
+  role?: string | null;
+  status?: string | null;
+  isSelf?: boolean;
 }
 
 const PopUpMarker: React.FC<PopUpMarkerProps> = ({ 
@@ -16,7 +20,11 @@ const PopUpMarker: React.FC<PopUpMarkerProps> = ({
   type, 
   data, 
   playerLogo = 'joueur_1.png',
-  id 
+  id,
+  label,
+  role,
+  status,
+  isSelf = false
 }) => {
   // Configuration des icônes selon le type
   const getIconConfig = () => {
@@ -98,8 +106,10 @@ const PopUpMarker: React.FC<PopUpMarkerProps> = ({
       case 'player':
         return (
           <div className="player-popup">
-            <h3>👤 Votre Position</h3>
-            <p><strong>Type:</strong> Position actuelle du joueur</p>
+            <h3>👤 {isSelf ? 'Votre position' : (label || 'Joueur')}</h3>
+            <p><strong>Type:</strong> {isSelf ? 'Position actuelle du joueur' : 'Position du joueur'}</p>
+            {!isSelf && role && <p><strong>Rôle:</strong> {role}</p>}
+            {status && <p><strong>Statut:</strong> {status}</p>}
             <p><strong>Coordonnées:</strong></p>
             <p>Lat: {position[0].toFixed(6)}</p>
             <p>Lng: {position[1].toFixed(6)}</p>

@@ -11,11 +11,11 @@ import {
   isPlayerInStartZone,
   fetchRoute
 } from '../utils/utils';
-import { updatePlayerPosition, updatePlayerInStartZone, updateGameData } from '../utils/PlayerUtils';
+import { updatePlayerPosition, updatePlayerInStartZone } from '../utils/PlayerUtils';
 import { updateGameWinnerType } from '../utils/AdminUtils';
 import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, radioOutline, settings, skullOutline } from 'ionicons/icons';
 import './Rogue.css';
-import { GameProp, GameDetails, ObjectiveCircle } from '../components/Interfaces';
+import { GameProp, GameDetails, Player } from '../components/Interfaces';
 import PopUpMarker from '../components/PopUpMarker';
 import Compass from '../components/Compass';
 import QRCode from '../components/QRCode';
@@ -65,7 +65,6 @@ const Rogue: React.FC = () => {
   // États pour le compte à rebours
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isCountdownActive, setIsCountdownActive] = useState<boolean>(false);
-  const [currentUserIsAdmin, setCurrentUserIsAdmin] = useState<boolean>(false);
   const [gameCode, setGameCode] = useState<string | null>(null);
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
@@ -75,7 +74,6 @@ const Rogue: React.FC = () => {
   const [routineExecutionCount, setRoutineExecutionCount] = useState<number>(0);
   const routineIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
-  const [objectivePropsInitialized, setObjectivePropsInitialized] = useState<boolean>(false);
   
   // États pour l'itinéraire en phase de convergence
   const [routePath, setRoutePath] = useState<[number, number][]>([]);
@@ -110,6 +108,27 @@ const Rogue: React.FC = () => {
   
   // Texte pour le QR code (email + code de partie)
   const [qrCodeText, setQrCodeText] = useState<string>('');
+
+  const getPlayerLogo = useCallback((playerIdValue: string) => {
+    const hash = Array.from(playerIdValue).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const logoNumber = (hash % 6) + 1;
+    return `joueur_${logoNumber}.png`;
+  }, []);
+
+  const isPlayerVisible = useCallback((player: Player) => {
+    if (player.status === 'disconnected') return false;
+    if (player.status === 'CAPTURED') return false;
+    const role = (player.role || '').trim().toUpperCase();
+    if (role === 'AGENT') return false;
+    return true;
+  }, []);
+
+  const getPlayerMarkerPosition = useCallback((player: Player): [number, number] | null => {
+    if (player.latitude && player.longitude) {
+      return [parseFloat(player.latitude), parseFloat(player.longitude)];
+    }
+    return null;
+  }, []);
 
   // Fonction helper pour gérer les erreurs avec l'email de l'utilisateur
   const handleErrorWithUser = async (errorMessage: string, error?: any, context?: string) => {
@@ -265,7 +284,6 @@ const Rogue: React.FC = () => {
         started: true,
         is_converging_phase: false
       });
-      setGameDetails(prev => prev ? { ...prev, started: true, is_converging_phase: false } as any : prev);
       toast.success('🚀 Partie démarrée');
     } catch (error) {
       await handleErrorWithUser('Erreur lors du démarrage de la partie', error, ERROR_CONTEXTS.GAME_START);
@@ -291,16 +309,7 @@ const Rogue: React.FC = () => {
         setQrCodeText(`${playerId};${code}`);
 
         if (sessionGameDetails) {
-          setGameDetails(sessionGameDetails);
           setCurrentPlayerId(playerId);
-          const me = sessionGameDetails.players?.find((p) => p.id_player === playerId);
-          setCurrentUserIsAdmin(!!me?.is_admin || isHost);
-
-          if (sessionGameDetails.props) {
-            setObjectiveProps(sessionGameDetails.props);
-            setObjectivePropsInitialized(true);
-            console.log(`${sessionGameDetails.props.length} objectifs initialisés`);
-          }
         }
       } catch (err) {
         await handleErrorWithUser('Erreur lors du chargement de la partie', err, ERROR_CONTEXTS.DATABASE);
@@ -312,6 +321,17 @@ const Rogue: React.FC = () => {
     }
   }, [location.search, playerId, sessionGameDetails, playerName, isHost]);
 
+  useEffect(() => {
+    if (sessionGameDetails) {
+      setGameDetails(sessionGameDetails);
+      if (sessionGameDetails.props) {
+        setObjectiveProps(sessionGameDetails.props);
+        console.log(`${sessionGameDetails.props.length} objectifs synchronisés`);
+      }
+    }
+  }, [sessionGameDetails]);
+
+
   // Handler pour la fin de partie
   const handleGameEnd = async () => {
     console.log('⏰ TEMPS ÉCOULÉ - Fin de la partie !');
@@ -320,15 +340,7 @@ const Rogue: React.FC = () => {
     setIsCountdownActive(false);
     setCountdown(0);
         
-    let isCurrentPlayerAdmin = false;
-    
-    if (currentPlayerId) {
-      const playerById = gameDetails?.players?.find(
-        player => player.id_player === currentPlayerId
-      );
-      isCurrentPlayerAdmin = playerById?.is_admin || false;
-    }
-    if (isCurrentPlayerAdmin) {
+    if (isHost) {
       console.log('👑 ADMIN - Fin de partie détectée');
       
       // Mettre à jour remaining_time=0 puis winner_type à "ROGUE" car le temps est écoulé
@@ -398,8 +410,17 @@ const Rogue: React.FC = () => {
     }
   }, []);
 
+  useEffect(() => {
+    if (currentPosition && currentPlayerId) {
+      updatePlayerPosition(currentPlayerId, currentPosition[0], currentPosition[1]);
+    }
+  }, [currentPosition, currentPlayerId]);
+
   // Effet pour gérer le compte à rebours
   useEffect(() => {
+    if (!isHost) {
+      return;
+    }
     if (isCountdownActive && countdown !== null && countdown > 0) {
       // Nettoyer l'intervalle précédent s'il existe
       if (countdownIntervalRef.current) {
@@ -438,22 +459,25 @@ const Rogue: React.FC = () => {
         countdownIntervalRef.current = null;
       }
     };
-  }, [isCountdownActive, countdown]);
+  }, [isCountdownActive, countdown, isHost]);
 
   // Synchroniser remaining_time côté serveur pour l'admin à chaque tick
   useEffect(() => {
     const pushRemainingTime = async () => {
       try {
-        if (currentUserIsAdmin && isCountdownActive && countdown !== null && gameCode) {
+        if (isHost && isCountdownActive && countdown !== null && gameCode) {
           await updateGameDetails({ remaining_time: countdown });
         }
       } catch (_) {}
     };
     pushRemainingTime();
-  }, [countdown, isCountdownActive, currentUserIsAdmin, gameCode]);
+  }, [countdown, isCountdownActive, isHost, gameCode]);
 
   // Effet pour initialiser le compte à rebours quand la partie démarre (privilégier remaining_time)
   useEffect(() => {
+    if (!isHost) {
+      return;
+    }
     if (gameDetails?.started && !isCountdownActive) {
       console.log('🚀 Partie démarrée - Initialisation du compte à rebours');
       const totalSeconds = (gameDetails.remaining_time ?? gameDetails.duration) || 0;
@@ -462,7 +486,19 @@ const Rogue: React.FC = () => {
         setIsCountdownActive(true);
       }
     }
-  }, [gameDetails?.started, gameDetails?.duration, gameDetails?.remaining_time, isCountdownActive]);
+  }, [gameDetails?.started, gameDetails?.duration, gameDetails?.remaining_time, isCountdownActive, isHost]);
+
+  useEffect(() => {
+    if (!isHost && gameDetails?.remaining_time !== undefined && gameDetails?.remaining_time !== null) {
+      setCountdown(gameDetails.remaining_time);
+    }
+  }, [gameDetails?.remaining_time, isHost]);
+
+  useEffect(() => {
+    if (!isHost && (gameDetails?.remaining_time === 0 || gameDetails?.winner_type)) {
+      history.push('/end-game');
+    }
+  }, [gameDetails?.remaining_time, gameDetails?.winner_type, isHost, history]);
 
   // Fonction de routine périodique
   const executeRoutine = useCallback(async () => {
@@ -480,31 +516,7 @@ const Rogue: React.FC = () => {
       }
     }
     
-    // 2. Mettre à jour les données de la partie
-    const params = new URLSearchParams(location.search);
-    const code = params.get('code');
-    if (code) {
-      const updatedGame = await updateGameData(code);
-      if (updatedGame) {
-        setGameDetails(updatedGame);
-        // Synchroniser le compte à rebours avec le serveur (UNIQUEMENT pour non-admin)
-        if (!currentUserIsAdmin) {
-          const serverRemaining = updatedGame.remaining_time;
-          if (serverRemaining !== null && serverRemaining !== undefined) {
-            if (isCountdownActive) {
-              if (countdown !== serverRemaining) {
-                setCountdown(serverRemaining);
-              }
-            } else if (updatedGame.started && serverRemaining > 0) {
-              setCountdown(serverRemaining);
-              setIsCountdownActive(true);
-            }
-          }
-        }
-      }
-    }
-    
-    // 3. Vérifier l'état de la partie
+    // 2. Vérifier l'état de la partie
     let gameState = 'Phase normale';
     let distanceToStart = null;
     let isInStartZone = false;
@@ -572,7 +584,7 @@ const Rogue: React.FC = () => {
     // Console.log unifié avec toutes les informations de la routine
     console.log(`🔄 Routine #${routineExecutionCount} | État: ${gameState} | Distance: ${distanceToStart ? distanceToStart.toFixed(0) + 'm' : 'N/A'} | Zone départ: ${isInStartZone ? 'OUI' : 'NON'} | Objectif: ${objectiveInRange ? 'À PORTÉE' : 'HORS PORTÉE'}`);
     
-     }, [currentPosition, gameDetails, objectiveProps, routineExecutionCount, currentPlayerId, location.search]);
+     }, [currentPosition, gameDetails, objectiveProps, routineExecutionCount, currentPlayerId]);
 
 
 
@@ -642,9 +654,9 @@ const Rogue: React.FC = () => {
       <IonHeader>
         <IonToolbar>
           <IonTitle>Rogue</IonTitle>
-          {countdown !== null && isCountdownActive ? (
+          {((isHost && countdown !== null && isCountdownActive) || (!isHost && gameDetails?.remaining_time !== null && gameDetails?.remaining_time !== undefined)) ? (
             <IonLabel slot="primary" className="duration-display countdown-active">
-              ⏰ {Math.floor(countdown / 60)}:{(countdown % 60).toString().padStart(2, '0')}
+              ⏰ {Math.floor(((isHost ? countdown : gameDetails?.remaining_time) || 0) / 60)}:{(((isHost ? countdown : gameDetails?.remaining_time) || 0) % 60).toString().padStart(2, '0')}
             </IonLabel>
           ) : gameDetails?.duration ? (
             <IonLabel slot="primary" className="duration-display">
@@ -764,8 +776,30 @@ const Rogue: React.FC = () => {
                     type="player"
                     playerLogo={playerLogo}
                     id="player-position"
+                    label={playerName || 'Vous'}
+                    isSelf={true}
                   />
                 )}
+              {(gameDetails?.players || [])
+                .filter((player) => player.id_player !== playerId)
+                .filter(isPlayerVisible)
+                .map((player) => {
+                  const position = getPlayerMarkerPosition(player);
+                  if (!position) return null;
+                  return (
+                    <PopUpMarker
+                      key={`player-${player.id_player}`}
+                      position={position}
+                      type="player"
+                      playerLogo={getPlayerLogo(player.id_player)}
+                      id={`player-${player.id_player}`}
+                      label={player.displayName || player.id_player}
+                      role={player.role}
+                      status={player.status}
+                      isSelf={false}
+                    />
+                  );
+                })}
             </MapContainer>
           </div>
         ) : (
@@ -773,7 +807,7 @@ const Rogue: React.FC = () => {
         )}
 
         {/* Bouton flottant centré pour démarrer la partie (admin uniquement) */}
-        {currentUserIsAdmin && !gameDetails?.started && Array.isArray(gameDetails?.players) && gameDetails!.players!.length > 0 && gameDetails!.players!.every(p => p.isInStartZone === true) && (
+        {isHost && !gameDetails?.started && Array.isArray(gameDetails?.players) && gameDetails!.players!.length > 0 && gameDetails!.players!.every(p => p.isInStartZone === true) && (
           <div style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 1000 }}>
             <IonButton color="success" size="large" onClick={handleAdminStartFromStartZone}>
               🚀 Démarrer maintenant

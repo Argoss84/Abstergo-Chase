@@ -5,15 +5,32 @@ class AuthService {
   private readonly SERVER_URL = window.location.hostname === 'localhost'
     ? 'http://localhost:5174'
     : 'https://ws.abstergochase.fr';
+  private readonly IS_LOCALHOST = window.location.hostname === 'localhost';
+  private readonly ENV_PASSWORD = this.IS_LOCALHOST
+    ? (import.meta.env?.VITE_SERVER_PASSWORD ||
+      import.meta.env?.VITE_AUTH_PASSWORD ||
+      import.meta.env?.VITE_MDP ||
+      null)
+    : null;
 
   constructor() {
     // Restaurer le mot de passe depuis sessionStorage au démarrage
     this.restorePassword();
+    if (this.IS_LOCALHOST) {
+      this.password = 'test123'|| 'local';
+      this.persistPassword();
+      return;
+    }
   }
 
   // Vérifier le mot de passe auprès du serveur
   async verifyPassword(password: string): Promise<boolean> {
     try {
+      if (this.IS_LOCALHOST) {
+        this.password = "test123" || 'local';
+        this.persistPassword();
+        return true;
+      }
       const response = await fetch(`${this.SERVER_URL}/api/auth`, {
         method: 'POST',
         headers: {
@@ -44,6 +61,9 @@ class AuthService {
 
   // Vérifier si l'utilisateur est authentifié
   isAuthenticated(): boolean {
+    if (this.IS_LOCALHOST) {
+      return true;
+    }
     return this.password !== null;
   }
 

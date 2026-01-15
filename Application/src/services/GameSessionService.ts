@@ -78,6 +78,12 @@ class GameSessionService {
     if (typeof window !== 'undefined') {
       // Restaurer la session si elle existe
       this.restoreSession();
+
+      if (this.state.lobbyCode && this.state.playerId) {
+        this.ensureSocket().catch(() => {
+          this.updateState({ connectionStatus: 'error' });
+        });
+      }
       
       window.addEventListener('visibilitychange', () => {
         // Gérer le changement de visibilité de la page

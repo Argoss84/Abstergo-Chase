@@ -12,11 +12,11 @@ import {
   calculateDistanceToStartZone, 
   isPlayerInStartZone 
 } from '../utils/utils';
-import { updatePlayerPosition, updatePlayerInStartZone, updateGameData } from '../utils/PlayerUtils';
+import { updatePlayerPosition, updatePlayerInStartZone } from '../utils/PlayerUtils';
 import { updateGameWinnerType } from '../utils/AdminUtils';
 import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, settings, skullOutline } from 'ionicons/icons';
 import './Agent.css';
-import { GameProp, GameDetails, ObjectiveCircle } from '../components/Interfaces';
+import { GameProp, GameDetails, ObjectiveCircle, Player } from '../components/Interfaces';
 import PopUpMarker from '../components/PopUpMarker';
 import Compass from '../components/Compass';
 import Camera from '../components/Camera';
@@ -77,7 +77,6 @@ const Agent: React.FC = () => {
   const routineIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   const [objectiveCirclesInitialized, setObjectiveCirclesInitialized] = useState<boolean>(false);
-  const [currentUserIsAdmin, setCurrentUserIsAdmin] = useState<boolean>(false);
   const [gameCode, setGameCode] = useState<string | null>(() => {
     try {
       const params = new URLSearchParams(location.search);
@@ -113,6 +112,27 @@ const Agent: React.FC = () => {
   // Texte pour le QR code (email + code de partie)
   const [qrCodeText, setQrCodeText] = useState<string>('');
 
+  const getPlayerLogo = useCallback((playerIdValue: string) => {
+    const hash = Array.from(playerIdValue).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const logoNumber = (hash % 6) + 1;
+    return `joueur_${logoNumber}.png`;
+  }, []);
+
+  const isPlayerVisible = useCallback((player: Player) => {
+    if (player.status === 'disconnected') return false;
+    if (player.status === 'CAPTURED') return false;
+    const role = (player.role || '').trim().toUpperCase();
+    if (role === 'ROGUE') return false;
+    return true;
+  }, []);
+
+  const getPlayerMarkerPosition = useCallback((player: Player): [number, number] | null => {
+    if (player.latitude && player.longitude) {
+      return [parseFloat(player.latitude), parseFloat(player.longitude)];
+    }
+    return null;
+  }, []);
+
   const buildObjectiveCirclesKey = (code: string) => `objectiveCircles:${code}`;
   const objectiveCirclesBootstrapRef = useRef(false);
   const getStoredObjectiveCircles = (code: string): ObjectiveCircle[] | null => {
@@ -125,6 +145,14 @@ const Agent: React.FC = () => {
       return null;
     }
   };
+
+  const applyObjectiveCircles = useCallback((circles: ObjectiveCircle[], code?: string | null) => {
+    setObjectiveCircles(circles);
+    setObjectiveCirclesInitialized(true);
+    if (code) {
+      localStorage.setItem(buildObjectiveCirclesKey(code), JSON.stringify(circles));
+    }
+  }, []);
 
   // Fonction helper pour gérer les erreurs avec l'email de l'utilisateur
   const handleErrorWithUser = async (errorMessage: string, error?: any, context?: string) => {
@@ -192,15 +220,7 @@ const Agent: React.FC = () => {
     setIsCountdownActive(false);
     setCountdown(0);
         
-    let isCurrentPlayerAdmin = false;
-    
-    if (currentPlayerId) {
-      const playerById = gameDetails?.players?.find(
-        player => player.id_player === currentPlayerId
-      );
-      isCurrentPlayerAdmin = playerById?.is_admin || false;
-    }
-    if (currentUserIsAdmin) {
+    if (isHost) {
       console.log('👑 ADMIN - Fin de partie détectée');
       
       // Mettre à jour remaining_time=0 et winner_type à "AGENT" car le temps est écoulé
@@ -269,31 +289,7 @@ const Agent: React.FC = () => {
       }
     }
     
-    // 2. Mettre à jour les données de la partie
-    const params = new URLSearchParams(location.search);
-    const code = params.get('code');
-    if (code) {
-      const updatedGame = await updateGameData(code);
-      if (updatedGame) {
-        setGameDetails(updatedGame);
-        // Synchroniser le compte à rebours avec le serveur (UNIQUEMENT pour non-admin)
-        if (!currentUserIsAdmin) {
-          const serverRemaining = updatedGame.remaining_time;
-          if (serverRemaining !== null && serverRemaining !== undefined) {
-            if (isCountdownActive) {
-              if (countdown !== serverRemaining) {
-                setCountdown(serverRemaining);
-              }
-            } else if (updatedGame.started && serverRemaining > 0) {
-              setCountdown(serverRemaining);
-              setIsCountdownActive(true);
-            }
-          }
-        }
-      }
-    }
-    
-    // 3. Vérifier l'état de la partie
+    // 2. Vérifier l'état de la partie
     if (gameDetails) {
       gameState = gameDetails.is_converging_phase ? 'Phase de convergence' : 'Phase normale';
     }
@@ -335,19 +331,10 @@ const Agent: React.FC = () => {
       setRoutePath(route);
     }
     
-    // 6. Gestion du compte à rebours (privilégier remaining_time, fallback durée en secondes)
-    if (gameDetails?.started && !isCountdownActive) {
-      const totalSeconds = (gameDetails.remaining_time ?? gameDetails.duration) || 0;
-      if (totalSeconds > 0) {
-        setCountdown(totalSeconds);
-        setIsCountdownActive(true);
-      }
-    }
-    
     // Console.log unifié avec toutes les informations de la routine
     console.log(`🔄 Routine #${routineExecutionCount} | État: ${gameState} | Position: ${positionInfo} | Distance: ${distanceToStart ? distanceToStart.toFixed(0) + 'm' : 'N/A'} | Zone départ: ${isInStartZone ? 'OUI' : 'NON'}`);
     
-  }, [currentPosition, gameDetails, objectiveCircles, routineExecutionCount, currentPlayerId, location.search, isCountdownActive]);
+  }, [currentPosition, gameDetails, objectiveCircles, routineExecutionCount, currentPlayerId]);
 
 
 
@@ -404,7 +391,6 @@ const Agent: React.FC = () => {
         setQrCodeText(`${playerId};${code}`);
 
         if (sessionGameDetails) {
-          setGameDetails(sessionGameDetails);
           setCurrentPlayerId(playerId);
         }
       } catch (err) {
@@ -417,20 +403,33 @@ const Agent: React.FC = () => {
     }
   }, [location.search, playerId, playerName, sessionGameDetails]);
 
-  // Récupérer les cercles stockés pour un rafraîchissement de page
   useEffect(() => {
-    if (!gameCode || objectiveCirclesInitialized) return;
+    if (sessionGameDetails) {
+      setGameDetails(sessionGameDetails);
+    }
+  }, [sessionGameDetails]);
+
+  // Récupérer les cercles stockés pour un rafraîchissement de page (host uniquement)
+  useEffect(() => {
+    if (!isHost || !gameCode || objectiveCirclesInitialized) return;
 
     const storedCircles = getStoredObjectiveCircles(gameCode);
     if (!storedCircles) return;
-    setObjectiveCircles(storedCircles);
-    setObjectiveCirclesInitialized(true);
+    applyObjectiveCircles(storedCircles, gameCode);
     console.log(`${storedCircles.length} cercles d'objectifs restaurés depuis la session de jeu`);
-  }, [gameCode, objectiveCirclesInitialized]);
+  }, [isHost, gameCode, objectiveCirclesInitialized, applyObjectiveCircles]);
 
-  // Calculer les cercles d'objectifs une seule fois au démarrage de la partie
+  // Synchroniser les cercles depuis l'host si disponibles
   useEffect(() => {
-    if (!gameDetails?.started || !gameDetails.props || !gameCode || objectiveCirclesInitialized) {
+    if (objectiveCirclesInitialized) return;
+    if (gameDetails?.objective_circles && gameDetails.objective_circles.length > 0) {
+      applyObjectiveCircles(gameDetails.objective_circles, gameCode);
+    }
+  }, [gameDetails?.objective_circles, objectiveCirclesInitialized, applyObjectiveCircles, gameCode]);
+
+  // Calculer les cercles d'objectifs une seule fois au démarrage de la partie (host)
+  useEffect(() => {
+    if (!isHost || !gameDetails?.started || !gameDetails.props || !gameCode || objectiveCirclesInitialized) {
       return;
     }
     if (objectiveCirclesBootstrapRef.current) {
@@ -440,8 +439,7 @@ const Agent: React.FC = () => {
 
     const storedCircles = getStoredObjectiveCircles(gameCode);
     if (storedCircles) {
-      setObjectiveCircles(storedCircles);
-      setObjectiveCirclesInitialized(true);
+      applyObjectiveCircles(storedCircles, gameCode);
       console.log(`${storedCircles.length} cercles d'objectifs restaurés depuis la session de jeu`);
       return;
     }
@@ -454,18 +452,24 @@ const Agent: React.FC = () => {
       ),
       radius: prop.detection_radius || 0
     }));
-    setObjectiveCircles(circles);
-    setObjectiveCirclesInitialized(true);
-    localStorage.setItem(buildObjectiveCirclesKey(gameCode), JSON.stringify(circles));
+    applyObjectiveCircles(circles, gameCode);
+    updateGameDetails({ objective_circles: circles });
     console.log(`${circles.length} cercles d'objectifs initialisés`);
-  }, [gameDetails?.started, gameDetails?.props, objectiveCirclesInitialized, gameCode]);
+  }, [isHost, gameDetails?.started, gameDetails?.props, objectiveCirclesInitialized, gameCode, applyObjectiveCircles, updateGameDetails]);
 
   // Déterminer si l'utilisateur courant est admin
   useEffect(() => {
-    const playerById = gameDetails?.players?.find(p => p.id_player === playerId);
-    const isAdmin = playerById?.is_admin || isHost;
-    setCurrentUserIsAdmin(isAdmin);
-  }, [playerId, gameDetails?.players, isHost]);
+    if (!isHost) {
+      return;
+    }
+    if (gameDetails?.started && !isCountdownActive) {
+      const totalSeconds = (gameDetails.remaining_time ?? gameDetails.duration) || 0;
+      if (totalSeconds > 0) {
+        setCountdown(totalSeconds);
+        setIsCountdownActive(true);
+      }
+    }
+  }, [gameDetails?.started, gameDetails?.duration, gameDetails?.remaining_time, isCountdownActive, isHost]);
 
   useEffect(() => {
     // Choisir un logo de joueur aléatoirement
@@ -511,6 +515,12 @@ const Agent: React.FC = () => {
     }
   }, []);
 
+  useEffect(() => {
+    if (currentPosition && currentPlayerId) {
+      updatePlayerPosition(currentPlayerId, currentPosition[0], currentPosition[1]);
+    }
+  }, [currentPosition, currentPlayerId]);
+
   // Effet pour récupérer le trajet routier en phase de convergence
   useEffect(() => {
     const updateRoute = async () => {
@@ -543,6 +553,9 @@ const Agent: React.FC = () => {
 
   // Effet pour gérer le compte à rebours
   useEffect(() => {
+    if (!isHost) {
+      return;
+    }
     if (isCountdownActive && countdown !== null && countdown > 0) {
       // Nettoyer l'intervalle précédent s'il existe
       if (countdownIntervalRef.current) {
@@ -581,19 +594,31 @@ const Agent: React.FC = () => {
         countdownIntervalRef.current = null;
       }
     };
-  }, [isCountdownActive, countdown]);
+  }, [isCountdownActive, countdown, isHost]);
 
   // Synchroniser remaining_time côté serveur pour l'admin à chaque tick
   useEffect(() => {
     const pushRemainingTime = async () => {
       try {
-        if (currentUserIsAdmin && isCountdownActive && countdown !== null && gameCode) {
+        if (isHost && isCountdownActive && countdown !== null && gameCode) {
           await updateGameDetails({ remaining_time: countdown });
         }
       } catch (_) {}
     };
     pushRemainingTime();
-  }, [countdown, isCountdownActive, currentUserIsAdmin, gameCode]);
+  }, [countdown, isCountdownActive, isHost, gameCode]);
+
+  useEffect(() => {
+    if (!isHost && gameDetails?.remaining_time !== undefined && gameDetails?.remaining_time !== null) {
+      setCountdown(gameDetails.remaining_time);
+    }
+  }, [gameDetails?.remaining_time, isHost]);
+
+  useEffect(() => {
+    if (!isHost && (gameDetails?.remaining_time === 0 || gameDetails?.winner_type)) {
+      history.push('/end-game');
+    }
+  }, [gameDetails?.remaining_time, gameDetails?.winner_type, isHost, history]);
 
   useEffect(() => {
     setRoutineInterval(2000);
@@ -604,9 +629,9 @@ const Agent: React.FC = () => {
       <IonHeader>
         <IonToolbar>
           <IonTitle>Agent</IonTitle>
-          {countdown !== null && isCountdownActive ? (
+          {((isHost && countdown !== null && isCountdownActive) || (!isHost && gameDetails?.remaining_time !== null && gameDetails?.remaining_time !== undefined)) ? (
             <IonLabel slot="primary" className="duration-display countdown-active">
-              ⏰ {Math.floor(countdown / 60)}:{(countdown % 60).toString().padStart(2, '0')}
+              ⏰ {Math.floor(((isHost ? countdown : gameDetails?.remaining_time) || 0) / 60)}:{(((isHost ? countdown : gameDetails?.remaining_time) || 0) % 60).toString().padStart(2, '0')}
             </IonLabel>
           ) : gameDetails?.duration ? (
             <IonLabel slot="primary" className="duration-display">
@@ -705,8 +730,30 @@ const Agent: React.FC = () => {
                   type="player"
                   playerLogo={playerLogo}
                   id="player-position"
+                  label={playerName || 'Vous'}
+                  isSelf={true}
                 />
               )}
+              {(gameDetails?.players || [])
+                .filter((player) => player.id_player !== playerId)
+                .filter(isPlayerVisible)
+                .map((player) => {
+                  const position = getPlayerMarkerPosition(player);
+                  if (!position) return null;
+                  return (
+                    <PopUpMarker
+                      key={`player-${player.id_player}`}
+                      position={position}
+                      type="player"
+                      playerLogo={getPlayerLogo(player.id_player)}
+                      id={`player-${player.id_player}`}
+                      label={player.displayName || player.id_player}
+                      role={player.role}
+                      status={player.status}
+                      isSelf={false}
+                    />
+                  );
+                })}
               
               {/* Affichage du trajet vers la zone de départ en phase de convergence */}
               {gameDetails.is_converging_phase && 
@@ -813,7 +860,7 @@ const Agent: React.FC = () => {
         </div>
 
         {/* Bouton flottant centré pour démarrer la partie (admin uniquement) */}
-        {currentUserIsAdmin && !gameDetails?.started && Array.isArray(gameDetails?.players) && gameDetails!.players!.length > 0 && gameDetails!.players!.every(p => p.isInStartZone === true) && (
+        {isHost && !gameDetails?.started && Array.isArray(gameDetails?.players) && gameDetails!.players!.length > 0 && gameDetails!.players!.every(p => p.isInStartZone === true) && (
           <div style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 1000 }}>
             <IonButton color="success" size="large" onClick={handleAdminStartFromStartZone}>
               🚀 Démarrer maintenant
@@ -883,11 +930,6 @@ const Agent: React.FC = () => {
                   });
 
                   toast.success('✅ Rogue capturé !');
-
-                  if (gameDetails?.code) {
-                    const updated = await updateGameData(gameDetails.code);
-                    if (updated) setGameDetails(updated);
-                  }
 
                   setIsCameraModalOpen(false);
                 } catch (err) {

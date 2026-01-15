@@ -42,6 +42,7 @@ export interface GameDetails {
   started: boolean | null;
   props?: GameProp[];
   players?: Player[];
+  objective_circles?: ObjectiveCircle[];
 }
 
 export interface ObjectiveCircle {
