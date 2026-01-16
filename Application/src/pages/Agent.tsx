@@ -1,7 +1,7 @@
 import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonButtons, IonLabel, IonModal } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { MapContainer, TileLayer, Circle, Marker, useMap, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Circle, Polyline, Polygon, Pane } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -25,29 +25,7 @@ import { useGameSession } from '../contexts/GameSessionContext';
 import { useWakeLock } from '../utils/useWakeLock';
 import { useVibration } from '../hooks/useVibration';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
-
-const ResizeMap = () => {
-  const map = useMap();
-  useEffect(() => {
-    setTimeout(() => {
-      map.invalidateSize();
-    }, 0);
-  }, [map]);
-  return null;
-};
-
-// Composant pour gérer la référence de la carte
-const MapController = ({ onMapReady }: { onMapReady: (map: L.Map) => void }) => {
-  const map = useMap();
-  
-  useEffect(() => {
-    onMapReady(map);
-  }, [map, onMapReady]);
-  
-  return null;
-};
-
-
+import { MapController, ResizeMap, useFogRings } from '../utils/GameMapUtils';
 
 const Agent: React.FC = () => {
   const history = useHistory();
@@ -716,6 +694,8 @@ const Agent: React.FC = () => {
     setRoutineInterval(2000);
   }, []);
 
+  const fogRings = useFogRings(gameDetails, 50);
+
   return (
     <IonPage>
       <IonHeader>
@@ -780,6 +760,20 @@ const Agent: React.FC = () => {
                 radius={gameDetails.map_radius || 750}
                 pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
               />
+              <Pane name="fog" style={{ zIndex: 650 }}>
+                {fogRings.map((ring, index) => (
+                  <Polygon
+                    key={`fog-ring-${index}`}
+                    positions={[ring.outer, ring.inner]}
+                    pathOptions={{
+                      stroke: false,
+                      fillColor: '#0b0f14',
+                      fillOpacity: ring.opacity,
+                      fillRule: 'evenodd'
+                    }}
+                  />
+                ))}
+              </Pane>
               {gameDetails.start_zone_latitude && gameDetails.start_zone_longitude && (
                 <>
                   <PopUpMarker
