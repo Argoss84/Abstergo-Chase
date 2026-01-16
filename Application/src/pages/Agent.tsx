@@ -135,6 +135,17 @@ const Agent: React.FC = () => {
     return null;
   }, []);
 
+  const isObjectiveCircleVisible = useCallback((circle: ObjectiveCircle) => {
+    const props = gameDetails?.props;
+    if (!props || props.length === 0) return true;
+    const prop = props.find(item => item.id_prop === circle.id_prop);
+    if (!prop) return true;
+    if (prop.visible === false) return false;
+    const state = (prop.state || '').toString().trim().toUpperCase();
+    if (state === 'CAPTURED') return false;
+    return true;
+  }, [gameDetails?.props]);
+
   const buildObjectiveCirclesKey = (code: string) => `objectiveCircles:${code}`;
   const objectiveCirclesBootstrapRef = useRef(false);
   const getStoredObjectiveCircles = (code: string): ObjectiveCircle[] | null => {
@@ -154,6 +165,23 @@ const Agent: React.FC = () => {
     if (code) {
       localStorage.setItem(buildObjectiveCirclesKey(code), JSON.stringify(circles));
     }
+  }, []);
+
+  const buildFallbackObjectiveCircles = useCallback((props: GameProp[]): ObjectiveCircle[] => {
+    return props
+      .map((prop) => {
+        const latitude = parseFloat(prop.latitude || '');
+        const longitude = parseFloat(prop.longitude || '');
+        if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
+          return null;
+        }
+        return {
+          id_prop: prop.id_prop,
+          center: [latitude, longitude] as [number, number],
+          radius: prop.detection_radius || 0
+        };
+      })
+      .filter((circle): circle is ObjectiveCircle => Boolean(circle));
   }, []);
 
   // Fonction helper pour gérer les erreurs avec l'email de l'utilisateur
@@ -481,6 +509,24 @@ const Agent: React.FC = () => {
     console.log(`${circles.length} cercles d'objectifs initialisés`);
   }, [isHost, gameDetails?.started, gameDetails?.props, objectiveCirclesInitialized, gameCode, applyObjectiveCircles, updateGameDetails]);
 
+  // Fallback: afficher des cercles basés sur les props si l'état n'est pas encore synchronisé
+  useEffect(() => {
+    if (objectiveCirclesInitialized) return;
+    if (!gameDetails?.started) return;
+    if (objectiveCircles.length > 0) return;
+    if (!gameDetails?.props || gameDetails.props.length === 0) return;
+
+    const fallbackCircles = buildFallbackObjectiveCircles(gameDetails.props);
+    if (fallbackCircles.length === 0) return;
+    setObjectiveCircles(fallbackCircles);
+  }, [
+    objectiveCirclesInitialized,
+    objectiveCircles.length,
+    gameDetails?.started,
+    gameDetails?.props,
+    buildFallbackObjectiveCircles
+  ]);
+
   // Déterminer si l'utilisateur courant est admin
   useEffect(() => {
     if (!isHost) {
@@ -740,7 +786,9 @@ const Agent: React.FC = () => {
                   />
                 </>
               )}
-              {objectiveCircles.map((circle) => (
+              {objectiveCircles
+                .filter(isObjectiveCircleVisible)
+                .map((circle) => (
                 <Circle
                   key={circle.id_prop}
                   center={circle.center}
@@ -829,6 +877,7 @@ const Agent: React.FC = () => {
                 : []),
               // Cercles d'objectifs (centres des cercles)
               ...objectiveCircles
+                .filter(isObjectiveCircleVisible)
                 .filter(circle => circle.radius > 0)
                 .map((circle, index) => ({
                   latitude: circle.center[0],
