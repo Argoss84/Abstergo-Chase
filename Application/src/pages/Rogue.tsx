@@ -669,6 +669,8 @@ const Rogue: React.FC = () => {
     }
   }, [gameDetails?.is_converging_phase]);
 
+  const visibleObjectives = objectiveProps.filter(prop => prop.visible === true);
+
   return (
     <IonPage>
       <IonHeader>
@@ -761,17 +763,18 @@ const Rogue: React.FC = () => {
                   />
                 </>
               )}
-              {objectiveProps
-                .filter(prop => prop.visible === true)
-                .map((prop) => (
+              {visibleObjectives.map((prop, index) => {
+                const objectiveName = prop.name?.trim() || `Objectif ${index + 1}`;
+                return (
                   <PopUpMarker
                     key={prop.id_prop}
                     position={[parseFloat(prop.latitude || '0'), parseFloat(prop.longitude || '0')]}
                     type="objective"
-                    data={prop}
+                    data={{ ...prop, name: objectiveName }}
                     id={prop.id_prop}
                   />
-                ))}
+                );
+              })}
                
                {/* Affichage du trajet vers la zone de départ en phase de convergence */}
                {gameDetails.is_converging_phase && 
@@ -864,12 +867,10 @@ const Rogue: React.FC = () => {
                   }]
                 : []),
               // Objectifs visibles
-              ...objectiveProps
-                .filter(prop => prop.visible === true)
-                .map((prop, index) => ({
+              ...visibleObjectives.map((prop, index) => ({
                   latitude: parseFloat(prop.latitude || '0'),
                   longitude: parseFloat(prop.longitude || '0'),
-                  label: `Objectif ${index + 1}`,
+                  label: prop.name?.trim() || `Objectif ${index + 1}`,
                   color: "#ff6b6b"
                 }))
             ]}

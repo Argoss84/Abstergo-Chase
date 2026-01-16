@@ -40,35 +40,64 @@ const PopUpMarker: React.FC<PopUpMarkerProps> = ({
     switch (type) {
       case 'objective':
         return {
-          html: `<div style="background-color: purple; width: 15px; height: 15px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-          size: [15, 15],
-          anchor: [7.5, 7.5],
+          html: `
+            <div class="cyber-marker cyber-marker-objective">
+              <span class="cyber-marker-core"></span>
+              <span class="cyber-marker-glow"></span>
+              <span class="cyber-marker-pulse"></span>
+            </div>
+          `,
+          size: [26, 26],
+          anchor: [13, 13],
         };
       case 'start-zone':
         return {
-          html: `<div style="background-color: blue; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-          size: [20, 20],
-          anchor: [10, 10],
+          html: `
+            <div class="cyber-marker cyber-marker-start">
+              <span class="cyber-marker-core"></span>
+              <span class="cyber-marker-glow"></span>
+              <span class="cyber-marker-pulse"></span>
+            </div>
+          `,
+          size: [28, 28],
+          anchor: [14, 14],
         };
       case 'start-zone-rogue':
         return {
-          html: `<div style="background-color: green; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>`,
-          size: [20, 20],
-          anchor: [10, 10],
+          html: `
+            <div class="cyber-marker cyber-marker-rogue">
+              <span class="cyber-marker-core"></span>
+              <span class="cyber-marker-glow"></span>
+              <span class="cyber-marker-pulse"></span>
+            </div>
+          `,
+          size: [28, 28],
+          anchor: [14, 14],
         };
       case 'player': {
         const logoUrl = getLogoUrl(playerLogo);
         return {
-          html: `<img src="${logoUrl}" style="width: 30px; height: 30px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);" />`,
-          size: [30, 30],
-          anchor: [15, 15],
+          html: `
+            <div class="cyber-marker cyber-marker-player">
+              <img src="${logoUrl}" class="cyber-marker-avatar" />
+              <span class="cyber-marker-ring"></span>
+              <span class="cyber-marker-pulse"></span>
+            </div>
+          `,
+          size: [34, 34],
+          anchor: [17, 17],
         };
       }
       default:
         return {
-          html: `<div style="background-color: gray; width: 15px; height: 15px; border-radius: 50%; border: 2px solid white;"></div>`,
-          size: [15, 15],
-          anchor: [7.5, 7.5],
+          html: `
+            <div class="cyber-marker cyber-marker-default">
+              <span class="cyber-marker-core"></span>
+              <span class="cyber-marker-glow"></span>
+            </div>
+          `,
+          size: [24, 24],
+          anchor: [12, 12],
         };
     }
   };
@@ -155,7 +184,7 @@ const PopUpMarker: React.FC<PopUpMarkerProps> = ({
       })}
     >
       {popupContent && (
-        <Popup>
+        <Popup className={`cyber-popup cyber-popup-${type}`}>
           {popupContent}
         </Popup>
       )}

@@ -79,137 +79,201 @@
   margin-right: 16px;
 }
 
-/* Style pour les popups d'objectifs */
-.objective-popup {
-  text-align: center;
-  min-width: 200px;
+/* Cyberpunk marker styles */
+.custom-div-icon {
+  background: transparent;
+  border: none;
 }
 
-.objective-popup h3 {
-  color: #6a0dad;
-  margin: 0 0 10px 0;
-  font-size: 16px;
-  font-weight: bold;
+.cyber-marker {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 10, 20, 0.85);
+  border: 1px solid rgba(0, 255, 154, 0.35);
+  box-shadow: 0 0 10px rgba(0, 255, 154, 0.35), inset 0 0 8px rgba(0, 255, 154, 0.2);
+  color: #00ff9a;
 }
 
-.objective-popup p {
-  margin: 5px 0;
-  font-size: 12px;
-  color: #333;
+.cyber-marker-core {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 10px currentColor;
+  z-index: 2;
 }
 
-.objective-popup strong {
-  color: #6a0dad;
-  font-weight: bold;
+.cyber-marker-glow,
+.cyber-marker-pulse,
+.cyber-marker-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
 }
 
-/* Style pour les popups Leaflet */
+.cyber-marker-glow {
+  box-shadow: 0 0 12px currentColor;
+  opacity: 0.6;
+}
+
+.cyber-marker-pulse {
+  border: 1px solid currentColor;
+  animation: cyberPulse 1.6s ease-out infinite;
+  opacity: 0.8;
+}
+
+.cyber-marker-objective {
+  color: #d14cff;
+  border-color: rgba(209, 76, 255, 0.6);
+  box-shadow: 0 0 12px rgba(209, 76, 255, 0.55), inset 0 0 10px rgba(209, 76, 255, 0.2);
+}
+
+.cyber-marker-start {
+  color: #00b3ff;
+  border-color: rgba(0, 179, 255, 0.6);
+  box-shadow: 0 0 12px rgba(0, 179, 255, 0.55), inset 0 0 10px rgba(0, 179, 255, 0.2);
+}
+
+.cyber-marker-rogue {
+  color: #00ff7a;
+  border-color: rgba(0, 255, 122, 0.6);
+  box-shadow: 0 0 12px rgba(0, 255, 122, 0.55), inset 0 0 10px rgba(0, 255, 122, 0.2);
+}
+
+.cyber-marker-player {
+  width: 34px;
+  height: 34px;
+  color: #00e5ff;
+  border-color: rgba(0, 229, 255, 0.7);
+  box-shadow: 0 0 14px rgba(0, 229, 255, 0.6), inset 0 0 12px rgba(0, 229, 255, 0.25);
+}
+
+.cyber-marker-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 229, 255, 0.75);
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.5);
+  z-index: 2;
+}
+
+.cyber-marker-ring {
+  border: 1px dashed rgba(0, 229, 255, 0.7);
+  animation: cyberSpin 6s linear infinite;
+  opacity: 0.7;
+}
+
+.cyber-marker-default {
+  color: #7f8ea3;
+  border-color: rgba(127, 142, 163, 0.6);
+  box-shadow: 0 0 8px rgba(127, 142, 163, 0.4), inset 0 0 6px rgba(127, 142, 163, 0.2);
+}
+
+@keyframes cyberPulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  70% {
+    transform: scale(1.65);
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes cyberSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Cyberpunk popup styles */
 .leaflet-popup-content-wrapper {
-  background: linear-gradient(135deg, #f8f9fa, #e9ecef);
-  border-radius: 8px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+  background: linear-gradient(135deg, #05070f, #0b1326);
+  border-radius: 10px;
+  border: 1px solid rgba(0, 255, 154, 0.45);
+  box-shadow: 0 0 20px rgba(0, 255, 154, 0.35), inset 0 0 16px rgba(0, 255, 154, 0.12);
+  color: #e6f7ff;
+  font-family: "Courier New", monospace;
+}
+
+.leaflet-popup-content {
+  margin: 10px 12px;
 }
 
 .leaflet-popup-tip {
-  background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+  background: #0b1326;
+  border: 1px solid rgba(0, 255, 154, 0.45);
+  box-shadow: 0 0 12px rgba(0, 255, 154, 0.4);
 }
 
 .leaflet-popup-close-button {
-  color: #6a0dad !important;
-  font-weight: bold;
+  color: #00ff9a !important;
+  text-shadow: 0 0 6px rgba(0, 255, 154, 0.8);
 }
 
-/* Styles pour les différents types de popups */
-.start-zone-popup {
-  text-align: center;
-  min-width: 200px;
-}
-
-.start-zone-popup h3 {
-  color: #0066cc;
-  margin: 0 0 10px 0;
-  font-size: 16px;
-  font-weight: bold;
-}
-
-.start-zone-popup p {
-  margin: 5px 0;
-  font-size: 12px;
-  color: #333;
-}
-
-.start-zone-popup strong {
-  color: #0066cc;
-  font-weight: bold;
-}
-
-.start-zone-rogue-popup {
-  text-align: center;
-  min-width: 200px;
-}
-
-.start-zone-rogue-popup h3 {
-  color: #00cc33;
-  margin: 0 0 10px 0;
-  font-size: 16px;
-  font-weight: bold;
-}
-
-.start-zone-rogue-popup p {
-  margin: 5px 0;
-  font-size: 12px;
-  color: #333;
-}
-
-.start-zone-rogue-popup strong {
-  color: #00cc33;
-  font-weight: bold;
-}
-
-.player-popup {
-  text-align: center;
-  min-width: 200px;
-}
-
-.player-popup h3 {
-  color: #ff6b35;
-  margin: 0 0 10px 0;
-  font-size: 16px;
-  font-weight: bold;
-}
-
-.player-popup p {
-  margin: 5px 0;
-  font-size: 12px;
-  color: #333;
-}
-
-.player-popup strong {
-  color: #ff6b35;
-  font-weight: bold;
-}
-
+.objective-popup,
+.start-zone-popup,
+.start-zone-rogue-popup,
+.player-popup,
 .default-popup {
-  text-align: center;
-  min-width: 200px;
+  text-align: left;
+  min-width: 210px;
 }
 
+.objective-popup h3,
+.start-zone-popup h3,
+.start-zone-rogue-popup h3,
+.player-popup h3,
 .default-popup h3 {
-  color: #666;
-  margin: 0 0 10px 0;
-  font-size: 16px;
-  font-weight: bold;
+  margin: 0 0 8px 0;
+  font-size: 15px;
+  letter-spacing: 0.5px;
 }
 
+.objective-popup p,
+.start-zone-popup p,
+.start-zone-rogue-popup p,
+.player-popup p,
 .default-popup p {
-  margin: 5px 0;
+  margin: 4px 0;
   font-size: 12px;
-  color: #333;
+  color: #b9c7d9;
 }
 
+.objective-popup strong,
+.start-zone-popup strong,
+.start-zone-rogue-popup strong,
+.player-popup strong,
 .default-popup strong {
-  color: #666;
-  font-weight: bold;
+  color: #e6f7ff;
+  font-weight: 700;
+}
+
+.cyber-popup-objective .objective-popup h3 {
+  color: #d14cff;
+}
+
+.cyber-popup-start-zone .start-zone-popup h3 {
+  color: #00b3ff;
+}
+
+.cyber-popup-start-zone-rogue .start-zone-rogue-popup h3 {
+  color: #00ff7a;
+}
+
+.cyber-popup-player .player-popup h3 {
+  color: #00e5ff;
 }
 
 @keyframes pulse {

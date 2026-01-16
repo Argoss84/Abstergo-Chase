@@ -1,32 +1,130 @@
 import L from "leaflet";
 
+const METERS_PER_DEGREE_LAT = 111320;
+
+const getMetersPerDegreeLng = (lat: number) =>
+  METERS_PER_DEGREE_LAT * Math.cos((lat * Math.PI) / 180);
+
+const toMeters = (point: [number, number], center: [number, number]) => {
+  const metersPerDegreeLng = getMetersPerDegreeLng(center[0]);
+  return {
+    x: (point[1] - center[1]) * metersPerDegreeLng,
+    y: (point[0] - center[0]) * METERS_PER_DEGREE_LAT,
+  };
+};
+
+const toLatLng = (point: { x: number; y: number }, center: [number, number]) => {
+  const metersPerDegreeLng = getMetersPerDegreeLng(center[0]);
+  return [
+    center[0] + point.y / METERS_PER_DEGREE_LAT,
+    center[1] + point.x / metersPerDegreeLng,
+  ] as [number, number];
+};
+
+const minDistanceToObjectives = (
+  point: [number, number],
+  objectives: [number, number][]
+) => {
+  if (!objectives.length) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Math.min(
+    ...objectives.map((obj) => L.latLng(point).distanceTo(L.latLng(obj)))
+  );
+};
+
+const dedupePoints = (points: [number, number][], minDistance = 1) => {
+  const deduped: [number, number][] = [];
+  points.forEach((point) => {
+    const isDuplicate = deduped.some(
+      (existing) => L.latLng(existing).distanceTo(L.latLng(point)) < minDistance
+    );
+    if (!isDuplicate) {
+      deduped.push(point);
+    }
+  });
+  return deduped;
+};
+
+const getCircleStreetIntersections = (
+  center: [number, number],
+  radius: number,
+  streets: L.LatLngTuple[][]
+) => {
+  const intersections: [number, number][] = [];
+
+  streets.forEach((street) => {
+    for (let i = 0; i < street.length - 1; i++) {
+      const start = street[i] as [number, number];
+      const end = street[i + 1] as [number, number];
+      const startMeters = toMeters(start, center);
+      const endMeters = toMeters(end, center);
+
+      const dx = endMeters.x - startMeters.x;
+      const dy = endMeters.y - startMeters.y;
+      const a = dx * dx + dy * dy;
+      if (a === 0) {
+        continue;
+      }
+
+      const b = 2 * (startMeters.x * dx + startMeters.y * dy);
+      const c = startMeters.x * startMeters.x + startMeters.y * startMeters.y - radius * radius;
+      const discriminant = b * b - 4 * a * c;
+      if (discriminant < 0) {
+        continue;
+      }
+
+      const sqrtDiscriminant = Math.sqrt(discriminant);
+      const t1 = (-b - sqrtDiscriminant) / (2 * a);
+      const t2 = (-b + sqrtDiscriminant) / (2 * a);
+
+      [t1, t2].forEach((t) => {
+        if (t >= 0 && t <= 1) {
+          const intersectionMeters = {
+            x: startMeters.x + t * dx,
+            y: startMeters.y + t * dy,
+          };
+          intersections.push(toLatLng(intersectionMeters, center));
+        }
+      });
+    }
+  });
+
+  return dedupePoints(intersections, 2);
+};
+
 export const generateStartZone = (
   center: [number, number],
   radius: number,
   objectives: [number, number][],
   streets: L.LatLngTuple[][]
 ): [number, number] => {
+  const intersectionPoints = getCircleStreetIntersections(center, radius, streets);
+  if (intersectionPoints.length) {
+    return intersectionPoints.reduce((best, current) => {
+      const currentMinDistance = minDistanceToObjectives(current, objectives);
+      const bestMinDistance = minDistanceToObjectives(best, objectives);
+      return currentMinDistance > bestMinDistance ? current : best;
+    });
+  }
+
   const pointsOnCircle: [number, number][] = [];
   const numPoints = 360; // Number of points to generate on the circle
 
   for (let i = 0; i < numPoints; i++) {
     const angle = (i * 2 * Math.PI) / numPoints;
     const point: [number, number] = [
-      center[0] + (radius / 111320) * Math.cos(angle),
-      center[1] + (radius / (111320 * Math.cos(center[0]))) * Math.sin(angle),
+      center[0] + (radius / METERS_PER_DEGREE_LAT) * Math.cos(angle),
+      center[1] + (radius / getMetersPerDegreeLng(center[0])) * Math.sin(angle),
     ];
     pointsOnCircle.push(point);
   }
 
-  const farthestPoint = pointsOnCircle.reduce((farthest, current) => {
-    const currentMinDistance = Math.min(
-      ...objectives.map((obj) => L.latLng(current).distanceTo(L.latLng(obj)))
-    );
-    const farthestMinDistance = Math.min(
-      ...objectives.map((obj) => L.latLng(farthest).distanceTo(L.latLng(obj)))
-    );
-    return currentMinDistance > farthestMinDistance ? current : farthest;
-  });
+  const farthestPoint = pointsOnCircle.reduce((farthest, current) =>
+    minDistanceToObjectives(current, objectives) > minDistanceToObjectives(farthest, objectives)
+      ? current
+      : farthest
+  );
 
   const closestStreetPoint = streets.reduce((closest, street) => {
     const closestPointOnStreet = street.reduce((prev, curr) =>
@@ -51,23 +149,46 @@ export const generateStartZoneRogue = (
     objectives: [number, number][],
     streets: L.LatLngTuple[][]
   ): [number, number] => {
-    const angle = Math.atan2(startZone[1] - center[1], startZone[0] - center[0]);
-    const randomOffset = (Math.random() * (Math.PI - Math.PI / 2)) + Math.PI / 2; // Random angle between 90 and 180 degrees
-    const rogueAngle = angle + randomOffset * (Math.random() < 0.5 ? 1 : -1); // Randomly add or subtract the offset
-  
-    const rogueLat = center[0] + (radius / 111320) * Math.cos(rogueAngle); // Conversion en degrés
-    const rogueLng = center[1] + (radius / (111320 * Math.cos(center[0]))) * Math.sin(rogueAngle); // Conversion en degrés
-  
-    const roguePoint: [number, number] = [rogueLat, rogueLng];
-  
+    const intersectionPoints = getCircleStreetIntersections(center, radius, streets);
     const minDistance = radius / 3;
-  
-    const isFarEnoughFromObjectives = (point: [number, number]) => {
-      return objectives.every(
+
+    const isFarEnoughFromObjectives = (point: [number, number]) =>
+      objectives.every(
         (objective) => L.latLng(point).distanceTo(L.latLng(objective)) >= minDistance
       );
-    };
-  
+
+    const agentAngle = Math.atan2(startZone[0] - center[0], startZone[1] - center[1]);
+    const normalizeAngle = (angle: number) =>
+      Math.atan2(Math.sin(angle), Math.cos(angle));
+
+    const chooseOppositePoint = (points: [number, number][]) =>
+      points.reduce((best, current) => {
+        const currentAngle = Math.atan2(current[0] - center[0], current[1] - center[1]);
+        const currentDelta = Math.abs(
+          Math.PI - Math.abs(normalizeAngle(currentAngle - agentAngle))
+        );
+        const bestAngle = Math.atan2(best[0] - center[0], best[1] - center[1]);
+        const bestDelta = Math.abs(
+          Math.PI - Math.abs(normalizeAngle(bestAngle - agentAngle))
+        );
+        return currentDelta < bestDelta ? current : best;
+      });
+
+    if (intersectionPoints.length) {
+      const farEnough = intersectionPoints.filter(isFarEnoughFromObjectives);
+      const candidates = farEnough.length ? farEnough : intersectionPoints;
+      return chooseOppositePoint(candidates);
+    }
+
+    const angle = Math.atan2(startZone[1] - center[1], startZone[0] - center[0]);
+    const randomOffset = Math.random() * (Math.PI - Math.PI / 2) + Math.PI / 2;
+    const rogueAngle = angle + randomOffset * (Math.random() < 0.5 ? 1 : -1);
+
+    const rogueLat = center[0] + (radius / METERS_PER_DEGREE_LAT) * Math.cos(rogueAngle);
+    const rogueLng = center[1] + (radius / getMetersPerDegreeLng(center[0])) * Math.sin(rogueAngle);
+
+    const roguePoint: [number, number] = [rogueLat, rogueLng];
+
     const closestStreetPoint = streets.reduce((closest, street) => {
       const closestPointOnStreet = street.reduce((prev, curr) =>
         L.latLng(curr).distanceTo(L.latLng(roguePoint)) <
@@ -81,7 +202,7 @@ export const generateStartZoneRogue = (
         ? closestPointOnStreet
         : closest;
     }, streets[0][0]);
-  
+
     return closestStreetPoint as [number, number];
   };
 
@@ -131,8 +252,12 @@ export const generateRandomPoints = (
             ? curr
             : prev
         );
-        if (isFarEnough(closestNode as [number, number])) {
-          points.push(closestNode as [number, number]);
+        const closestNodePoint = closestNode as [number, number];
+        if (
+          isPointInCircle(closestNodePoint, center, radius) &&
+          isFarEnough(closestNodePoint)
+        ) {
+          points.push(closestNodePoint);
         }
       }
     }
