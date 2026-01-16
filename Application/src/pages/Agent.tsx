@@ -146,6 +146,28 @@ const Agent: React.FC = () => {
     return true;
   }, [gameDetails?.props]);
 
+  const getObjectiveCirclePathOptions = useCallback((circle: ObjectiveCircle) => {
+    const defaultOptions = {
+      color: 'purple',
+      fillColor: 'purple',
+      fillOpacity: 0.2
+    };
+    const props = gameDetails?.props;
+    if (!props || props.length === 0) return defaultOptions;
+    const prop = props.find(item => item.id_prop === circle.id_prop);
+    if (!prop) return defaultOptions;
+    const state = (prop.state || '').toString().trim().toUpperCase();
+    if (state === 'CAPTURING') {
+      return {
+        color: '#ff8c00',
+        fillColor: '#ff8c00',
+        fillOpacity: 0.35,
+        className: 'objective-capturing'
+      };
+    }
+    return defaultOptions;
+  }, [gameDetails?.props]);
+
   const buildObjectiveCirclesKey = (code: string) => `objectiveCircles:${code}`;
   const objectiveCirclesBootstrapRef = useRef(false);
   const getStoredObjectiveCircles = (code: string): ObjectiveCircle[] | null => {
@@ -793,7 +815,7 @@ const Agent: React.FC = () => {
                   key={circle.id_prop}
                   center={circle.center}
                   radius={circle.radius}
-                  pathOptions={{ color: 'purple', fillColor: 'purple', fillOpacity: 0.2 }}
+                  pathOptions={getObjectiveCirclePathOptions(circle)}
                 />
               ))}
               {currentPosition && (

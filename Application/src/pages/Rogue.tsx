@@ -233,6 +233,22 @@ const Rogue: React.FC = () => {
           });
         
         if (objectiveInRange) {
+          try {
+            // Marquer l'objectif comme en cours de capture pour la synchro
+            await updateProp(objectiveInRange.id_prop, {
+              state: "CAPTURING"
+            });
+            setObjectiveProps(prevProps =>
+              prevProps.map(prop =>
+                prop.id_prop === objectiveInRange.id_prop
+                  ? { ...prop, state: "CAPTURING" }
+                  : prop
+              )
+            );
+          } catch (error) {
+            console.error('❌ Erreur lors du marquage de la capture:', error);
+          }
+
           // Fermer le toast et réinitialiser l'état à la fin de l'animation
           setTimeout(async () => {
             if (captureToastRef.current) {
@@ -264,6 +280,10 @@ const Rogue: React.FC = () => {
             setIsCaptureInProgress(false);
             captureToastRef.current = null;
           }, hackDuration);
+        } else {
+          setIsCaptureInProgress(false);
+          captureToastRef.current = null;
+          toast.warning('❌ Aucun objectif à portée');
         }
       }
     } else {

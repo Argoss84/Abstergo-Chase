@@ -204,6 +204,27 @@
   filter: drop-shadow(0 0 3px #0000ff);
 }
 
+@keyframes objectiveCaptureBlink {
+  0% {
+    opacity: 0.35;
+    filter: drop-shadow(0 0 4px rgba(255, 140, 0, 0.6));
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 12px rgba(255, 140, 0, 0.9));
+  }
+  100% {
+    opacity: 0.35;
+    filter: drop-shadow(0 0 4px rgba(255, 140, 0, 0.6));
+  }
+}
+
+.leaflet-interactive.objective-capturing {
+  stroke: #ff8c00 !important;
+  fill: #ff8c00 !important;
+  animation: objectiveCaptureBlink 1s ease-in-out infinite;
+}
+
 /* Style pour le compteur de distance dans le header */
 .distance-counter {
   background: linear-gradient(135deg, #0004ff, #0000cc);
