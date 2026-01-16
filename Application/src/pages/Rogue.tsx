@@ -13,7 +13,7 @@ import {
 } from '../utils/utils';
 import { updatePlayerPosition, updatePlayerInStartZone } from '../utils/PlayerUtils';
 import { updateGameWinnerType } from '../utils/AdminUtils';
-import { add, apertureOutline, camera, cellular, cellularOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, radioOutline, settings, skullOutline } from 'ionicons/icons';
+import { add, apertureOutline, camera, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, micOutline, navigate, radioOutline, settings, skullOutline, volumeHighOutline } from 'ionicons/icons';
 import './Rogue.css';
 import { GameProp, GameDetails, Player } from '../components/Interfaces';
 import PopUpMarker from '../components/PopUpMarker';
@@ -35,7 +35,11 @@ const Rogue: React.FC = () => {
     joinLobby,
     updateGameDetails,
     updateProp,
-    isHost
+    isHost,
+    startVoiceTransmission,
+    stopVoiceTransmission,
+    startToneTransmission,
+    stopToneTransmission
   } = useGameSession();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
   const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
@@ -67,6 +71,12 @@ const Rogue: React.FC = () => {
   
   // État pour les boutons FAB
   const [isFabOpen, setIsFabOpen] = useState(false);
+  const [isVoiceActive, setIsVoiceActive] = useState(false);
+  const [isToneActive, setIsToneActive] = useState(false);
+  const [isRemoteAudioPlaying, setIsRemoteAudioPlaying] = useState(false);
+  const voiceActiveRef = useRef(false);
+  const toneActiveRef = useRef(false);
+  const activeAudioPeersRef = useRef<Set<string>>(new Set());
   
   // État pour détecter si un objectif est à portée
   const [isObjectiveInRange, setIsObjectiveInRange] = useState<boolean>(false);
@@ -127,10 +137,48 @@ const Rogue: React.FC = () => {
   const fogRings = useFogRings(gameDetails, 20);
 
   // Fonctions pour les boutons FAB
-  const handleNetworkScan = () => {
-    console.log('Scan réseau activé');
-    toast.info('🔍 Scan réseau en cours...');
-    vibrate(patterns.short);
+  const handleVoicePressStart = async () => {
+    if (voiceActiveRef.current) return;
+    voiceActiveRef.current = true;
+    setIsVoiceActive(true);
+    try {
+      await startVoiceTransmission();
+      vibrate(patterns.short);
+    } catch (error) {
+      voiceActiveRef.current = false;
+      setIsVoiceActive(false);
+      const message = error instanceof Error ? error.message : 'Accès micro refusé';
+      toast.error(`🎙️ ${message}`);
+    }
+  };
+
+  const handleVoicePressEnd = () => {
+    if (!voiceActiveRef.current) return;
+    voiceActiveRef.current = false;
+    setIsVoiceActive(false);
+    stopVoiceTransmission();
+  };
+
+  const handleTonePressStart = async () => {
+    if (toneActiveRef.current) return;
+    toneActiveRef.current = true;
+    setIsToneActive(true);
+    try {
+      await startToneTransmission();
+      vibrate(patterns.short);
+    } catch (error) {
+      toneActiveRef.current = false;
+      setIsToneActive(false);
+      const message = error instanceof Error ? error.message : 'Son indisponible';
+      toast.error(`🔊 ${message}`);
+    }
+  };
+
+  const handleTonePressEnd = () => {
+    if (!toneActiveRef.current) return;
+    toneActiveRef.current = false;
+    setIsToneActive(false);
+    stopToneTransmission();
   };
 
   const handleVisionMode = () => {
@@ -332,6 +380,31 @@ const Rogue: React.FC = () => {
       }
     }
   }, [sessionGameDetails]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleAudioPlayback = (event: Event) => {
+      const detail = (event as CustomEvent<{ peerId: string; playing: boolean }>).detail;
+      if (!detail?.peerId) return;
+      if (detail.playing) {
+        activeAudioPeersRef.current.add(detail.peerId);
+      } else {
+        activeAudioPeersRef.current.delete(detail.peerId);
+      }
+      setIsRemoteAudioPlaying(activeAudioPeersRef.current.size > 0);
+    };
+    window.addEventListener('audio:playback', handleAudioPlayback as EventListener);
+    return () => {
+      window.removeEventListener('audio:playback', handleAudioPlayback as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      stopVoiceTransmission();
+      stopToneTransmission();
+    };
+  }, [stopToneTransmission, stopVoiceTransmission]);
 
 
   // Handler pour la fin de partie
@@ -879,14 +952,52 @@ const Rogue: React.FC = () => {
           )}
         </div>
 
+        {isRemoteAudioPlaying && (
+          <div
+            style={{
+              position: 'fixed',
+              top: '72px',
+              right: '16px',
+              zIndex: 1000,
+              width: '34px',
+              height: '34px',
+              borderRadius: '50%',
+              background: 'rgba(0, 0, 0, 0.6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+            aria-label="Audio en lecture"
+          >
+            <IonIcon icon={volumeHighOutline} color="light" />
+          </div>
+        )}
+
         <div className="fab-container">
           <IonFabButton onClick={() => setIsFabOpen(!isFabOpen)}>
             <IonIcon icon={apertureOutline} />
           </IonFabButton>
           
           <div className={`fab-list fab-list-top ${!isFabOpen ? 'fab-list-hidden' : ''}`}>
-            <IonFabButton color="light" onClick={handleNetworkScan}>
-              <IonIcon icon={cellularOutline} />
+            <IonFabButton
+              color={isVoiceActive ? 'danger' : 'light'}
+              onPointerDown={handleVoicePressStart}
+              onPointerUp={handleVoicePressEnd}
+              onPointerLeave={handleVoicePressEnd}
+              onPointerCancel={handleVoicePressEnd}
+              aria-label="Parler au micro"
+            >
+              <IonIcon icon={micOutline} />
+            </IonFabButton>
+            <IonFabButton
+              color={isToneActive ? 'warning' : 'light'}
+              onPointerDown={handleTonePressStart}
+              onPointerUp={handleTonePressEnd}
+              onPointerLeave={handleTonePressEnd}
+              onPointerCancel={handleTonePressEnd}
+              aria-label="Diffuser un son"
+            >
+              <IonIcon icon={volumeHighOutline} />
             </IonFabButton>
           </div>
 

@@ -1058,7 +1058,8 @@ io.on('connection', (socket) => {
         type: 'webrtc:signal',
         payload: {
           fromId: clientId,
-          signal: payload?.signal
+          signal: payload?.signal,
+          channel: payload?.channel
         }
       });
       return;
