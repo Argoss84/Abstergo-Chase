@@ -27,7 +27,6 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { generateRandomPoints, generateStartZone, generateStartZoneRogue } from '../utils/utils';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
-import { authService } from '../services/AuthService';
 
 interface GameFormData {
   objectif_number: number;
@@ -90,13 +89,6 @@ const CreateLobby: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingStreets, setIsLoadingStreets] = useState(false);
   const [streetsLoadError, setStreetsLoadError] = useState<string | null>(null);
-
-  // Vérifier l'authentification
-  useEffect(() => {
-    if (!authService.isAuthenticated()) {
-      history.replace('/home');
-    }
-  }, [history]);
 
   useEffect(() => {
     if (!lobbyCode && !hasDisconnectedSocketRef.current) {

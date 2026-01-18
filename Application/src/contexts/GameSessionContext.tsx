@@ -15,10 +15,6 @@ interface GameSessionContextValue extends SessionState {
   leaveLobby: () => void;
   hasPersistedSession: () => boolean;
   disconnectSocket: () => void;
-  startVoiceTransmission: () => Promise<void>;
-  stopVoiceTransmission: () => void;
-  startToneTransmission: () => Promise<void>;
-  stopToneTransmission: () => void;
 }
 
 const GameSessionContext = createContext<GameSessionContextValue | undefined>(undefined);
@@ -44,11 +40,7 @@ export const GameSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     clearSession: () => gameSessionService.clearSession(),
     leaveLobby: () => gameSessionService.leaveLobby(),
     hasPersistedSession: () => gameSessionService.hasPersistedSession(),
-    disconnectSocket: () => gameSessionService.disconnectSocket(),
-    startVoiceTransmission: () => gameSessionService.startVoiceTransmission(),
-    stopVoiceTransmission: () => gameSessionService.stopVoiceTransmission(),
-    startToneTransmission: () => gameSessionService.startToneTransmission(),
-    stopToneTransmission: () => gameSessionService.stopToneTransmission()
+    disconnectSocket: () => gameSessionService.disconnectSocket()
   };
 
   return <GameSessionContext.Provider value={value}>{children}</GameSessionContext.Provider>;

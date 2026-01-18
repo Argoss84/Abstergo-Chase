@@ -57,7 +57,8 @@ const Lobby: React.FC = () => {
     isHost,
     connectionStatus,
     clearSession,
-    leaveLobby
+    leaveLobby,
+    requestLatestState
   } = useGameSession();
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -991,6 +992,25 @@ const Lobby: React.FC = () => {
               </IonContent>
             </IonModal>
           </>
+        ) : connectionStatus === 'connected' && lobbyCode ? (
+          <IonCard style={{ margin: '1rem' }}>
+            <IonCardHeader>
+              <IonCardTitle>En attente des données du lobby...</IonCardTitle>
+            </IonCardHeader>
+            <IonCardContent>
+              <IonText>
+                <p>Connexion établie. En attente de la synchronisation des données du lobby.</p>
+              </IonText>
+              <IonButton 
+                expand="block" 
+                color="primary"
+                onClick={() => requestLatestState()} 
+                style={{ marginTop: '1rem' }}
+              >
+                🔄 Demander la synchronisation
+              </IonButton>
+            </IonCardContent>
+          </IonCard>
         ) : null}
       </IonContent>
     </IonPage>

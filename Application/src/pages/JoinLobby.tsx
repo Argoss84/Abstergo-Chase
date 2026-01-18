@@ -19,7 +19,6 @@ import {
 import { useState, useEffect } from 'react';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 import { useGameSession } from '../contexts/GameSessionContext';
-import { authService } from '../services/AuthService';
   
   const JoinLobby: React.FC = () => {
     const history = useHistory();
@@ -27,26 +26,6 @@ import { authService } from '../services/AuthService';
     const { playerName, setPlayerName, lobbyCode, clearSession } = useGameSession();
     const [gameCode, setGameCode] = useState('');
     const [displayName, setDisplayName] = useState(playerName);
-
-  // Vérifier l'authentification (auto-auth pour les QR codes)
-  useEffect(() => {
-    const ensureAuth = async () => {
-      if (authService.isAuthenticated()) {
-        return;
-      }
-      const params = new URLSearchParams(location.search);
-      const codeFromUrl = params.get('code');
-      if (codeFromUrl) {
-        const ok = await authService.verifyPassword('1234');
-        if (ok) {
-          return;
-        }
-      }
-      history.replace('/home');
-    };
-
-    void ensureAuth();
-  }, [history, location.search]);
 
     // Pré-remplir le code depuis l'URL si présent
     useEffect(() => {

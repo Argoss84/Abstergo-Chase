@@ -1,6 +1,5 @@
 import { io, Socket } from 'socket.io-client';
 import { GameDetails, GameProp, Player } from '../components/Interfaces';
-import { authService } from './AuthService';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
@@ -68,18 +67,6 @@ class GameSessionService {
   private peerConnections = new Map<string, RTCPeerConnection>();
   private dataChannels = new Map<string, RTCDataChannel>();
   private hostChannel: RTCDataChannel | null = null;
-  private audioPeerConnections = new Map<string, RTCPeerConnection>();
-  private audioSenders = new Map<string, RTCRtpSender>();
-  private audioElements = new Map<string, HTMLAudioElement>();
-  private localAudioStream: MediaStream | null = null;
-  private localAudioTrack: MediaStreamTrack | null = null;
-  private isVoiceTransmitting = false;
-  private toneAudioContext: AudioContext | null = null;
-  private toneOscillator: OscillatorNode | null = null;
-  private toneDestination: MediaStreamAudioDestinationNode | null = null;
-  private toneStream: MediaStream | null = null;
-  private toneTrack: MediaStreamTrack | null = null;
-  private isToneTransmitting = false;
   private reconnectAttempts = new Map<string, number>();
   private rejoinInFlight = false;
   private joinInProgress = false;
@@ -240,34 +227,6 @@ class GameSessionService {
     this.updateState({ connectionStatus: 'idle' });
   }
 
-  async startVoiceTransmission() {
-    if (typeof navigator === 'undefined') return;
-    await this.ensureLocalAudioStream();
-    if (!this.localAudioTrack) return;
-    this.isVoiceTransmitting = true;
-    this.updateOutgoingAudioTrack();
-    this.ensureAudioConnectionsForCurrentPlayers();
-  }
-
-  stopVoiceTransmission() {
-    this.isVoiceTransmitting = false;
-    this.updateOutgoingAudioTrack();
-  }
-
-  async startToneTransmission() {
-    if (typeof window === 'undefined') return;
-    await this.ensureToneStream();
-    if (!this.toneTrack || !this.toneStream) return;
-    this.isToneTransmitting = true;
-    this.updateOutgoingAudioTrack();
-    this.ensureAudioConnectionsForCurrentPlayers();
-  }
-
-  stopToneTransmission() {
-    this.isToneTransmitting = false;
-    this.stopToneStream();
-    this.updateOutgoingAudioTrack();
-  }
 
   async createLobby(gameDetails: GameDetails, props: GameProp[]) {
     try {
@@ -639,8 +598,6 @@ class GameSessionService {
   }
 
   private updateState(partial: Partial<SessionState>) {
-    const previousPlayers = this.state.players;
-    const previousPlayerId = this.state.playerId;
     this.state = { ...this.state, ...partial };
     this.listeners.forEach((listener) => listener(this.state));
     
@@ -648,186 +605,8 @@ class GameSessionService {
     if (this.state.lobbyCode && this.state.playerId) {
       this.persistSession();
     }
-    this.syncAudioMeshConnections(previousPlayers, previousPlayerId);
   }
 
-  private syncAudioMeshConnections(previousPlayers: Player[], previousPlayerId: string | null) {
-    if (typeof window === 'undefined') return;
-    const currentPlayerId = this.state.playerId;
-    const currentPlayers = this.state.players;
-
-    if (!currentPlayerId || !this.state.lobbyCode) {
-      this.cleanupAudioConnections();
-      return;
-    }
-
-    if (!this.havePlayerSetChanged(previousPlayers, currentPlayers) && previousPlayerId === currentPlayerId) {
-      return;
-    }
-
-    const currentIds = new Set(currentPlayers.map((player) => player.id_player).filter(Boolean));
-    currentIds.delete(currentPlayerId);
-
-    Array.from(this.audioPeerConnections.keys()).forEach((peerId) => {
-      if (!currentIds.has(peerId)) {
-        this.teardownAudioPeer(peerId);
-      }
-    });
-
-    currentIds.forEach((peerId) => {
-      if (this.shouldInitiateAudioConnection(peerId) && !this.audioPeerConnections.has(peerId)) {
-        this.createAudioOffer(peerId);
-      }
-    });
-  }
-
-  private ensureAudioConnectionsForCurrentPlayers() {
-    if (!this.state.playerId || !this.state.lobbyCode) return;
-    const currentIds = new Set(this.state.players.map((player) => player.id_player).filter(Boolean));
-    currentIds.delete(this.state.playerId);
-    currentIds.forEach((peerId) => {
-      if (this.shouldInitiateAudioConnection(peerId) && !this.audioPeerConnections.has(peerId)) {
-        this.createAudioOffer(peerId);
-      }
-    });
-  }
-
-  private async ensureLocalAudioStream() {
-    if (this.localAudioTrack && this.localAudioTrack.readyState !== 'ended') {
-      return;
-    }
-
-    const isSecureContext = window.isSecureContext || window.location.hostname === 'localhost';
-    if (!isSecureContext) {
-      throw new Error('Le micro nécessite HTTPS ou localhost.');
-    }
-    if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error('getUserMedia indisponible dans ce navigateur.');
-    }
-
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        },
-        video: false
-      });
-    } catch (error) {
-      const name = error instanceof DOMException ? error.name : 'UnknownError';
-      const details = error instanceof Error ? error.message : '';
-      throw new Error(`Micro indisponible (${name}${details ? `: ${details}` : ''}).`);
-    }
-    const [track] = stream.getAudioTracks();
-    if (!track) {
-      stream.getTracks().forEach((existing) => existing.stop());
-      throw new Error('Aucune piste audio disponible.');
-    }
-    track.enabled = false;
-    this.localAudioStream = stream;
-    this.localAudioTrack = track;
-  }
-
-  private async ensureToneStream() {
-    if (this.toneTrack && this.toneTrack.readyState !== 'ended') {
-      return;
-    }
-    const context = new AudioContext();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    gain.gain.value = 0.2;
-    oscillator.type = 'sine';
-    oscillator.frequency.value = 440;
-    const destination = context.createMediaStreamDestination();
-    oscillator.connect(gain);
-    gain.connect(destination);
-    oscillator.start();
-    if (context.state === 'suspended') {
-      await context.resume();
-    }
-    const [track] = destination.stream.getAudioTracks();
-    if (!track) {
-      oscillator.stop();
-      context.close();
-      throw new Error('Impossible de générer le son.');
-    }
-    this.toneAudioContext = context;
-    this.toneOscillator = oscillator;
-    this.toneDestination = destination;
-    this.toneStream = destination.stream;
-    this.toneTrack = track;
-  }
-
-  private stopToneStream() {
-    this.toneTrack?.stop();
-    this.toneTrack = null;
-    this.toneStream = null;
-    this.toneDestination = null;
-    if (this.toneOscillator) {
-      try {
-        this.toneOscillator.stop();
-      } catch (_) {}
-    }
-    this.toneOscillator = null;
-    if (this.toneAudioContext) {
-      this.toneAudioContext.close();
-    }
-    this.toneAudioContext = null;
-  }
-
-  private updateOutgoingAudioTrack() {
-    if (this.isToneTransmitting && this.toneTrack && this.toneStream) {
-      this.replaceOutgoingTrack(this.toneTrack, this.toneStream);
-      return;
-    }
-    if (this.localAudioTrack && this.localAudioStream) {
-      this.localAudioTrack.enabled = this.isVoiceTransmitting;
-      this.replaceOutgoingTrack(this.localAudioTrack, this.localAudioStream);
-      return;
-    }
-    this.replaceOutgoingTrack(null);
-  }
-
-  private getPreferredOutgoingTrack() {
-    if (this.isToneTransmitting && this.toneTrack && this.toneStream) {
-      return { track: this.toneTrack, stream: this.toneStream };
-    }
-    if (this.localAudioTrack && this.localAudioStream) {
-      return { track: this.localAudioTrack, stream: this.localAudioStream };
-    }
-    return null;
-  }
-
-  private replaceOutgoingTrack(track: MediaStreamTrack | null, stream?: MediaStream) {
-    this.audioPeerConnections.forEach((pc, peerId) => {
-      const existingSender = this.audioSenders.get(peerId);
-      if (existingSender) {
-        existingSender.replaceTrack(track);
-      } else if (track) {
-        const transceiver = pc.addTransceiver('audio', { direction: 'sendrecv' });
-        transceiver.sender.replaceTrack(track);
-        this.audioSenders.set(peerId, transceiver.sender);
-      }
-    });
-  }
-
-  private havePlayerSetChanged(previousPlayers: Player[], nextPlayers: Player[]) {
-    if (previousPlayers.length !== nextPlayers.length) return true;
-    const previousIds = new Set(previousPlayers.map((player) => player.id_player));
-    for (const player of nextPlayers) {
-      if (!previousIds.has(player.id_player)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private shouldInitiateAudioConnection(peerId: string) {
-    if (!this.state.playerId) return false;
-    return this.state.playerId.localeCompare(peerId) < 0;
-  }
 
   private async ensureSocket() {
     if (this.socket?.connected) {
@@ -852,10 +631,7 @@ class GameSessionService {
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       timeout: 20000,
-      transports: ['polling', 'websocket'],
-      auth: {
-        password: authService.getPassword()
-      }
+      transports: ['polling', 'websocket']
     });
     this.socketReady = new Promise((resolve, reject) => {
       if (!this.socket) return reject();
@@ -982,11 +758,7 @@ class GameSessionService {
     }
 
     if (type === 'webrtc:signal') {
-      if (payload?.channel === 'audio') {
-        this.handleAudioSignal(payload.fromId, payload.signal);
-      } else {
-        this.handleSignal(payload.fromId, payload.signal);
-      }
+      this.handleSignal(payload.fromId, payload.signal);
       return;
     }
 
@@ -1069,7 +841,6 @@ class GameSessionService {
       existingChannel.close();
       this.dataChannels.delete(playerId);
     }
-    this.teardownAudioPeer(playerId);
     this.reconnectAttempts.delete(playerId);
 
     // Mettre à jour le nom du joueur s'il a changé
@@ -1100,7 +871,6 @@ class GameSessionService {
     pc?.close();
     this.peerConnections.delete(playerId);
     this.dataChannels.delete(playerId);
-    this.teardownAudioPeer(playerId);
     this.broadcastState();
   }
 
@@ -1111,7 +881,6 @@ class GameSessionService {
     this.dataChannels.clear();
     this.hostChannel?.close();
     this.hostChannel = null;
-    this.cleanupAudioConnections();
 
     // Mettre à jour le hostId dans gameDetails
     if (this.state.gameDetails) {
@@ -1119,8 +888,6 @@ class GameSessionService {
         gameDetails: { ...this.state.gameDetails }
       });
     }
-
-    this.ensureAudioConnectionsForCurrentPlayers();
 
     // Le nouveau host va initier une nouvelle connexion WebRTC avec nous
     // Nous allons recevoir un signal offer de sa part
@@ -1150,48 +917,6 @@ class GameSessionService {
     setTimeout(() => this.broadcastState(), 2000);
   }
 
-  private async createAudioOffer(peerId: string) {
-    const pc = this.createAudioPeerConnection(peerId);
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    this.sendAudioSignal(peerId, { type: 'offer', sdp: offer });
-  }
-
-  private createAudioPeerConnection(peerId: string) {
-    const pc = new RTCPeerConnection({
-      iceServers: this.getIceServers()
-    });
-
-    const transceiver = pc.addTransceiver('audio', { direction: 'sendrecv' });
-    this.audioSenders.set(peerId, transceiver.sender);
-    const preferred = this.getPreferredOutgoingTrack();
-    if (preferred) {
-      transceiver.sender.replaceTrack(preferred.track);
-    }
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        this.sendAudioSignal(peerId, { type: 'ice', candidate: event.candidate });
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      const state = pc.connectionState;
-      if (state === 'failed' || state === 'disconnected' || state === 'closed') {
-        this.teardownAudioPeer(peerId);
-        if (state !== 'closed' && this.shouldInitiateAudioConnection(peerId)) {
-          this.createAudioOffer(peerId);
-        }
-      }
-    };
-
-    pc.ontrack = (event) => {
-      const stream = event.streams[0] || new MediaStream([event.track]);
-      this.attachRemoteAudio(peerId, stream);
-    };
-
-    this.audioPeerConnections.set(peerId, pc);
-    return pc;
-  }
 
   private createPeerConnection(peerId: string, isHost: boolean) {
     const pc = new RTCPeerConnection({
@@ -1283,36 +1008,6 @@ class GameSessionService {
     }
   }
 
-  private sendAudioSignal(targetId: string, signal: SignalMessage) {
-    this.sendSocket('webrtc:signal', {
-      targetId,
-      channel: 'audio',
-      signal
-    });
-  }
-
-  private async handleAudioSignal(fromId: string, signal: SignalMessage) {
-    let pc = this.audioPeerConnections.get(fromId);
-
-    if (!pc) {
-      pc = this.createAudioPeerConnection(fromId);
-    }
-
-    if (signal.type === 'offer' && signal.sdp) {
-      await pc.setRemoteDescription(signal.sdp);
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      this.sendAudioSignal(fromId, { type: 'answer', sdp: answer });
-    }
-
-    if (signal.type === 'answer' && signal.sdp) {
-      await pc.setRemoteDescription(signal.sdp);
-    }
-
-    if (signal.type === 'ice' && signal.candidate) {
-      await pc.addIceCandidate(signal.candidate);
-    }
-  }
 
   private handleDataChannelMessage(raw: string) {
     let message;
@@ -1497,68 +1192,6 @@ class GameSessionService {
     }
   }
 
-  private attachRemoteAudio(peerId: string, stream: MediaStream) {
-    if (typeof document === 'undefined') return;
-    let audio = this.audioElements.get(peerId);
-    if (!audio) {
-      audio = document.createElement('audio');
-      audio.autoplay = true;
-      audio.setAttribute('playsinline', 'true');
-      audio.style.display = 'none';
-      audio.setAttribute('data-audio-peer', peerId);
-      const notify = (playing: boolean) => {
-        window.dispatchEvent(new CustomEvent('audio:playback', { detail: { peerId, playing } }));
-      };
-      audio.addEventListener('playing', () => notify(true));
-      audio.addEventListener('pause', () => notify(false));
-      audio.addEventListener('ended', () => notify(false));
-      audio.addEventListener('error', () => notify(false));
-      document.body.appendChild(audio);
-      this.audioElements.set(peerId, audio);
-    }
-    if (audio.srcObject !== stream) {
-      audio.srcObject = stream;
-      const playPromise = audio.play();
-      if (playPromise) {
-        playPromise.catch(() => {});
-      }
-    }
-  }
-
-  private teardownAudioPeer(peerId: string) {
-    const pc = this.audioPeerConnections.get(peerId);
-    pc?.close();
-    this.audioPeerConnections.delete(peerId);
-    this.audioSenders.delete(peerId);
-    const audio = this.audioElements.get(peerId);
-    if (audio) {
-      audio.srcObject = null;
-      audio.remove();
-      this.audioElements.delete(peerId);
-    }
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('audio:playback', { detail: { peerId, playing: false } }));
-    }
-  }
-
-  private cleanupAudioConnections() {
-    this.audioPeerConnections.forEach((pc) => pc.close());
-    this.audioPeerConnections.clear();
-    this.audioSenders.clear();
-    this.audioElements.forEach((audio) => {
-      audio.srcObject = null;
-      audio.remove();
-    });
-    this.audioElements.clear();
-    if (this.localAudioStream) {
-      this.localAudioStream.getTracks().forEach((track) => track.stop());
-    }
-    this.localAudioStream = null;
-    this.localAudioTrack = null;
-    this.isVoiceTransmitting = false;
-    this.stopToneStream();
-    this.isToneTransmitting = false;
-  }
 
   private cleanupConnections() {
     this.peerConnections.forEach((pc) => pc.close());
@@ -1568,7 +1201,6 @@ class GameSessionService {
     this.hostChannel?.close();
     this.hostChannel = null;
     this.reconnectAttempts.clear();
-    this.cleanupAudioConnections();
   }
 
   private clearObjectiveCirclesSession() {
