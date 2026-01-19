@@ -126,6 +126,27 @@ const Rogue: React.FC = () => {
     setRoutineInterval(2000);
   }, []);
 
+  // Effet pour vérifier les conditions de victoire (Host uniquement)
+  useEffect(() => {
+    if (!isHost || !gameDetails?.started || gameDetails?.winner_type) return;
+
+    const allObjectives = gameDetails.props || [];
+    const capturedObjectives = allObjectives.filter(p => p.state === 'CAPTURED');
+
+    // Victoire Rogue si tous les objectifs sont capturés
+    if (allObjectives.length > 0 && capturedObjectives.length >= allObjectives.length) {
+      console.log('🏆 Tous les objectifs capturés - Victoire des Rogues !');
+      updateGameDetails({ 
+        winner_type: 'ROGUE',
+        remaining_time: 0 
+      }).then(() => {
+        setTimeout(() => {
+          history.push('/end-game');
+        }, 1000);
+      });
+    }
+  }, [isHost, gameDetails?.started, gameDetails?.winner_type, gameDetails?.props, updateGameDetails, history]);
+
   const fogRings = useFogRings(gameDetails, 20);
 
   // Fonctions pour les boutons FAB
@@ -251,6 +272,8 @@ const Rogue: React.FC = () => {
               );
               
               toast.success('🎯 Objectif capturé avec succès !');
+              
+              // Le useEffect vérifiera automatiquement si tous les objectifs sont capturés
             } catch (error) {
               console.error('❌ Erreur lors de la capture de l\'objectif:', error);
               toast.error('❌ Erreur lors de la capture de l\'objectif');
@@ -712,14 +735,6 @@ const Rogue: React.FC = () => {
               <TileLayer
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              />
-              <Circle
-                center={[
-                  parseFloat(gameDetails.map_center_latitude || '0'), 
-                  parseFloat(gameDetails.map_center_longitude || '0')
-                ]}
-                radius={gameDetails.map_radius || 750}
-                pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
               />
               <Pane name="fog" style={{ zIndex: 650 }}>
                 {fogRings.map((ring, index) => (

@@ -506,6 +506,9 @@ class GameSessionService {
       );
       this.updateState({ players, gameDetails: { ...this.state.gameDetails!, players } });
       this.broadcastState();
+      if (partial.role !== undefined) {
+        this.sendSocket('player:role-update', { playerId, role: partial.role });
+      }
     } else {
       this.sendAction('action:update-player', { playerId, changes: partial });
     }

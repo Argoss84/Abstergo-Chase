@@ -9,6 +9,27 @@ dotenv.config();
 const PORT = process.env.SIGNALING_PORT || 5174;
 const SOCKET_IO_PATH = process.env.SOCKET_IO_PATH || '/socket.io';
 
+const formatRemainingTime = (seconds) => {
+  if (seconds === null || seconds === undefined || Number.isNaN(seconds)) {
+    return 'n/a';
+  }
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainingSeconds = safeSeconds % 60;
+  return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
+};
+
+const getRemainingTimeSeconds = (game) => {
+  if (!game || typeof game.remainingTimeSeconds !== 'number') {
+    return null;
+  }
+  const updatedAt = typeof game.remainingTimeUpdatedAt === 'number'
+    ? game.remainingTimeUpdatedAt
+    : Date.now();
+  const elapsedSeconds = Math.floor((Date.now() - updatedAt) / 1000);
+  return Math.max(game.remainingTimeSeconds - elapsedSeconds, 0);
+};
+
 // Fonction pour obtenir les statistiques du serveur
 const getServerStats = () => ({
   connectedClients: clients.size,
@@ -53,6 +74,7 @@ const getServerStats = () => ({
     hostId: game.hostId,
     playerCount: game.players.size,
     socketMessageCount: gameSocketMessageCounts.get(code) || 0,
+    remainingTimeSeconds: getRemainingTimeSeconds(game),
     players: Array.from(game.players.values()).map(player => {
       const socket = socketsById.get(player.id);
       return {
@@ -447,9 +469,10 @@ const server = createServer((req, res) => {
                       const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
                       const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
                       const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
+                      const roleLabel = p.role ? ` [${p.role}]` : ' [n/a]';
                       return `
                         <div style="margin: 2px 0; opacity: ${opacity};">
-                          ${icon} ${p.name} ${p.isHost ? '👑' : ''} ${badge}
+                          ${icon} ${p.name}${roleLabel} ${p.isHost ? '👑' : ''} ${badge}
                         </div>
                       `;
                     }).join('')}
@@ -472,6 +495,7 @@ const server = createServer((req, res) => {
               <th>Host ID</th>
               <th>Joueurs</th>
               <th>Messages</th>
+              <th>Temps restant</th>
               <th>Détails</th>
             </tr>
           </thead>
@@ -482,6 +506,7 @@ const server = createServer((req, res) => {
                 <td><code>${game.hostId.substring(0, 8)}...</code></td>
                 <td>${game.playerCount}</td>
                 <td>${game.socketMessageCount}</td>
+                <td><strong>${formatRemainingTime(game.remainingTimeSeconds)}</strong></td>
                 <td>
                   <div class="player-list">
                     ${game.players.map(p => {
@@ -490,9 +515,10 @@ const server = createServer((req, res) => {
                       const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
                       const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
                       const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
+                      const roleLabel = p.role ? ` [${p.role}]` : ' [n/a]';
                       return `
                         <div style="margin: 2px 0; opacity: ${opacity};">
-                          ${icon} ${p.name} ${p.isHost ? '👑' : ''} ${badge}
+                          ${icon} ${p.name}${roleLabel} ${p.isHost ? '👑' : ''} ${badge}
                         </div>
                       `;
                     }).join('')}
@@ -534,6 +560,16 @@ const server = createServer((req, res) => {
 
   <script>
     let lastLogCount = 0;
+
+    const formatRemainingTime = (seconds) => {
+      if (seconds === null || seconds === undefined || Number.isNaN(seconds)) {
+        return 'n/a';
+      }
+      const safeSeconds = Math.max(0, Math.floor(seconds));
+      const minutes = Math.floor(safeSeconds / 60);
+      const remainingSeconds = safeSeconds % 60;
+      return minutes + ':' + String(remainingSeconds).padStart(2, '0');
+    };
     
     // Fonction pour mettre à jour les statistiques
     async function updateStats() {
@@ -616,9 +652,10 @@ const server = createServer((req, res) => {
                           const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
                           const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
                           const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
+                          const roleLabel = p.role ? \` [\${p.role}]\` : ' [n/a]';
                           return \`
                             <div style="margin: 2px 0; opacity: \${opacity};">
-                              \${icon} \${p.name} \${p.isHost ? '👑' : ''} \${badge}
+                              \${icon} \${p.name}\${roleLabel} \${p.isHost ? '👑' : ''} \${badge}
                             </div>
                           \`;
                         }).join('')}
@@ -645,6 +682,7 @@ const server = createServer((req, res) => {
                   <th>Host ID</th>
                   <th>Joueurs</th>
                   <th>Messages</th>
+                  <th>Temps restant</th>
                   <th>Détails</th>
                 </tr>
               </thead>
@@ -655,6 +693,7 @@ const server = createServer((req, res) => {
                     <td><code>\${game.hostId.substring(0, 8)}...</code></td>
                     <td>\${game.playerCount}</td>
                     <td>\${game.socketMessageCount}</td>
+                    <td><strong>\${formatRemainingTime(game.remainingTimeSeconds)}</strong></td>
                     <td>
                       <div class="player-list">
                         \${game.players.map(p => {
@@ -663,9 +702,10 @@ const server = createServer((req, res) => {
                           const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
                           const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
                           const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
+                          const roleLabel = p.role ? \` [\${p.role}]\` : ' [n/a]';
                           return \`
                             <div style="margin: 2px 0; opacity: \${opacity};">
-                              \${icon} \${p.name} \${p.isHost ? '👑' : ''} \${badge}
+                              \${icon} \${p.name}\${roleLabel} \${p.isHost ? '👑' : ''} \${badge}
                             </div>
                           \`;
                         }).join('')}
@@ -1487,6 +1527,15 @@ io.on('connection', (socket) => {
         log(`[ERREUR RESYNC] État sync vers ${targetId} échoué: destinataire introuvable`);
         return;
       }
+      const gameCode = clientInfo?.gameCode;
+      const remainingTime = payload?.payload?.gameDetails?.remaining_time;
+      if (gameCode && games.has(gameCode) && typeof remainingTime === 'number') {
+        const game = games.get(gameCode);
+        if (game && clientInfo?.clientId === game.hostId) {
+          game.remainingTimeSeconds = remainingTime;
+          game.remainingTimeUpdatedAt = Date.now();
+        }
+      }
       send(targetSocket, {
         type: 'state:sync',
         payload: payload?.payload
@@ -1718,6 +1767,30 @@ io.on('connection', (socket) => {
               log(`[HOST RETOUR] Code: ${lobbyCode}, Host: ${clientId} - Timer annulé`);
             }
           }
+        }
+      }
+      return;
+    }
+
+    if (type === 'player:role-update') {
+      const { lobbyCode, gameCode } = clients.get(socket.id) || {};
+      const targetId = payload?.playerId || clientId;
+      const role = payload?.role ?? null;
+
+      if (gameCode && games.has(gameCode)) {
+        const game = games.get(gameCode);
+        const player = game.players.get(targetId);
+        if (player) {
+          player.role = role;
+        }
+        return;
+      }
+
+      if (lobbyCode && lobbies.has(lobbyCode)) {
+        const lobby = lobbies.get(lobbyCode);
+        const player = lobby.players.get(targetId);
+        if (player) {
+          player.role = role;
         }
       }
       return;
