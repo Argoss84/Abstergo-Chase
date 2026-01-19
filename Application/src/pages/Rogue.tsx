@@ -32,10 +32,12 @@ const Rogue: React.FC = () => {
     playerId,
     playerName,
     gameDetails: sessionGameDetails,
-    joinLobby,
+    joinGame,
     updateGameDetails,
     updateProp,
-    isHost
+    isHost,
+    connectionStatus,
+    sessionScope
   } = useGameSession();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
   const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
@@ -299,8 +301,14 @@ const Rogue: React.FC = () => {
           return;
         }
 
-        if (!sessionGameDetails || sessionGameDetails.code !== code) {
-          await joinLobby(code);
+        const needsReconnect =
+          sessionScope !== 'game' ||
+          connectionStatus !== 'connected' ||
+          !sessionGameDetails ||
+          sessionGameDetails.code !== code;
+
+        if (needsReconnect) {
+          await joinGame(code);
         }
 
         setQrCodeText(`${playerId};${code}`);
@@ -316,7 +324,7 @@ const Rogue: React.FC = () => {
     if (playerId) {
       fetchGameDetails();
     }
-  }, [location.search, playerId, sessionGameDetails, playerName, isHost]);
+  }, [location.search, playerId, sessionGameDetails, playerName, isHost, connectionStatus, sessionScope]);
 
   useEffect(() => {
     if (sessionGameDetails) {

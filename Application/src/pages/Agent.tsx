@@ -34,10 +34,12 @@ const Agent: React.FC = () => {
     playerId,
     playerName,
     gameDetails: sessionGameDetails,
-    joinLobby,
+    joinGame,
     updateGameDetails,
     updatePlayer,
     isHost,
+    connectionStatus,
+    sessionScope,
     requestLatestState
   } = useGameSession();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
@@ -408,8 +410,14 @@ const Agent: React.FC = () => {
           return;
         }
 
-        if (!sessionGameDetails || sessionGameDetails.code !== code) {
-          await joinLobby(code);
+        const needsReconnect =
+          sessionScope !== 'game' ||
+          connectionStatus !== 'connected' ||
+          !sessionGameDetails ||
+          sessionGameDetails.code !== code;
+
+        if (needsReconnect) {
+          await joinGame(code);
         }
 
         setQrCodeText(`${playerId};${code}`);
@@ -425,7 +433,7 @@ const Agent: React.FC = () => {
     if (playerId) {
       fetchGameDetails();
     }
-  }, [location.search, playerId, playerName, sessionGameDetails]);
+  }, [location.search, playerId, playerName, sessionGameDetails, connectionStatus, sessionScope]);
 
   useEffect(() => {
     if (sessionGameDetails) {

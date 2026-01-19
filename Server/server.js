@@ -13,12 +13,14 @@ const SOCKET_IO_PATH = process.env.SOCKET_IO_PATH || '/socket.io';
 const getServerStats = () => ({
   connectedClients: clients.size,
   activeLobbies: lobbies.size,
+  activeGames: games.size,
   totalSocketMessages,
   clients: Array.from(clients.entries()).map(([socketId, info]) => {
     const socket = io.sockets.sockets.get(socketId);
     return {
       clientId: info.clientId,
       lobbyCode: info.lobbyCode || 'Aucun',
+      gameCode: info.gameCode || 'Aucun',
       connected: Boolean(socket?.connected)
     };
   }),
@@ -46,6 +48,20 @@ const getServerStats = () => ({
       awayTimeout: awayInfo ? Math.ceil((2 * 60 * 1000 - (Date.now() - awayInfo.awayAt)) / 1000) : null
     };
   }),
+  games: Array.from(games.entries()).map(([code, game]) => ({
+    code,
+    hostId: game.hostId,
+    playerCount: game.players.size,
+    socketMessageCount: gameSocketMessageCounts.get(code) || 0,
+    players: Array.from(game.players.values()).map(player => {
+      const socket = socketsById.get(player.id);
+      return {
+        ...player,
+        socketConnected: Boolean(socket?.connected),
+        status: player.status || 'active'
+      };
+    })
+  })),
   serverInfo: {
     port: PORT,
     nodeVersion: process.version,
@@ -316,6 +332,10 @@ const server = createServer((req, res) => {
         <div class="label">Lobbies Actifs</div>
       </div>
       <div class="stat-box">
+        <div class="number">${stats.activeGames}</div>
+        <div class="label">Games en cours</div>
+      </div>
+      <div class="stat-box">
         <div class="number">${stats.totalSocketMessages}</div>
         <div class="label">Messages Socket Totaux</div>
       </div>
@@ -373,6 +393,7 @@ const server = createServer((req, res) => {
             <tr>
               <th>Client ID</th>
               <th>Lobby</th>
+              <th>Game</th>
               <th>Statut</th>
             </tr>
           </thead>
@@ -381,6 +402,7 @@ const server = createServer((req, res) => {
               <tr>
                 <td><code>${client.clientId.substring(0, 8)}...</code></td>
                 <td>${client.lobbyCode}</td>
+                <td>${client.gameCode}</td>
                 <td>
                   <span class="status ${client.connected ? 'connected' : 'disconnected'}">
                     ${client.connected ? '🟢 Connecté' : '🔴 Déconnecté'}
@@ -440,6 +462,49 @@ const server = createServer((req, res) => {
       ` : '<div class="no-data">Aucun lobby actif actuellement</div>'}
     </div>
 
+    <div class="card" id="gamesCard">
+      <h2>🎯 Games en cours</h2>
+      ${stats.games.length > 0 ? `
+        <table>
+          <thead>
+            <tr>
+              <th>Code Game</th>
+              <th>Host ID</th>
+              <th>Joueurs</th>
+              <th>Messages</th>
+              <th>Détails</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${stats.games.map(game => `
+              <tr>
+                <td><strong>${game.code}</strong></td>
+                <td><code>${game.hostId.substring(0, 8)}...</code></td>
+                <td>${game.playerCount}</td>
+                <td>${game.socketMessageCount}</td>
+                <td>
+                  <div class="player-list">
+                    ${game.players.map(p => {
+                      const isDisconnected = p.status === 'disconnected' || !p.socketConnected;
+                      const isAway = p.status === 'away';
+                      const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
+                      const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
+                      const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
+                      return `
+                        <div style="margin: 2px 0; opacity: ${opacity};">
+                          ${icon} ${p.name} ${p.isHost ? '👑' : ''} ${badge}
+                        </div>
+                      `;
+                    }).join('')}
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      ` : '<div class="no-data">Aucune game en cours</div>'}
+    </div>
+
     <div class="card" id="logsCard">
       <div class="logs-header">
         <h2>📋 Logs Serveur</h2>
@@ -479,9 +544,10 @@ const server = createServer((req, res) => {
         // Mettre à jour les statistiques principales
         document.querySelectorAll('.stat-box')[0].querySelector('.number').textContent = stats.connectedClients;
         document.querySelectorAll('.stat-box')[1].querySelector('.number').textContent = stats.activeLobbies;
-        document.querySelectorAll('.stat-box')[2].querySelector('.number').textContent = stats.totalSocketMessages;
-        document.querySelectorAll('.stat-box')[3].querySelector('.number').textContent = Math.floor(stats.serverInfo.uptime / 60) + 'm';
-        document.querySelectorAll('.stat-box')[4].querySelector('.number').textContent = Math.round(stats.serverInfo.memoryUsage.heapUsed / 1024 / 1024) + 'MB';
+        document.querySelectorAll('.stat-box')[2].querySelector('.number').textContent = stats.activeGames;
+        document.querySelectorAll('.stat-box')[3].querySelector('.number').textContent = stats.totalSocketMessages;
+        document.querySelectorAll('.stat-box')[4].querySelector('.number').textContent = Math.floor(stats.serverInfo.uptime / 60) + 'm';
+        document.querySelectorAll('.stat-box')[5].querySelector('.number').textContent = Math.round(stats.serverInfo.memoryUsage.heapUsed / 1024 / 1024) + 'MB';
         
         // Mettre à jour les clients
         const clientsCard = document.getElementById('clientsCard');
@@ -492,6 +558,7 @@ const server = createServer((req, res) => {
                 <tr>
                   <th>Client ID</th>
                   <th>Lobby</th>
+                  <th>Game</th>
                   <th>Statut</th>
                 </tr>
               </thead>
@@ -500,6 +567,7 @@ const server = createServer((req, res) => {
                   <tr>
                     <td><code>\${client.clientId.substring(0, 8)}...</code></td>
                     <td>\${client.lobbyCode}</td>
+                    <td>\${client.gameCode}</td>
                     <td>
                       <span class="status \${client.connected ? 'connected' : 'disconnected'}">
                         \${client.connected ? '🟢 Connecté' : '🔴 Déconnecté'}
@@ -564,6 +632,53 @@ const server = createServer((req, res) => {
           lobbiesCard.innerHTML = '<h2>🎮 Lobbies Actifs</h2>' + lobbiesHTML;
         } else {
           lobbiesCard.innerHTML = '<h2>🎮 Lobbies Actifs</h2><div class="no-data">Aucun lobby actif actuellement</div>';
+        }
+
+        // Mettre à jour les games
+        const gamesCard = document.getElementById('gamesCard');
+        if (stats.games.length > 0) {
+          const gamesHTML = \`
+            <table>
+              <thead>
+                <tr>
+                  <th>Code Game</th>
+                  <th>Host ID</th>
+                  <th>Joueurs</th>
+                  <th>Messages</th>
+                  <th>Détails</th>
+                </tr>
+              </thead>
+              <tbody>
+                \${stats.games.map(game => \`
+                  <tr>
+                    <td><strong>\${game.code}</strong></td>
+                    <td><code>\${game.hostId.substring(0, 8)}...</code></td>
+                    <td>\${game.playerCount}</td>
+                    <td>\${game.socketMessageCount}</td>
+                    <td>
+                      <div class="player-list">
+                        \${game.players.map(p => {
+                          const isDisconnected = p.status === 'disconnected' || !p.socketConnected;
+                          const isAway = p.status === 'away';
+                          const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
+                          const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
+                          const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
+                          return \`
+                            <div style="margin: 2px 0; opacity: \${opacity};">
+                              \${icon} \${p.name} \${p.isHost ? '👑' : ''} \${badge}
+                            </div>
+                          \`;
+                        }).join('')}
+                      </div>
+                    </td>
+                  </tr>
+                \`).join('')}
+              </tbody>
+            </table>
+          \`;
+          gamesCard.innerHTML = '<h2>🎯 Games en cours</h2>' + gamesHTML;
+        } else {
+          gamesCard.innerHTML = '<h2>🎯 Games en cours</h2><div class="no-data">Aucune game en cours</div>';
         }
         
         // Mettre à jour les logs seulement si nécessaire
@@ -631,11 +746,14 @@ const io = new SocketIOServer(server, {
 });
 
 const lobbies = new Map();
+const games = new Map();
 const clients = new Map();
 const socketsById = new Map();
 const disconnectedHosts = new Map(); // Stocke temporairement les lobbies dont le host s'est déconnecté
+const disconnectedGameHosts = new Map(); // Stocke temporairement les games dont le host s'est déconnecté
 const awayHosts = new Map(); // Stocke les lobbies dont le host est absent (away)
 const lobbySocketMessageCounts = new Map();
+const gameSocketMessageCounts = new Map();
 let totalSocketMessages = 0;
 
 // Stockage des logs en mémoire (derniers 100 logs)
@@ -684,17 +802,46 @@ const incrementLobbySocketMessages = (lobbyCode) => {
   lobbySocketMessageCounts.set(lobbyCode, current + 1);
 };
 
+const incrementGameSocketMessages = (gameCode) => {
+  if (!gameCode) return;
+  const current = gameSocketMessageCounts.get(gameCode) || 0;
+  gameSocketMessageCounts.set(gameCode, current + 1);
+};
+
 const getLobbyCodeFromMessage = (type, payload, clientInfo) => {
+  const isLobbyType =
+    type?.startsWith('lobby:') ||
+    type === 'webrtc:signal' ||
+    type === 'action:relay' ||
+    type === 'state:sync' ||
+    type === 'player:status-update';
+
+  if (!isLobbyType) return null;
+
   if (type === 'lobby:join' || type === 'lobby:rejoin-host') {
     return payload?.code?.toUpperCase() || null;
   }
   if (type === 'lobby:leave') {
     return payload?.lobbyCode?.toUpperCase() || clientInfo?.lobbyCode || null;
   }
-  if (payload?.code && typeof payload.code === 'string') {
-    return payload.code.toUpperCase();
-  }
   return clientInfo?.lobbyCode || null;
+};
+
+const getGameCodeFromMessage = (type, payload, clientInfo) => {
+  const isGameType =
+    type?.startsWith('game:') ||
+    type === 'player:status-update' ||
+    type === 'state:sync';
+
+  if (!isGameType) return null;
+
+  if (type === 'game:join' || type === 'game:rejoin-host') {
+    return payload?.code?.toUpperCase() || null;
+  }
+  if (type === 'game:leave') {
+    return payload?.gameCode?.toUpperCase() || clientInfo?.gameCode || null;
+  }
+  return clientInfo?.gameCode || null;
 };
 
 const send = (socket, message) => {
@@ -720,7 +867,7 @@ const getLobbySnapshot = (lobby) => ({
 
 io.on('connection', (socket) => {
   const clientId = randomUUID();
-  clients.set(socket.id, { clientId, lobbyCode: null });
+  clients.set(socket.id, { clientId, lobbyCode: null, gameCode: null });
   socketsById.set(clientId, socket);
   
   log(`[CONNEXION] Nouveau client connecté: ${clientId}`);
@@ -751,7 +898,9 @@ io.on('connection', (socket) => {
     log(`[MESSAGE REÇU] ClientId: ${clientId}, Type: ${type}, Payload:`, payload);
     const clientInfo = clients.get(socket.id);
     const lobbyCodeForMessage = getLobbyCodeFromMessage(type, payload, clientInfo);
+    const gameCodeForMessage = getGameCodeFromMessage(type, payload, clientInfo);
     incrementLobbySocketMessages(lobbyCodeForMessage);
+    incrementGameSocketMessages(gameCodeForMessage);
 
     if (type === 'lobby:create') {
       let code = generateCode();
@@ -993,6 +1142,288 @@ io.on('connection', (socket) => {
       }
     }
 
+    if (type === 'game:create') {
+      const code = payload?.code?.toUpperCase();
+      const lobby = lobbies.get(code);
+      if (!code || !lobby) {
+        send(socket, { type: 'game:error', payload: { message: 'Lobby introuvable pour démarrer la partie.' } });
+        return;
+      }
+
+      if (lobby.hostId !== clientId) {
+        send(socket, { type: 'game:error', payload: { message: 'Seul le host peut démarrer la partie.' } });
+        return;
+      }
+
+      if (games.has(code)) {
+        send(socket, {
+          type: 'game:created',
+          payload: {
+            code,
+            playerId: clientId,
+            hostId: lobby.hostId,
+            game: getLobbySnapshot(games.get(code))
+          }
+        });
+        return;
+      }
+
+      const game = {
+        code,
+        hostId: lobby.hostId,
+        players: new Map()
+      };
+
+      lobby.players.forEach((player) => {
+        game.players.set(player.id, { ...player });
+      });
+
+      games.set(code, game);
+      gameSocketMessageCounts.set(code, gameSocketMessageCounts.get(code) || 0);
+
+      lobby.players.forEach((player) => {
+        const playerSocket = socketsById.get(player.id);
+        if (playerSocket) {
+          const playerClient = clients.get(playerSocket.id);
+          if (playerClient) {
+            playerClient.lobbyCode = null;
+          }
+        }
+      });
+
+      lobbies.delete(code);
+      lobbySocketMessageCounts.delete(code);
+
+      lobby.players.forEach((player) => {
+        const playerSocket = socketsById.get(player.id);
+        if (playerSocket) {
+          send(playerSocket, {
+            type: 'game:started',
+            payload: { code }
+          });
+        }
+      });
+
+      clients.get(socket.id).gameCode = code;
+      clients.get(socket.id).lobbyCode = null;
+
+      send(socket, {
+        type: 'game:created',
+        payload: {
+          code,
+          playerId: clientId,
+          hostId: lobby.hostId,
+          game: getLobbySnapshot(game)
+        }
+      });
+      return;
+    }
+
+    if (type === 'game:join') {
+      const code = payload?.code?.toUpperCase();
+      const oldPlayerId = payload?.oldPlayerId;
+      const game = games.get(code);
+      if (!game) {
+        send(socket, { type: 'game:error', payload: { message: 'Partie introuvable.' } });
+        return;
+      }
+
+      if (oldPlayerId && game.players.has(oldPlayerId)) {
+        const existingPlayer = game.players.get(oldPlayerId);
+        game.players.delete(oldPlayerId);
+        game.players.set(clientId, {
+          id: clientId,
+          name: payload?.playerName || existingPlayer?.name || 'Joueur',
+          isHost: existingPlayer?.isHost || false,
+          status: existingPlayer?.status || 'active'
+        });
+
+        if (game.hostId === oldPlayerId) {
+          game.hostId = clientId;
+        }
+
+        socketsById.delete(oldPlayerId);
+        socketsById.set(clientId, socket);
+        clients.get(socket.id).gameCode = code;
+        clients.get(socket.id).lobbyCode = null;
+
+        send(socket, {
+          type: 'game:joined',
+          payload: {
+            code,
+            playerId: clientId,
+            hostId: game.hostId,
+            game: getLobbySnapshot(game)
+          }
+        });
+
+        if (game.hostId !== clientId) {
+          const hostSocket = socketsById.get(game.hostId);
+          if (hostSocket) {
+            send(hostSocket, {
+              type: 'game:peer-reconnected',
+              payload: {
+                playerId: clientId,
+                playerName: existingPlayer?.name || payload?.playerName || 'Joueur'
+              }
+            });
+          }
+        }
+        return;
+      }
+
+      if (game.players.has(clientId)) {
+        const existingPlayer = game.players.get(clientId);
+        if (existingPlayer && payload?.playerName) {
+          existingPlayer.name = payload.playerName;
+          game.players.set(clientId, existingPlayer);
+        }
+
+        clients.get(socket.id).gameCode = code;
+        clients.get(socket.id).lobbyCode = null;
+        socketsById.set(clientId, socket);
+
+        send(socket, {
+          type: 'game:joined',
+          payload: {
+            code,
+            playerId: clientId,
+            hostId: game.hostId,
+            game: getLobbySnapshot(game)
+          }
+        });
+
+        const hostSocket = socketsById.get(game.hostId);
+        if (hostSocket && hostSocket.id !== socket.id) {
+          send(hostSocket, {
+            type: 'game:peer-reconnected',
+            payload: {
+              playerId: clientId,
+              playerName: existingPlayer?.name || payload?.playerName || 'Joueur'
+            }
+          });
+        }
+
+        return;
+      }
+
+      game.players.set(clientId, { id: clientId, name: payload?.playerName || 'Joueur', isHost: false });
+      clients.get(socket.id).gameCode = code;
+      clients.get(socket.id).lobbyCode = null;
+
+      send(socket, {
+        type: 'game:joined',
+        payload: {
+          code,
+          playerId: clientId,
+          hostId: game.hostId,
+          game: getLobbySnapshot(game)
+        }
+      });
+
+      const hostSocket = socketsById.get(game.hostId);
+      if (hostSocket) {
+        send(hostSocket, {
+          type: 'game:peer-joined',
+          payload: {
+            playerId: clientId,
+            playerName: payload?.playerName || 'Joueur'
+          }
+        });
+      }
+      return;
+    }
+
+    if (type === 'game:rejoin-host') {
+      const code = payload?.code?.toUpperCase();
+      const oldPlayerId = payload?.playerId;
+      const game = games.get(code);
+
+      if (!game) {
+        send(socket, { type: 'game:error', payload: { message: 'Partie introuvable.' } });
+        return;
+      }
+
+      if (game.hostId === oldPlayerId) {
+        if (disconnectedGameHosts.has(code)) {
+          const hostInfo = disconnectedGameHosts.get(code);
+          clearTimeout(hostInfo.timeoutId);
+          disconnectedGameHosts.delete(code);
+        }
+
+        game.hostId = clientId;
+        const oldPlayer = game.players.get(oldPlayerId);
+        if (oldPlayer) {
+          game.players.delete(oldPlayerId);
+          game.players.set(clientId, {
+            id: clientId,
+            name: payload?.playerName || oldPlayer.name || 'Host',
+            isHost: true,
+            status: oldPlayer.status || 'active'
+          });
+        } else {
+          game.players.set(clientId, {
+            id: clientId,
+            name: payload?.playerName || 'Host',
+            isHost: true,
+            status: 'active'
+          });
+        }
+
+        socketsById.delete(oldPlayerId);
+        socketsById.set(clientId, socket);
+        clients.set(socket.id, { clientId, lobbyCode: null, gameCode: code });
+
+        send(socket, {
+          type: 'game:joined',
+          payload: {
+            code,
+            playerId: clientId,
+            hostId: clientId,
+            game: getLobbySnapshot(game)
+          }
+        });
+
+        game.players.forEach((player) => {
+          if (player.id !== clientId) {
+            const playerSocket = socketsById.get(player.id);
+            if (playerSocket) {
+              send(playerSocket, {
+                type: 'game:host-reconnected',
+                payload: { newHostId: clientId }
+              });
+            }
+          }
+        });
+        return;
+      }
+
+      send(socket, { type: 'game:error', payload: { message: 'Non autorisé à rejoindre en tant que host.' } });
+      return;
+    }
+
+    if (type === 'game:signal') {
+      const targetId = payload?.targetId;
+      const targetSocket = socketsById.get(targetId);
+      if (!targetSocket) {
+        send(socket, {
+          type: 'game:error',
+          payload: { message: 'Destinataire WebRTC introuvable.' }
+        });
+        return;
+      }
+
+      send(targetSocket, {
+        type: 'game:signal',
+        payload: {
+          fromId: clientId,
+          signal: payload?.signal,
+          channel: payload?.channel
+        }
+      });
+      return;
+    }
+
     if (type === 'webrtc:signal') {
       const targetId = payload?.targetId;
       const targetSocket = socketsById.get(targetId);
@@ -1034,6 +1465,21 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'game:request-resync') {
+      const { gameCode } = clients.get(socket.id) || {};
+      if (!gameCode || !games.has(gameCode)) {
+        send(socket, { type: 'game:error', payload: { message: 'Partie introuvable pour resync.' } });
+        return;
+      }
+      const game = games.get(gameCode);
+      const hostSocket = socketsById.get(game.hostId);
+      send(hostSocket, {
+        type: 'game:request-resync',
+        payload: { playerId: clientId }
+      });
+      return;
+    }
+
     if (type === 'state:sync') {
       const targetId = payload?.targetId;
       const targetSocket = socketsById.get(targetId);
@@ -1059,6 +1505,21 @@ io.on('connection', (socket) => {
       const hostSocket = socketsById.get(lobby.hostId);
       send(hostSocket, {
         type: 'action:relay',
+        payload: { fromId: clientId, action: payload?.action }
+      });
+      return;
+    }
+
+    if (type === 'game:action-relay') {
+      const { gameCode } = clients.get(socket.id) || {};
+      if (!gameCode || !games.has(gameCode)) {
+        send(socket, { type: 'game:error', payload: { message: 'Partie introuvable pour action.' } });
+        return;
+      }
+      const game = games.get(gameCode);
+      const hostSocket = socketsById.get(game.hostId);
+      send(hostSocket, {
+        type: 'game:action-relay',
         payload: { fromId: clientId, action: payload?.action }
       });
       return;
@@ -1139,8 +1600,60 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'game:leave') {
+      const code = payload?.gameCode;
+      const playerId = payload?.playerId || clientId;
+
+      if (!code || !games.has(code)) {
+        return;
+      }
+
+      const game = games.get(code);
+      if (!game.players.has(playerId)) {
+        return;
+      }
+
+      if (game.hostId === playerId) {
+        game.players.forEach((player) => {
+          if (player.id !== playerId) {
+            const playerSocket = socketsById.get(player.id);
+            send(playerSocket, {
+              type: 'game:closed',
+              payload: { code, reason: 'Le host a quitté la partie' }
+            });
+          }
+        });
+        games.delete(code);
+        gameSocketMessageCounts.delete(code);
+      } else {
+        game.players.delete(playerId);
+        const hostSocket = socketsById.get(game.hostId);
+        if (hostSocket) {
+          send(hostSocket, {
+            type: 'game:peer-left',
+            payload: { playerId }
+          });
+        }
+      }
+
+      const clientInfo = clients.get(socket.id);
+      if (clientInfo) {
+        clientInfo.gameCode = null;
+      }
+      return;
+    }
+
     if (type === 'player:status-update') {
-      const { lobbyCode } = clients.get(socket.id) || {};
+      const { lobbyCode, gameCode } = clients.get(socket.id) || {};
+      if (gameCode && games.has(gameCode)) {
+        const game = games.get(gameCode);
+        const player = game.players.get(clientId);
+        if (player) {
+          player.status = payload?.status || 'active';
+        }
+        return;
+      }
+
       if (!lobbyCode || !lobbies.has(lobbyCode)) {
         return;
       }
@@ -1224,7 +1737,37 @@ io.on('connection', (socket) => {
 
     log(`[DÉCONNEXION] Client déconnecté: ${clientInfo.clientId}`);
     
-    const { lobbyCode } = clientInfo;
+    const { lobbyCode, gameCode } = clientInfo;
+    if (gameCode && games.has(gameCode)) {
+      const game = games.get(gameCode);
+      if (game.hostId === clientInfo.clientId) {
+        const timeoutId = setTimeout(() => {
+          if (games.has(gameCode) && games.get(gameCode).hostId === clientInfo.clientId) {
+            const currentGame = games.get(gameCode);
+            if (currentGame) {
+              currentGame.players.forEach((player) => {
+                const playerSocket = socketsById.get(player.id);
+                send(playerSocket, { type: 'game:closed', payload: { code: gameCode } });
+              });
+            }
+            games.delete(gameCode);
+            gameSocketMessageCounts.delete(gameCode);
+            disconnectedGameHosts.delete(gameCode);
+          }
+        }, 5 * 60 * 1000);
+
+        disconnectedGameHosts.set(gameCode, {
+          hostId: clientInfo.clientId,
+          timeoutId,
+          disconnectedAt: Date.now()
+        });
+      } else {
+        game.players.delete(clientInfo.clientId);
+        const hostSocket = socketsById.get(game.hostId);
+        send(hostSocket, { type: 'game:peer-left', payload: { playerId: clientInfo.clientId } });
+      }
+    }
+
     if (lobbyCode && lobbies.has(lobbyCode)) {
       const lobby = lobbies.get(lobbyCode);
 

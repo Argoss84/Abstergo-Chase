@@ -52,7 +52,7 @@ const Lobby: React.FC = () => {
     players,
     playerId,
     updatePlayer,
-    updateGameDetails,
+    startGame,
     props,
     isHost,
     connectionStatus,
@@ -295,11 +295,7 @@ const Lobby: React.FC = () => {
         return;
       }
 
-      await updateGameDetails({
-        is_converging_phase: true,
-        started: true,
-        started_date: new Date().toISOString()
-      });
+      await startGame();
     } catch (error) {
       await handleErrorWithUser('Erreur lors du démarrage de la partie', error, ERROR_CONTEXTS.GAME_START);
     }

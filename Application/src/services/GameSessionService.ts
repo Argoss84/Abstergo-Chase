@@ -2,9 +2,11 @@ import { io, Socket } from 'socket.io-client';
 import { GameDetails, GameProp, Player } from '../components/Interfaces';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error';
+export type SessionScope = 'lobby' | 'game';
 
 interface SessionState {
   lobbyCode: string | null;
+  gameCode: string | null;
   playerId: string | null;
   playerName: string;
   isHost: boolean;
@@ -12,13 +14,16 @@ interface SessionState {
   gameDetails: GameDetails | null;
   props: GameProp[];
   connectionStatus: ConnectionStatus;
+  sessionScope: SessionScope;
 }
 
 interface PersistedSessionData {
   lobbyCode: string;
+  gameCode?: string | null;
   playerId: string;
   playerName: string;
   isHost: boolean;
+  sessionScope?: SessionScope;
   timestamp: number;
   gameDetails?: GameDetails | null;
   players?: Player[];
@@ -44,13 +49,15 @@ const defaultPlayerName = () => {
 
 const createInitialState = (): SessionState => ({
   lobbyCode: null,
+  gameCode: null,
   playerId: null,
   playerName: defaultPlayerName(),
   isHost: false,
   players: [],
   gameDetails: null,
   props: [],
-  connectionStatus: 'idle'
+  connectionStatus: 'idle',
+  sessionScope: 'lobby'
 });
 
 interface PendingAction {
@@ -71,6 +78,9 @@ class GameSessionService {
   private rejoinInFlight = false;
   private joinInProgress = false;
   private hostReconnectInProgress = false;
+  private gameRejoinInFlight = false;
+  private gameJoinInProgress = false;
+  private gameHostReconnectInProgress = false;
   private lastStatusUpdate = 0;
 
   constructor() {
@@ -78,7 +88,7 @@ class GameSessionService {
       // Restaurer la session si elle existe
       this.restoreSession();
 
-      if (this.state.lobbyCode && this.state.playerId) {
+      if ((this.state.lobbyCode || this.state.gameCode) && this.state.playerId) {
         this.ensureSocket().catch(() => {
           this.updateState({ connectionStatus: 'error' });
         });
@@ -88,7 +98,7 @@ class GameSessionService {
         // Gérer le changement de visibilité de la page
         if (!document.hidden) {
           // Quand l'utilisateur revient sur la page
-          if (this.state.lobbyCode && this.state.playerId) {
+          if ((this.state.lobbyCode || this.state.gameCode) && this.state.playerId) {
             // D'abord vérifier la connexion socket avant de mettre à jour le statut
             if (!this.socket?.connected) {
               // Ne pas déclencher de reconnexion pour le host si le socket se reconnecte automatiquement
@@ -111,7 +121,7 @@ class GameSessionService {
           }
         } else {
           // Quand l'utilisateur quitte la page - marquer comme away
-          if (this.state.lobbyCode && this.state.playerId) {
+          if ((this.state.lobbyCode || this.state.gameCode) && this.state.playerId) {
             // Mettre à jour le statut à "away" (via WebRTC ET socket.io)
             this.updatePlayerStatus('away');
           }
@@ -119,7 +129,7 @@ class GameSessionService {
       });
       window.addEventListener('beforeunload', () => {
         // Marquer le joueur comme déconnecté avant de fermer
-        if (this.state.lobbyCode && this.state.playerId) {
+        if ((this.state.lobbyCode || this.state.gameCode) && this.state.playerId) {
           // Utiliser sendBeacon pour envoyer le message même si la page se ferme
           const url = window.location.hostname === 'localhost'
             ? 'http://localhost:5174'
@@ -159,7 +169,7 @@ class GameSessionService {
     console.log('Nettoyage complet de la session utilisateur');
     
     // Informer le serveur qu'on quitte le lobby (si connecté)
-    if (this.state.lobbyCode && this.socket?.connected) {
+    if ((this.state.lobbyCode || this.state.gameCode) && this.socket?.connected) {
       this.sendSocket('player:status-update', { status: 'disconnected' });
     }
     
@@ -194,12 +204,43 @@ class GameSessionService {
     const playerName = this.state.playerName;
     this.updateState({
       lobbyCode: null,
+      gameCode: null,
       playerId: null,
       isHost: false,
       players: [],
       gameDetails: null,
       props: [],
-      connectionStatus: this.socket?.connected ? 'connected' : 'idle'
+      connectionStatus: this.socket?.connected ? 'connected' : 'idle',
+      sessionScope: 'lobby'
+    });
+    this.state.playerName = playerName;
+  }
+
+  leaveGame() {
+    console.log('Sortie de la partie en cours');
+
+    if (this.state.gameCode && this.socket?.connected) {
+      this.sendSocket('game:leave', {
+        gameCode: this.state.gameCode,
+        playerId: this.state.playerId
+      });
+    }
+
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    this.clearObjectiveCirclesSession();
+    this.cleanupConnections();
+
+    const playerName = this.state.playerName;
+    this.updateState({
+      lobbyCode: null,
+      gameCode: null,
+      playerId: null,
+      isHost: false,
+      players: [],
+      gameDetails: null,
+      props: [],
+      connectionStatus: this.socket?.connected ? 'connected' : 'idle',
+      sessionScope: 'lobby'
     });
     this.state.playerName = playerName;
   }
@@ -231,7 +272,7 @@ class GameSessionService {
   async createLobby(gameDetails: GameDetails, props: GameProp[]) {
     try {
       // Nettoyer toute session existante avant de créer un nouveau lobby
-      if (this.state.lobbyCode || this.state.playerId) {
+      if (this.state.lobbyCode || this.state.gameCode || this.state.playerId) {
         console.log('Nettoyage de la session existante avant création d\'un nouveau lobby');
         this.cleanupConnections();
         localStorage.removeItem(SESSION_STORAGE_KEY);
@@ -281,12 +322,14 @@ class GameSessionService {
 
     this.updateState({
       lobbyCode,
+      gameCode: null,
       playerId,
       isHost: true,
       players: [hostPlayer],
       gameDetails: updatedGameDetails,
       props,
-      connectionStatus: 'connected'
+      connectionStatus: 'connected',
+      sessionScope: 'lobby'
     });
 
     // Informer le serveur socket.io que le joueur est actif
@@ -341,9 +384,11 @@ class GameSessionService {
       
       this.updateState({
         lobbyCode: response.code,
+        gameCode: null,
         playerId: response.playerId,
         isHost: response.playerId === response.hostId,
-        connectionStatus: 'connected'
+        connectionStatus: 'connected',
+        sessionScope: 'lobby'
       });
 
       // Informer le serveur socket.io que le joueur est actif
@@ -355,6 +400,88 @@ class GameSessionService {
     } finally {
       this.joinInProgress = false;
     }
+  }
+
+  async startGame() {
+    if (!this.state.isHost || !this.state.lobbyCode || !this.state.gameDetails) {
+      return;
+    }
+
+    await this.ensureSocket();
+
+    const updatedGameDetails = {
+      ...this.state.gameDetails,
+      is_converging_phase: true,
+      started: true,
+      started_date: new Date().toISOString()
+    } as GameDetails;
+
+    this.updateState({ gameDetails: updatedGameDetails });
+
+    this.sendSocket('game:create', { code: this.state.lobbyCode });
+    const response = await this.waitFor('game:created', 15000);
+
+    this.cleanupConnections();
+    this.updateState({
+      lobbyCode: null,
+      gameCode: response.code,
+      playerId: response.playerId,
+      isHost: true,
+      connectionStatus: 'connected',
+      sessionScope: 'game',
+      gameDetails: updatedGameDetails
+    });
+
+    await this.reestablishAllPeerConnections();
+  }
+
+  async joinGame(code: string) {
+    if (this.gameJoinInProgress || this.gameRejoinInFlight || this.gameHostReconnectInProgress) {
+      return;
+    }
+
+    if (this.state.gameCode === code && this.state.sessionScope === 'game' && this.state.connectionStatus === 'connected') {
+      return;
+    }
+
+    this.gameJoinInProgress = true;
+    try {
+      await this.ensureSocket();
+      this.cleanupConnections();
+
+      const isReconnecting = this.state.gameCode === code && this.state.playerId;
+
+      this.sendSocket('game:join', {
+        code,
+        playerName: this.state.playerName,
+        oldPlayerId: isReconnecting ? this.state.playerId : undefined
+      });
+
+      const response = await this.waitFor('game:joined');
+
+      this.updateState({
+        lobbyCode: null,
+        gameCode: response.code,
+        playerId: response.playerId,
+        isHost: response.playerId === response.hostId,
+        connectionStatus: 'connected',
+        sessionScope: 'game'
+      });
+
+      this.sendSocket('player:status-update', { status: 'active' });
+    } finally {
+      this.gameJoinInProgress = false;
+    }
+  }
+
+  private transitionToGame(code: string) {
+    if (this.state.isHost) {
+      return;
+    }
+    if (this.state.sessionScope === 'game' && this.state.gameCode === code) {
+      return;
+    }
+    this.joinGame(code);
   }
 
   async updateGameDetails(partial: Partial<GameDetails>) {
@@ -451,15 +578,17 @@ class GameSessionService {
   }
 
   private persistSession() {
-    if (!this.state.lobbyCode || !this.state.playerId) {
+    if ((!this.state.lobbyCode && !this.state.gameCode) || !this.state.playerId) {
       return;
     }
 
     const data: PersistedSessionData = {
-      lobbyCode: this.state.lobbyCode,
+      lobbyCode: this.state.lobbyCode || this.state.gameCode || '',
+      gameCode: this.state.gameCode,
       playerId: this.state.playerId,
       playerName: this.state.playerName,
       isHost: this.state.isHost,
+      sessionScope: this.state.sessionScope,
       timestamp: Date.now(),
       gameDetails: this.state.gameDetails,
       players: this.state.players,
@@ -489,7 +618,7 @@ class GameSessionService {
       }
       
       // Validation des données essentielles
-      if (!data.lobbyCode || !data.playerId || !data.playerName) {
+      if ((!data.lobbyCode && !data.gameCode) || !data.playerId || !data.playerName) {
         console.warn('Session invalide (données manquantes), suppression');
         localStorage.removeItem(SESSION_STORAGE_KEY);
         return;
@@ -498,11 +627,14 @@ class GameSessionService {
       console.log(`Restauration de la session: lobby ${data.lobbyCode}, joueur ${data.playerName}`);
       
       // Restaurer tous les états y compris gameDetails, players et props
+      const restoredScope = data.sessionScope || 'lobby';
       const stateUpdate: Partial<SessionState> = {
-        lobbyCode: data.lobbyCode,
+        lobbyCode: restoredScope === 'lobby' ? data.lobbyCode : null,
+        gameCode: restoredScope === 'game' ? data.gameCode || data.lobbyCode : null,
         playerId: data.playerId,
         playerName: data.playerName,
-        isHost: data.isHost
+        isHost: data.isHost,
+        sessionScope: restoredScope
       };
 
       // Restaurer les données du jeu si elles existent (important pour le host)
@@ -597,12 +729,73 @@ class GameSessionService {
     }
   }
 
+  private async reconnectToGame() {
+    if (!this.state.gameCode || !this.state.playerId) {
+      return;
+    }
+
+    if (this.gameHostReconnectInProgress || this.gameJoinInProgress || this.gameRejoinInFlight) {
+      return;
+    }
+
+    try {
+      await this.ensureSocket();
+
+      if (this.state.isHost) {
+        this.gameHostReconnectInProgress = true;
+
+        this.sendSocket('game:rejoin-host', {
+          code: this.state.gameCode,
+          playerId: this.state.playerId,
+          playerName: this.state.playerName
+        });
+
+        try {
+          const response = await this.waitFor('game:joined', 10000);
+
+          const oldPlayerId = this.state.playerId;
+          const newPlayerId = response.playerId;
+
+          const updatedPlayers = this.state.players.map((player) =>
+            player.id_player === oldPlayerId
+              ? { ...player, id_player: newPlayerId, user_id: newPlayerId }
+              : player
+          );
+
+          const updatedGameDetails = this.state.gameDetails
+            ? { ...this.state.gameDetails, players: updatedPlayers }
+            : null;
+
+          this.updateState({
+            playerId: newPlayerId,
+            players: updatedPlayers,
+            gameDetails: updatedGameDetails,
+            connectionStatus: 'connected',
+            sessionScope: 'game'
+          });
+
+          this.cleanupConnections();
+          await this.reestablishAllPeerConnections();
+        } catch (error) {
+          this.updateState({ connectionStatus: 'error' });
+        } finally {
+          this.gameHostReconnectInProgress = false;
+        }
+      } else {
+        await this.attemptGameRejoin();
+      }
+    } catch (error) {
+      this.updateState({ connectionStatus: 'error' });
+      this.gameHostReconnectInProgress = false;
+    }
+  }
+
   private updateState(partial: Partial<SessionState>) {
     this.state = { ...this.state, ...partial };
     this.listeners.forEach((listener) => listener(this.state));
     
     // Persister la session si on a un lobby actif
-    if (this.state.lobbyCode && this.state.playerId) {
+    if ((this.state.lobbyCode || this.state.gameCode) && this.state.playerId) {
       this.persistSession();
     }
   }
@@ -642,7 +835,7 @@ class GameSessionService {
         this.handleSocketReconnect();
         
         // Si on est sur la page et qu'on a un lobby, mettre à jour le statut à "active"
-        if (!document.hidden && this.state.lobbyCode && this.state.playerId) {
+        if (!document.hidden && (this.state.lobbyCode || this.state.gameCode) && this.state.playerId) {
           // Attendre un peu que la connexion soit stable
           setTimeout(() => {
             this.updatePlayerStatus('active');
@@ -732,7 +925,25 @@ class GameSessionService {
       return;
     }
 
+    if (type === 'game:error') {
+      const waitingTypes = ['game:joined', 'game:created'];
+      for (const waitingType of waitingTypes) {
+        if (this.pendingActions.has(waitingType)) {
+          const action = this.pendingActions.get(waitingType)!;
+          this.pendingActions.delete(waitingType);
+          action.reject(new Error(payload?.message || 'Erreur de partie'));
+          break;
+        }
+      }
+      return;
+    }
+
     if (type === 'lobby:peer-joined' && this.state.isHost) {
+      this.handlePeerJoined(payload.playerId, payload.playerName);
+      return;
+    }
+
+    if (type === 'game:peer-joined' && this.state.isHost) {
       this.handlePeerJoined(payload.playerId, payload.playerName);
       return;
     }
@@ -742,7 +953,17 @@ class GameSessionService {
       return;
     }
 
+    if (type === 'game:peer-reconnected' && this.state.isHost) {
+      this.handlePeerReconnected(payload.playerId, payload.playerName);
+      return;
+    }
+
     if (type === 'lobby:peer-left' && this.state.isHost) {
+      this.handlePeerLeft(payload.playerId);
+      return;
+    }
+
+    if (type === 'game:peer-left' && this.state.isHost) {
       this.handlePeerLeft(payload.playerId);
       return;
     }
@@ -752,8 +973,26 @@ class GameSessionService {
       return;
     }
 
+    if (type === 'game:host-reconnected') {
+      this.handleHostReconnected(payload.newHostId);
+      return;
+    }
+
     if (type === 'lobby:closed') {
       this.resetSession();
+      return;
+    }
+
+    if (type === 'game:closed') {
+      this.resetSession();
+      return;
+    }
+
+    if (type === 'game:started') {
+      const code = payload?.code;
+      if (code) {
+        this.transitionToGame(code);
+      }
       return;
     }
 
@@ -762,7 +1001,17 @@ class GameSessionService {
       return;
     }
 
+    if (type === 'game:signal') {
+      this.handleSignal(payload.fromId, payload.signal);
+      return;
+    }
+
     if (type === 'lobby:request-resync' && this.state.isHost) {
+      this.handleResyncRequest(payload?.playerId);
+      return;
+    }
+
+    if (type === 'game:request-resync' && this.state.isHost) {
       this.handleResyncRequest(payload?.playerId);
       return;
     }
@@ -775,6 +1024,10 @@ class GameSessionService {
     if (type === 'action:relay' && this.state.isHost) {
       this.handleActionMessage(payload?.action);
     }
+
+    if (type === 'game:action-relay' && this.state.isHost) {
+      this.handleActionMessage(payload?.action);
+    }
   }
 
   private resetSession() {
@@ -783,12 +1036,14 @@ class GameSessionService {
     this.clearObjectiveCirclesSession();
     this.updateState({
       lobbyCode: null,
+      gameCode: null,
       playerId: null,
       isHost: false,
       players: [],
       gameDetails: null,
       props: [],
-      connectionStatus: 'idle'
+      connectionStatus: 'idle',
+      sessionScope: 'lobby'
     });
   }
 
@@ -821,10 +1076,7 @@ class GameSessionService {
     const pc = this.createPeerConnection(playerId, true);
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    this.sendSocket('webrtc:signal', {
-      targetId: playerId,
-      signal: { type: 'offer', sdp: pc.localDescription }
-    });
+    this.sendSignal(playerId, { type: 'offer', sdp: pc.localDescription });
 
     this.broadcastState();
   }
@@ -855,10 +1107,7 @@ class GameSessionService {
     const pc = this.createPeerConnection(playerId, true);
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    this.sendSocket('webrtc:signal', {
-      targetId: playerId,
-      signal: { type: 'offer', sdp: pc.localDescription }
-    });
+    this.sendSignal(playerId, { type: 'offer', sdp: pc.localDescription });
 
     // Envoyer l'état actuel une fois la connexion établie
     this.broadcastState();
@@ -903,10 +1152,7 @@ class GameSessionService {
           const pc = this.createPeerConnection(player.id_player, true);
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-          this.sendSocket('webrtc:signal', {
-            targetId: player.id_player,
-            signal: { type: 'offer', sdp: pc.localDescription }
-          });
+          this.sendSignal(player.id_player, { type: 'offer', sdp: pc.localDescription });
         } catch (error) {
           // Erreur silencieuse
         }
@@ -917,6 +1163,14 @@ class GameSessionService {
     setTimeout(() => this.broadcastState(), 2000);
   }
 
+  private sendSignal(targetId: string, signal: SignalMessage) {
+    const type = this.state.sessionScope === 'game' ? 'game:signal' : 'webrtc:signal';
+    this.sendSocket(type, {
+      targetId,
+      signal
+    });
+  }
+
 
   private createPeerConnection(peerId: string, isHost: boolean) {
     const pc = new RTCPeerConnection({
@@ -925,10 +1179,7 @@ class GameSessionService {
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        this.sendSocket('webrtc:signal', {
-          targetId: peerId,
-          signal: { type: 'ice', candidate: event.candidate }
-        });
+        this.sendSignal(peerId, { type: 'ice', candidate: event.candidate });
       }
     };
 
@@ -993,10 +1244,7 @@ class GameSessionService {
       await pc.setRemoteDescription(signal.sdp);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      this.sendSocket('webrtc:signal', {
-        targetId: fromId,
-        signal: { type: 'answer', sdp: pc.localDescription }
-      });
+      this.sendSignal(fromId, { type: 'answer', sdp: pc.localDescription });
     }
 
     if (signal.type === 'answer' && signal.sdp) {
@@ -1058,7 +1306,8 @@ class GameSessionService {
       this.hostChannel.send(JSON.stringify({ type, payload }));
       return;
     }
-    this.sendSocket('action:relay', { action: { type, payload } });
+    const relayType = this.state.sessionScope === 'game' ? 'game:action-relay' : 'action:relay';
+    this.sendSocket(relayType, { action: { type, payload } });
   }
 
   private handleActionMessage(message?: { type?: string; payload?: any }) {
@@ -1087,6 +1336,14 @@ class GameSessionService {
   }
 
   private handleSocketReconnect() {
+    if (this.state.sessionScope === 'game' && this.state.gameCode) {
+      if (this.state.isHost) {
+        this.reconnectToGame();
+      } else {
+        this.attemptGameRejoin();
+      }
+      return;
+    }
     if (this.state.lobbyCode) {
       if (this.state.isHost) {
         this.reconnectToLobby();
@@ -1130,8 +1387,46 @@ class GameSessionService {
     }
   }
 
+  private async attemptGameRejoin() {
+    if (this.gameRejoinInFlight || this.gameJoinInProgress || !this.state.gameCode) {
+      return;
+    }
+
+    if (this.state.connectionStatus === 'connected') {
+      return;
+    }
+
+    this.gameRejoinInFlight = true;
+    try {
+      this.sendSocket('game:join', {
+        code: this.state.gameCode,
+        playerName: this.state.playerName,
+        oldPlayerId: this.state.playerId
+      });
+      const response = await this.waitFor('game:joined', 10000);
+      this.updateState({
+        lobbyCode: null,
+        gameCode: response.code,
+        playerId: response.playerId,
+        isHost: response.playerId === response.hostId,
+        connectionStatus: 'connected',
+        sessionScope: 'game'
+      });
+      this.requestResync('socket-reconnect');
+    } catch (error) {
+      // Erreur silencieuse
+    } finally {
+      this.gameRejoinInFlight = false;
+    }
+  }
+
   private requestResync(reason: string) {
     if (this.state.isHost) return;
+    if (this.state.sessionScope === 'game') {
+      if (!this.state.gameCode) return;
+      this.sendSocket('game:request-resync', { reason });
+      return;
+    }
     if (!this.state.lobbyCode) return;
     this.sendSocket('lobby:request-resync', { reason });
   }
@@ -1178,10 +1473,7 @@ class GameSessionService {
     const pc = this.createPeerConnection(peerId, true);
     const offer = await pc.createOffer({ iceRestart: true });
     await pc.setLocalDescription(offer);
-    this.sendSocket('webrtc:signal', {
-      targetId: peerId,
-      signal: { type: 'offer', sdp: pc.localDescription }
-    });
+    this.sendSignal(peerId, { type: 'offer', sdp: pc.localDescription });
   }
 
   private handlePeerConnectionIssue(peerId: string, state: string) {

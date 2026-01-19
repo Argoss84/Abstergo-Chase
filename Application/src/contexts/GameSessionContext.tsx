@@ -6,6 +6,8 @@ import { GameDetails, GameProp, Player } from '../components/Interfaces';
 interface GameSessionContextValue extends SessionState {
   createLobby: (gameDetails: GameDetails, props: GameProp[]) => Promise<string>;
   joinLobby: (code: string) => Promise<void>;
+  startGame: () => Promise<void>;
+  joinGame: (code: string) => Promise<void>;
   updateGameDetails: (partial: Partial<GameDetails>) => Promise<void>;
   updatePlayer: (playerId: string, partial: Partial<Player>) => Promise<void>;
   updateProp: (propId: number, partial: Partial<GameProp>) => Promise<void>;
@@ -13,6 +15,7 @@ interface GameSessionContextValue extends SessionState {
   setPlayerName: (name: string) => void;
   clearSession: () => void;
   leaveLobby: () => void;
+  leaveGame: () => void;
   hasPersistedSession: () => boolean;
   disconnectSocket: () => void;
 }
@@ -32,6 +35,8 @@ export const GameSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
       return gameSessionService.createLobby(gameDetails, props);
     },
     joinLobby: async (code: string) => gameSessionService.joinLobby(code),
+    startGame: async () => gameSessionService.startGame(),
+    joinGame: async (code: string) => gameSessionService.joinGame(code),
     updateGameDetails: async (partial) => gameSessionService.updateGameDetails(partial),
     updatePlayer: async (playerId, partial) => gameSessionService.updatePlayer(playerId, partial),
     updateProp: async (propId, partial) => gameSessionService.updateProp(propId, partial),
@@ -39,6 +44,7 @@ export const GameSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setPlayerName: (name: string) => gameSessionService.setPlayerName(name),
     clearSession: () => gameSessionService.clearSession(),
     leaveLobby: () => gameSessionService.leaveLobby(),
+    leaveGame: () => gameSessionService.leaveGame(),
     hasPersistedSession: () => gameSessionService.hasPersistedSession(),
     disconnectSocket: () => gameSessionService.disconnectSocket()
   };
