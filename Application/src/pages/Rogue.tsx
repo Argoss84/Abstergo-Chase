@@ -545,20 +545,38 @@ const Rogue: React.FC = () => {
     pushRemainingTime();
   }, [countdown, isCountdownActive, isHost, gameCode]);
 
-  // Effet pour initialiser le compte à rebours quand la partie démarre (privilégier remaining_time)
+  // Lancer le compte à rebours uniquement si tous les joueurs sont dans leur zone
   useEffect(() => {
     if (!isHost) {
       return;
     }
     if (gameDetails?.started && !isCountdownActive) {
-      console.log('🚀 Partie démarrée - Initialisation du compte à rebours');
-      const totalSeconds = (gameDetails.remaining_time ?? gameDetails.duration) || 0;
-      if (totalSeconds > 0) {
-        setCountdown(totalSeconds);
-        setIsCountdownActive(true);
+      // Vérifier si tous les joueurs sont dans leur zone de départ
+      const allPlayersInStartZone = gameDetails?.players?.every(p => p.isInStartZone === true) ?? false;
+      
+      // Vérifier si le compte à rebours a déjà été lancé (remaining_time < duration)
+      const countdownAlreadyStarted = 
+        gameDetails.remaining_time !== undefined && 
+        gameDetails.remaining_time !== null && 
+        gameDetails.duration !== undefined &&
+        gameDetails.duration !== null &&
+        gameDetails.remaining_time < gameDetails.duration;
+      
+      // Ne lancer le compte à rebours que si :
+      // - Tous les joueurs sont dans leur zone, OU
+      // - Le compte à rebours a déjà été lancé (reconnexion/refresh)
+      if (allPlayersInStartZone || countdownAlreadyStarted) {
+        const totalSeconds = (gameDetails.remaining_time ?? gameDetails.duration) || 0;
+        if (totalSeconds > 0) {
+          setCountdown(totalSeconds);
+          setIsCountdownActive(true);
+          console.log('⏰ Compte à rebours démarré:', allPlayersInStartZone ? 'tous les joueurs en position' : 'reprise après reconnexion');
+        }
+      } else {
+        console.log('⏸️ Compte à rebours en attente: tous les joueurs doivent être dans leur zone');
       }
     }
-  }, [gameDetails?.started, gameDetails?.duration, gameDetails?.remaining_time, isCountdownActive, isHost]);
+  }, [gameDetails?.started, gameDetails?.duration, gameDetails?.remaining_time, gameDetails?.players, isCountdownActive, isHost]);
 
   useEffect(() => {
     if (!isHost && gameDetails?.remaining_time !== undefined && gameDetails?.remaining_time !== null) {

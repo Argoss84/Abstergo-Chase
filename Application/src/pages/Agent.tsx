@@ -559,19 +559,38 @@ const Agent: React.FC = () => {
     buildFallbackObjectiveCircles
   ]);
 
-  // Déterminer si l'utilisateur courant est admin
+  // Lancer le compte à rebours uniquement si tous les joueurs sont dans leur zone
   useEffect(() => {
     if (!isHost) {
       return;
     }
     if (gameDetails?.started && !isCountdownActive) {
-      const totalSeconds = (gameDetails.remaining_time ?? gameDetails.duration) || 0;
-      if (totalSeconds > 0) {
-        setCountdown(totalSeconds);
-        setIsCountdownActive(true);
+      // Vérifier si tous les joueurs sont dans leur zone de départ
+      const allPlayersInStartZone = gameDetails?.players?.every(p => p.isInStartZone === true) ?? false;
+      
+      // Vérifier si le compte à rebours a déjà été lancé (remaining_time < duration)
+      const countdownAlreadyStarted = 
+        gameDetails.remaining_time !== undefined && 
+        gameDetails.remaining_time !== null && 
+        gameDetails.duration !== undefined &&
+        gameDetails.duration !== null &&
+        gameDetails.remaining_time < gameDetails.duration;
+      
+      // Ne lancer le compte à rebours que si :
+      // - Tous les joueurs sont dans leur zone, OU
+      // - Le compte à rebours a déjà été lancé (reconnexion/refresh)
+      if (allPlayersInStartZone || countdownAlreadyStarted) {
+        const totalSeconds = (gameDetails.remaining_time ?? gameDetails.duration) || 0;
+        if (totalSeconds > 0) {
+          setCountdown(totalSeconds);
+          setIsCountdownActive(true);
+          console.log('⏰ Compte à rebours démarré:', allPlayersInStartZone ? 'tous les joueurs en position' : 'reprise après reconnexion');
+        }
+      } else {
+        console.log('⏸️ Compte à rebours en attente: tous les joueurs doivent être dans leur zone');
       }
     }
-  }, [gameDetails?.started, gameDetails?.duration, gameDetails?.remaining_time, isCountdownActive, isHost]);
+  }, [gameDetails?.started, gameDetails?.duration, gameDetails?.remaining_time, gameDetails?.players, isCountdownActive, isHost]);
 
   useEffect(() => {
     // Choisir un logo de joueur aléatoirement
