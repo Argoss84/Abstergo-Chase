@@ -1079,7 +1079,9 @@ class GameSessionService {
     const pc = this.createPeerConnection(playerId, true);
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    this.sendSignal(playerId, { type: 'offer', sdp: pc.localDescription });
+    if (pc.localDescription) {
+      this.sendSignal(playerId, { type: 'offer', sdp: pc.localDescription });
+    }
 
     this.broadcastState();
   }
@@ -1110,7 +1112,9 @@ class GameSessionService {
     const pc = this.createPeerConnection(playerId, true);
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    this.sendSignal(playerId, { type: 'offer', sdp: pc.localDescription });
+    if (pc.localDescription) {
+      this.sendSignal(playerId, { type: 'offer', sdp: pc.localDescription });
+    }
 
     // Envoyer l'état actuel une fois la connexion établie
     this.broadcastState();
@@ -1155,7 +1159,9 @@ class GameSessionService {
           const pc = this.createPeerConnection(player.id_player, true);
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-          this.sendSignal(player.id_player, { type: 'offer', sdp: pc.localDescription });
+          if (pc.localDescription) {
+            this.sendSignal(player.id_player, { type: 'offer', sdp: pc.localDescription });
+          }
         } catch (error) {
           // Erreur silencieuse
         }
@@ -1247,7 +1253,9 @@ class GameSessionService {
       await pc.setRemoteDescription(signal.sdp);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      this.sendSignal(fromId, { type: 'answer', sdp: pc.localDescription });
+      if (pc.localDescription) {
+        this.sendSignal(fromId, { type: 'answer', sdp: pc.localDescription });
+      }
     }
 
     if (signal.type === 'answer' && signal.sdp) {
@@ -1476,7 +1484,9 @@ class GameSessionService {
     const pc = this.createPeerConnection(peerId, true);
     const offer = await pc.createOffer({ iceRestart: true });
     await pc.setLocalDescription(offer);
-    this.sendSignal(peerId, { type: 'offer', sdp: pc.localDescription });
+    if (pc.localDescription) {
+      this.sendSignal(peerId, { type: 'offer', sdp: pc.localDescription });
+    }
   }
 
   private handlePeerConnectionIssue(peerId: string, state: string) {

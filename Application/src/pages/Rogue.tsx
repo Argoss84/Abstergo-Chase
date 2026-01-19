@@ -50,9 +50,9 @@ const Rogue: React.FC = () => {
   const [gameCode, setGameCode] = useState<string | null>(null);
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
-  // États pour la routine périodique
+  // États pour la routine périodique (Host uniquement)
   const [routineInterval, setRoutineInterval] = useState<number>(2000); // Valeur par défaut
-  const [isRoutineActive, setIsRoutineActive] = useState<boolean>(true);
+  const [isRoutineActive, setIsRoutineActive] = useState<boolean>(false);
   const [routineExecutionCount, setRoutineExecutionCount] = useState<number>(0);
   const routineIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
@@ -122,9 +122,15 @@ const Rogue: React.FC = () => {
     return errorResult;
   };
 
+  // Activer la routine uniquement pour le Host
   useEffect(() => {
-    setRoutineInterval(2000);
-  }, []);
+    if (isHost) {
+      setRoutineInterval(2000);
+      setIsRoutineActive(true);
+    } else {
+      setIsRoutineActive(false);
+    }
+  }, [isHost]);
 
   // Effet pour vérifier les conditions de victoire (Host uniquement)
   useEffect(() => {
@@ -235,6 +241,9 @@ const Rogue: React.FC = () => {
         if (objectiveInRange) {
           try {
             // Marquer l'objectif comme en cours de capture pour la synchro
+            if (!isHost) {
+              console.log(`📤 [WebRTC] Émission capture objectif: ${objectiveInRange.id_prop} (CAPTURING)`);
+            }
             await updateProp(objectiveInRange.id_prop, {
               state: "CAPTURING"
             });
@@ -257,6 +266,9 @@ const Rogue: React.FC = () => {
             
             try {
               // Mettre à jour l'objectif capturé
+              if (!isHost) {
+                console.log(`📤 [WebRTC] Émission capture objectif: ${objectiveInRange.id_prop} (CAPTURED)`);
+              }
               await updateProp(objectiveInRange.id_prop, {
                 visible: false,
                 state: "CAPTURED"
@@ -302,11 +314,26 @@ const Rogue: React.FC = () => {
         await handleErrorWithUser('Code de partie introuvable pour démarrer', null, ERROR_CONTEXTS.GAME_START);
         return;
       }
+
+      // Vérification de sécurité : tous les joueurs doivent être dans leur zone de départ
+      const allPlayersInStartZone = gameDetails?.players?.every(p => p.isInStartZone === true) ?? false;
+      if (!allPlayersInStartZone) {
+        toast.error('⚠️ Tous les joueurs doivent être dans leur zone de départ');
+        return;
+      }
+
+      const playerCount = gameDetails?.players?.length ?? 0;
+      if (playerCount === 0) {
+        toast.error('⚠️ Aucun joueur dans la partie');
+        return;
+      }
+
+      vibrate(patterns.long);
       await updateGameDetails({
         started: true,
         is_converging_phase: false
       });
-      toast.success('🚀 Partie démarrée');
+      toast.success(`🚀 Partie démarrée avec ${playerCount} joueur(s) !`);
     } catch (error) {
       await handleErrorWithUser('Erreur lors du démarrage de la partie', error, ERROR_CONTEXTS.GAME_START);
     }
@@ -351,13 +378,24 @@ const Rogue: React.FC = () => {
 
   useEffect(() => {
     if (sessionGameDetails) {
+      if (!isHost) {
+        console.log(`📥 [WebRTC] Réception état du jeu:`, {
+          players: sessionGameDetails.players?.length || 0,
+          props: sessionGameDetails.props?.length || 0,
+          remaining_time: sessionGameDetails.remaining_time,
+          is_converging_phase: sessionGameDetails.is_converging_phase,
+          winner_type: sessionGameDetails.winner_type
+        });
+      }
       setGameDetails(sessionGameDetails);
       if (sessionGameDetails.props) {
         setObjectiveProps(sessionGameDetails.props);
-        console.log(`${sessionGameDetails.props.length} objectifs synchronisés`);
+        if (!isHost) {
+          console.log(`${sessionGameDetails.props.length} objectifs synchronisés via WebRTC`);
+        }
       }
     }
-  }, [sessionGameDetails]);
+  }, [sessionGameDetails, isHost]);
 
 
 
@@ -439,11 +477,16 @@ const Rogue: React.FC = () => {
     }
   }, []);
 
+  // Mise à jour de la position (géolocalisation locale uniquement)
+  // La synchronisation se fait via WebRTC pour tous les joueurs
   useEffect(() => {
     if (currentPosition && currentPlayerId) {
+      if (!isHost) {
+        console.log(`📤 [WebRTC] Émission position: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
+      }
       updatePlayerPosition(currentPlayerId, currentPosition[0], currentPosition[1]);
     }
-  }, [currentPosition, currentPlayerId]);
+  }, [currentPosition, currentPlayerId, isHost]);
 
   // Effet pour gérer le compte à rebours
   useEffect(() => {
@@ -617,8 +660,13 @@ const Rogue: React.FC = () => {
 
 
 
-  // Effet pour gérer la routine périodique
+  // Effet pour gérer la routine périodique (Host uniquement)
   useEffect(() => {
+    // La routine ne s'exécute que pour le Host
+    if (!isHost) {
+      return;
+    }
+
     if (isRoutineActive && routineInterval > 0) {
       // Nettoyer l'intervalle précédent s'il existe
       if (routineIntervalRef.current) {
@@ -646,9 +694,9 @@ const Rogue: React.FC = () => {
         routineIntervalRef.current = null;
       }
     };
-  }, [isRoutineActive, routineInterval, executeRoutine]);
+  }, [isRoutineActive, routineInterval, executeRoutine, isHost]);
 
-  // Effet pour récupérer le trajet routier en phase de convergence
+  // Effet pour récupérer le trajet routier en phase de convergence (calcul local pour tous)
   useEffect(() => {
     const updateRoute = async () => {
       if (gameDetails?.is_converging_phase && 
@@ -671,12 +719,58 @@ const Rogue: React.FC = () => {
     updateRoute();
   }, [gameDetails?.is_converging_phase, currentPosition, gameDetails?.start_zone_rogue_latitude, gameDetails?.start_zone_rogue_longitude]);
 
-  // Effet pour réinitialiser la distance quand on n'est plus en phase de convergence
+  // Calculer la distance à la zone de départ en temps réel (pour l'affichage local uniquement)
   useEffect(() => {
     if (!gameDetails?.is_converging_phase) {
       setDistanceToStartZone(null);
+      return;
     }
-  }, [gameDetails?.is_converging_phase]);
+
+    if (currentPosition && gameDetails?.start_zone_rogue_latitude && gameDetails?.start_zone_rogue_longitude) {
+      const distance = calculateDistanceToStartZone(
+        currentPosition, 
+        gameDetails.start_zone_rogue_latitude, 
+        gameDetails.start_zone_rogue_longitude
+      );
+      setDistanceToStartZone(distance);
+    }
+  }, [gameDetails?.is_converging_phase, currentPosition, gameDetails?.start_zone_rogue_latitude, gameDetails?.start_zone_rogue_longitude]);
+
+  // Vérifier en temps réel si le joueur est dans la zone de départ (mise à jour locale)
+  useEffect(() => {
+    if (currentPosition && gameDetails?.start_zone_rogue_latitude && gameDetails?.start_zone_rogue_longitude && currentPlayerId) {
+      const isInStartZone = isPlayerInStartZone(
+        currentPosition, 
+        gameDetails.start_zone_rogue_latitude, 
+        gameDetails.start_zone_rogue_longitude
+      );
+      if (!isHost) {
+        console.log(`📤 [WebRTC] Émission isInStartZone: ${isInStartZone}`);
+      }
+      updatePlayerInStartZone(currentPlayerId, isInStartZone);
+    }
+  }, [currentPosition, gameDetails?.start_zone_rogue_latitude, gameDetails?.start_zone_rogue_longitude, currentPlayerId, isHost]);
+
+  // Vérifier en temps réel si un objectif est à portée (mise à jour locale)
+  useEffect(() => {
+    if (currentPosition && objectiveProps.length > 0) {
+      const objectiveInRange = objectiveProps
+        .filter(prop => prop.visible === true)
+        .some(prop => {
+          const distance = calculateDistanceToStartZone(
+            currentPosition,
+            prop.latitude || '0',
+            prop.longitude || '0'
+          );
+          const detectionRadius = prop.detection_radius || 30;
+          return distance <= detectionRadius;
+        });
+      
+      setIsObjectiveInRange(objectiveInRange);
+    } else {
+      setIsObjectiveInRange(false);
+    }
+  }, [currentPosition, objectiveProps]);
 
   const visibleObjectives = objectiveProps.filter(prop => prop.visible === true);
 
@@ -846,10 +940,40 @@ const Rogue: React.FC = () => {
 
         {/* Bouton flottant centré pour démarrer la partie (admin uniquement) */}
         {isHost && !gameDetails?.started && Array.isArray(gameDetails?.players) && gameDetails!.players!.length > 0 && gameDetails!.players!.every(p => p.isInStartZone === true) && (
-          <div style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 1000 }}>
-            <IonButton color="success" size="large" onClick={handleAdminStartFromStartZone}>
-              🚀 Démarrer maintenant
+          <div style={{ 
+            position: 'fixed', 
+            left: '50%', 
+            top: '50%', 
+            transform: 'translate(-50%, -50%)', 
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '10px',
+            padding: '20px',
+            background: 'rgba(0, 0, 0, 0.8)',
+            borderRadius: '15px',
+            border: '2px solid #2dd36f',
+            boxShadow: '0 0 30px rgba(45, 211, 111, 0.5)'
+          }}>
+            <div style={{ color: '#2dd36f', fontSize: '14px', fontWeight: 'bold', textAlign: 'center' }}>
+              ✅ Tous les joueurs sont en position
+            </div>
+            <IonButton 
+              color="success" 
+              size="large" 
+              onClick={handleAdminStartFromStartZone}
+              style={{ 
+                '--box-shadow': '0 4px 20px rgba(45, 211, 111, 0.6)',
+                fontSize: '18px',
+                fontWeight: 'bold'
+              }}
+            >
+              🚀 DÉMARRER LA PARTIE
             </IonButton>
+            <div style={{ color: '#aaa', fontSize: '12px', textAlign: 'center' }}>
+              {gameDetails?.players?.length || 0} joueur(s) prêt(s)
+            </div>
           </div>
         )}
 
