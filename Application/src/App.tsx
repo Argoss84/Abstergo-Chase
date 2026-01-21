@@ -43,6 +43,7 @@ import Rogue from './pages/Rogue';
 import EndGame from './pages/EndGame';
 import SessionDiagnostics from './pages/SessionDiagnostics';
 import { WakeLockProvider } from './components/WakeLockProvider';
+import PermissionManager from './components/PermissionManager';
 setupIonicReact();
 
 const App: React.FC = () => {
@@ -50,6 +51,7 @@ const App: React.FC = () => {
     <WakeLockProvider enabled={true}>
       <IonApp>
         <IonReactRouter>
+          <PermissionManager />
           <IonRouterOutlet>
             <Switch>
               <Route exact path="/" render={() => <Redirect to="/home" />} />
