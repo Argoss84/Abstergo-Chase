@@ -40,6 +40,7 @@ export interface GameDetails {
   agent_range: number | null;
   is_converging_phase: boolean | null;
   started: boolean | null;
+  countdown_started: boolean | null;
   props?: GameProp[];
   players?: Player[];
   objective_circles?: ObjectiveCircle[];

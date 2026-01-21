@@ -26,6 +26,23 @@ import { useWakeLock } from '../utils/useWakeLock';
 import { useVibration } from '../hooks/useVibration';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 import { MapController, ResizeMap, useFogRings } from '../utils/GameMapUtils';
+import {
+  DEFAULT_ROUTINE_INTERVAL_MS,
+  START_ZONE_RADIUS,
+  DEFAULT_MAP_ZOOM,
+  FOG_RINGS_AGENT,
+  GEOLOCATION_TIMEOUT,
+  GEOLOCATION_MAX_AGE,
+  GEOLOCATION_WATCH_MAX_AGE,
+  GAME_START_MODAL_AUTO_CLOSE_MS,
+  COMPASS_SIZE_SMALL,
+  COMPASS_DEFAULT_LATITUDE,
+  COMPASS_DEFAULT_LONGITUDE,
+  QR_CODE_SIZE,
+  OBJECTIVE_CIRCLES_SYNC_COOLDOWN_MS,
+  DEFAULT_AGENT_RANGE,
+  getRandomPlayerLogo
+} from '../ressources/DefaultValues';
 
 const Agent: React.FC = () => {
   const history = useHistory();
@@ -52,7 +69,7 @@ const Agent: React.FC = () => {
   const [distanceToStartZone, setDistanceToStartZone] = useState<number | null>(null);
   
   // États pour la routine périodique (Host uniquement)
-  const [routineInterval, setRoutineInterval] = useState<number>(2000); // Valeur par défaut
+  const [routineInterval, setRoutineInterval] = useState<number>(DEFAULT_ROUTINE_INTERVAL_MS);
   const [isRoutineActive, setIsRoutineActive] = useState<boolean>(false);
   const [routineExecutionCount, setRoutineExecutionCount] = useState<number>(0);
   const routineIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -93,6 +110,10 @@ const Agent: React.FC = () => {
   
   // Texte pour le QR code (email + code de partie)
   const [qrCodeText, setQrCodeText] = useState<string>('');
+  
+  // État pour la modal de démarrage de partie
+  const [isGameStartModalOpen, setIsGameStartModalOpen] = useState(false);
+  const gameStartModalShownRef = useRef(false);
 
   const getPlayerLogo = useCallback((playerIdValue: string) => {
     const hash = Array.from(playerIdValue).reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -199,24 +220,18 @@ const Agent: React.FC = () => {
   // Fonctions pour les boutons FAB
 
   const handleVisionMode = () => {
-    console.log('Mode vision activé');
-    // Ici vous pouvez ajouter la logique pour changer le mode de vision
     toast.success('👁️ Mode vision activé');
     vibrate(patterns.short);
   };
 
   const handleHealthCheck = () => {
-    console.log('Ouverture de la modal QR code');
     setIsQRModalOpen(true);
     vibrate(patterns.short);
   };
 
   const handleLocationTracker = () => {
-    console.log('Traceur de localisation activé');
-    // Recentrer la carte sur la position du joueur
     if (currentPosition && mapRef.current) {
-      mapRef.current.setView(currentPosition, 15);
-      console.log(`Carte recentrée sur: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
+      mapRef.current.setView(currentPosition, DEFAULT_MAP_ZOOM);
       toast.success('📍 Carte recentrée sur votre position');
     } else if (currentPosition) {
       toast.info(`📍 Position actuelle: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
@@ -227,9 +242,6 @@ const Agent: React.FC = () => {
   };
 
   const handleThreatDetection = async () => {
-    console.log('Détection de menaces activée - Ouverture de la caméra');
-    
-    // Ouvrir la modal avec la caméra
     setIsCameraModalOpen(true);
     vibrate(patterns.short);
   };
@@ -240,15 +252,11 @@ const Agent: React.FC = () => {
 
   // Handler pour la fin de partie
   const handleGameEnd = async () => {
-    console.log('⏰ TEMPS ÉCOULÉ - Fin de la partie !');
-    
     // Arrêter le compte à rebours
     setIsCountdownActive(false);
     setCountdown(0);
         
     if (isHost) {
-      console.log('👑 ADMIN - Fin de partie détectée');
-      
       // Mettre à jour remaining_time=0 et winner_type à "AGENT" car le temps est écoulé
       const params = new URLSearchParams(location.search);
       const code = params.get('code');
@@ -256,16 +264,8 @@ const Agent: React.FC = () => {
         try {
           await updateGameDetails({ remaining_time: 0 });
         } catch (_) {}
-        const success = await updateGameWinnerType(code, 'AGENT');
-        if (success) {
-          console.log('🏆 Winner_type mis à jour: AGENT (temps écoulé)');
-        } else {
-          console.error('❌ Échec de la mise à jour du winner_type');
-        }
+        await updateGameWinnerType(code, 'AGENT');
       }
-      
-    } else {
-      console.log('👤 JOUEUR - Fin de partie détectée');
     }
     
     // Rediriger vers la page de fin de partie (pour tous les joueurs)
@@ -296,11 +296,16 @@ const Agent: React.FC = () => {
       }
 
       vibrate(patterns.long);
+      
+      // Démarrer la partie ET le compte à rebours
       await updateGameDetails({
         started: true,
-        is_converging_phase: false
+        is_converging_phase: false,
+        countdown_started: true,
+        started_date: new Date().toISOString()
       });
-      setGameDetails(prev => prev ? { ...prev, started: true, is_converging_phase: false } as any : prev);
+      setGameDetails(prev => prev ? { ...prev, started: true, is_converging_phase: false, countdown_started: true, started_date: new Date().toISOString() } as any : prev);
+      
       toast.success(`🚀 Partie démarrée avec ${playerCount} joueur(s) !`);
     } catch (error) {
       await handleErrorWithUser('Erreur lors du démarrage de la partie', error, ERROR_CONTEXTS.GAME_START);
@@ -372,9 +377,6 @@ const Agent: React.FC = () => {
       setRoutePath(route);
     }
     
-    // Console.log unifié avec toutes les informations de la routine
-    console.log(`🔄 Routine #${routineExecutionCount} | État: ${gameState} | Position: ${positionInfo} | Distance: ${distanceToStart ? distanceToStart.toFixed(0) + 'm' : 'N/A'} | Zone départ: ${isInStartZone ? 'OUI' : 'NON'}`);
-    
   }, [currentPosition, gameDetails, objectiveCircles, routineExecutionCount, currentPlayerId]);
 
 
@@ -405,7 +407,6 @@ const Agent: React.FC = () => {
       if (routineIntervalRef.current) {
         clearInterval(routineIntervalRef.current);
         routineIntervalRef.current = null;
-        console.log('Routine arrêtée');
       }
     }
     
@@ -457,15 +458,6 @@ const Agent: React.FC = () => {
 
   useEffect(() => {
     if (sessionGameDetails) {
-      if (!isHost) {
-        console.log(`📥 [WebRTC] Réception état du jeu:`, {
-          players: sessionGameDetails.players?.length || 0,
-          props: sessionGameDetails.props?.length || 0,
-          remaining_time: sessionGameDetails.remaining_time,
-          is_converging_phase: sessionGameDetails.is_converging_phase,
-          winner_type: sessionGameDetails.winner_type
-        });
-      }
       setGameDetails(sessionGameDetails);
     }
   }, [sessionGameDetails, isHost]);
@@ -479,7 +471,6 @@ const Agent: React.FC = () => {
     if (!storedCircles) return;
     applyObjectiveCircles(storedCircles, gameCode);
     updateGameDetails({ objective_circles: storedCircles });
-    console.log(`${storedCircles.length} cercles d'objectifs restaurés depuis la session de jeu`);
   }, [isHost, gameCode, objectiveCirclesInitialized, applyObjectiveCircles, updateGameDetails]);
 
   // Synchroniser les cercles depuis l'host si disponibles
@@ -494,7 +485,9 @@ const Agent: React.FC = () => {
   useEffect(() => {
     if (isHost) return;
     if (objectiveCirclesInitialized) return;
-    if (!gameDetails?.started) return;
+    // Les cercles doivent être synchronisés quand la partie démarre vraiment
+    const shouldSync = gameDetails?.started && gameDetails?.countdown_started;
+    if (!shouldSync) return;
     if (gameDetails?.objective_circles && gameDetails.objective_circles.length > 0) return;
 
     const now = Date.now();
@@ -506,13 +499,17 @@ const Agent: React.FC = () => {
     isHost,
     objectiveCirclesInitialized,
     gameDetails?.started,
+    gameDetails?.countdown_started,
     gameDetails?.objective_circles,
     requestLatestState
   ]);
 
   // Calculer les cercles d'objectifs une seule fois au démarrage de la partie (host)
   useEffect(() => {
-    if (!isHost || !gameDetails?.started || !gameDetails.props || !gameCode || objectiveCirclesInitialized) {
+    // Les cercles doivent apparaître quand la partie démarre vraiment (started=true et countdown_started=true)
+    const shouldInitialize = gameDetails?.started && gameDetails?.countdown_started;
+    
+    if (!isHost || !shouldInitialize || !gameDetails?.props || !gameCode || objectiveCirclesInitialized) {
       return;
     }
     if (objectiveCirclesBootstrapRef.current) {
@@ -524,7 +521,6 @@ const Agent: React.FC = () => {
     if (storedCircles) {
       applyObjectiveCircles(storedCircles, gameCode);
       updateGameDetails({ objective_circles: storedCircles });
-      console.log(`${storedCircles.length} cercles d'objectifs restaurés depuis la session de jeu`);
       return;
     }
 
@@ -538,13 +534,14 @@ const Agent: React.FC = () => {
     }));
     applyObjectiveCircles(circles, gameCode);
     updateGameDetails({ objective_circles: circles });
-    console.log(`${circles.length} cercles d'objectifs initialisés`);
-  }, [isHost, gameDetails?.started, gameDetails?.props, objectiveCirclesInitialized, gameCode, applyObjectiveCircles, updateGameDetails]);
+  }, [isHost, gameDetails?.started, gameDetails?.countdown_started, gameDetails?.props, objectiveCirclesInitialized, gameCode, applyObjectiveCircles, updateGameDetails]);
 
   // Fallback: afficher des cercles basés sur les props si l'état n'est pas encore synchronisé
   useEffect(() => {
     if (objectiveCirclesInitialized) return;
-    if (!gameDetails?.started) return;
+    // Les cercles doivent apparaître quand la partie démarre vraiment
+    const shouldShow = gameDetails?.started && gameDetails?.countdown_started;
+    if (!shouldShow) return;
     if (objectiveCircles.length > 0) return;
     if (!gameDetails?.props || gameDetails.props.length === 0) return;
 
@@ -555,47 +552,32 @@ const Agent: React.FC = () => {
     objectiveCirclesInitialized,
     objectiveCircles.length,
     gameDetails?.started,
+    gameDetails?.countdown_started,
     gameDetails?.props,
     buildFallbackObjectiveCircles
   ]);
 
-  // Lancer le compte à rebours uniquement si tous les joueurs sont dans leur zone
+  // Lancer le compte à rebours uniquement quand le host a appuyé sur le bouton
   useEffect(() => {
     if (!isHost) {
       return;
     }
-    if (gameDetails?.started && !isCountdownActive) {
-      // Vérifier si tous les joueurs sont dans leur zone de départ
-      const allPlayersInStartZone = gameDetails?.players?.every(p => p.isInStartZone === true) ?? false;
-      
-      // Vérifier si le compte à rebours a déjà été lancé (remaining_time < duration)
-      const countdownAlreadyStarted = 
-        gameDetails.remaining_time !== undefined && 
-        gameDetails.remaining_time !== null && 
-        gameDetails.duration !== undefined &&
-        gameDetails.duration !== null &&
-        gameDetails.remaining_time < gameDetails.duration;
-      
-      // Ne lancer le compte à rebours que si :
-      // - Tous les joueurs sont dans leur zone, OU
-      // - Le compte à rebours a déjà été lancé (reconnexion/refresh)
-      if (allPlayersInStartZone || countdownAlreadyStarted) {
-        const totalSeconds = (gameDetails.remaining_time ?? gameDetails.duration) || 0;
-        if (totalSeconds > 0) {
-          setCountdown(totalSeconds);
-          setIsCountdownActive(true);
-          console.log('⏰ Compte à rebours démarré:', allPlayersInStartZone ? 'tous les joueurs en position' : 'reprise après reconnexion');
-        }
-      } else {
-        console.log('⏸️ Compte à rebours en attente: tous les joueurs doivent être dans leur zone');
+    if (gameDetails?.started && !isCountdownActive && gameDetails?.countdown_started) {
+      const totalSeconds = (gameDetails.remaining_time ?? gameDetails.duration) || 0;
+      if (totalSeconds > 0) {
+        setCountdown(totalSeconds);
+        setIsCountdownActive(true);
+        
+        // Réinitialiser les cercles d'objectifs pour forcer une nouvelle initialisation
+        setObjectiveCirclesInitialized(false);
+        objectiveCirclesBootstrapRef.current = false;
       }
     }
-  }, [gameDetails?.started, gameDetails?.duration, gameDetails?.remaining_time, gameDetails?.players, isCountdownActive, isHost]);
+  }, [gameDetails?.started, gameDetails?.countdown_started, gameDetails?.duration, gameDetails?.remaining_time, isCountdownActive, isHost]);
 
   useEffect(() => {
     // Choisir un logo de joueur aléatoirement
-    const logoNumber = Math.floor(Math.random() * 6) + 1;
-    setPlayerLogo(`joueur_${logoNumber}.png`);
+    setPlayerLogo(getRandomPlayerLogo());
     
     // Get initial position
     if ("geolocation" in navigator) {
@@ -604,7 +586,6 @@ const Agent: React.FC = () => {
           setCurrentPosition([position.coords.latitude, position.coords.longitude]);
         },
         (error) => {
-          console.log("Geolocation error on initial position:", error.code, error.message);
           // Don't log error - position will be updated by watchPosition
         },
         {
@@ -620,13 +601,12 @@ const Agent: React.FC = () => {
           setCurrentPosition([position.coords.latitude, position.coords.longitude]);
         },
         (error) => {
-          console.log("Geolocation watch error:", error.code, error.message);
           // Don't log to error handler - watchPosition will keep trying
         },
         {
           enableHighAccuracy: true,
-          maximumAge: 1000, // Accept position up to 1 second old for smoother tracking
-          timeout: 15000 // Increased timeout to 15 seconds
+          maximumAge: GEOLOCATION_WATCH_MAX_AGE,
+          timeout: GEOLOCATION_TIMEOUT
         }
       );
 
@@ -640,9 +620,6 @@ const Agent: React.FC = () => {
   // La synchronisation se fait via WebRTC pour tous les joueurs
   useEffect(() => {
     if (currentPosition && currentPlayerId) {
-      if (!isHost) {
-        console.log(`📤 [WebRTC] Émission position: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
-      }
       updatePlayerPosition(currentPlayerId, currentPosition[0], currentPosition[1]);
     }
   }, [currentPosition, currentPlayerId, isHost]);
@@ -695,9 +672,6 @@ const Agent: React.FC = () => {
         gameDetails.start_zone_latitude, 
         gameDetails.start_zone_longitude
       );
-      if (!isHost) {
-        console.log(`📤 [WebRTC] Émission isInStartZone: ${isInStartZone}`);
-      }
       updatePlayerInStartZone(currentPlayerId, isInStartZone);
     }
   }, [currentPosition, gameDetails?.start_zone_latitude, gameDetails?.start_zone_longitude, currentPlayerId, isHost]);
@@ -727,8 +701,6 @@ const Agent: React.FC = () => {
           return prev;
         });
       }, 1000);
-      
-      console.log(`⏰ Compte à rebours démarré: ${Math.floor(countdown / 60)}:${(countdown % 60).toString().padStart(2, '0')}`);
     } else if (countdown === 0) {
       // Arrêter le compte à rebours quand il atteint 0
       if (countdownIntervalRef.current) {
@@ -774,12 +746,28 @@ const Agent: React.FC = () => {
   // Activer la routine uniquement pour le Host
   useEffect(() => {
     if (isHost) {
-      setRoutineInterval(2000);
+      setRoutineInterval(DEFAULT_ROUTINE_INTERVAL_MS);
       setIsRoutineActive(true);
     } else {
       setIsRoutineActive(false);
     }
   }, [isHost]);
+
+  // Afficher la popup de démarrage quand countdown_started devient true (une seule fois)
+  useEffect(() => {
+    if (gameDetails?.countdown_started && gameDetails?.started && !gameStartModalShownRef.current) {
+      gameStartModalShownRef.current = true;
+      setIsGameStartModalOpen(true);
+      vibrate(patterns.long);
+      
+      // Fermer automatiquement la modal après le délai configuré
+      setTimeout(() => {
+        setIsGameStartModalOpen(false);
+      }, GAME_START_MODAL_AUTO_CLOSE_MS);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameDetails?.countdown_started, gameDetails?.started]);
+
 
   // Effet pour vérifier les conditions de victoire (Host uniquement)
   useEffect(() => {
@@ -799,10 +787,28 @@ const Agent: React.FC = () => {
           history.push('/end-game');
         }, 1000);
       });
+      return;
     }
-  }, [isHost, gameDetails?.started, gameDetails?.winner_type, gameDetails?.players, updateGameDetails, history]);
 
-  const fogRings = useFogRings(gameDetails, 50);
+    // Victoire Rogue si le nombre d'objectifs capturés atteint la condition de victoire
+    const allObjectives = gameDetails.props || [];
+    const capturedObjectives = allObjectives.filter(p => p.state === 'CAPTURED');
+    const victoryCondition = gameDetails.victory_condition_nb_objectivs || allObjectives.length;
+
+    if (allObjectives.length > 0 && capturedObjectives.length >= victoryCondition) {
+      console.log(`🏆 ${capturedObjectives.length}/${victoryCondition} objectifs capturés - Victoire des Rogues !`);
+      updateGameDetails({ 
+        winner_type: 'ROGUE',
+        remaining_time: 0 
+      }).then(() => {
+        setTimeout(() => {
+          history.push('/end-game');
+        }, 1000);
+      });
+    }
+  }, [isHost, gameDetails?.started, gameDetails?.winner_type, gameDetails?.players, gameDetails?.props, gameDetails?.victory_condition_nb_objectivs, updateGameDetails, history]);
+
+  const fogRings = useFogRings(gameDetails, FOG_RINGS_AGENT);
 
   return (
     <IonPage>
@@ -836,7 +842,7 @@ const Agent: React.FC = () => {
                 parseFloat(gameDetails.map_center_latitude || '0'), 
                 parseFloat(gameDetails.map_center_longitude || '0')
               ]}
-              zoom={15}
+              zoom={DEFAULT_MAP_ZOOM}
               whenReady={() => {
                 // Force a resize after the map is ready
                 setTimeout(() => {
@@ -883,7 +889,7 @@ const Agent: React.FC = () => {
                   />
                   <Circle
                     center={[parseFloat(gameDetails.start_zone_latitude), parseFloat(gameDetails.start_zone_longitude)]}
-                    radius={50}
+                    radius={START_ZONE_RADIUS}
                     pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
                   />
                 </>
@@ -969,7 +975,7 @@ const Agent: React.FC = () => {
         <div className="compass-overlay">
           <Compass
             size="small"
-            width={75} // Largeur personnalisée pour un meilleur positionnement
+            width={COMPASS_SIZE_SMALL}
             currentPosition={
               currentPosition 
                 ? {
@@ -977,8 +983,8 @@ const Agent: React.FC = () => {
                     longitude: currentPosition[1]
                   }
                 : {
-                    latitude: 48.8566, // Paris par défaut
-                    longitude: 2.3522
+                    latitude: COMPASS_DEFAULT_LATITUDE,
+                    longitude: COMPASS_DEFAULT_LONGITUDE
                   }
             }
             targetPoints={[
@@ -1083,14 +1089,11 @@ const Agent: React.FC = () => {
         >
           <Camera
             onCapture={(imageData) => {
-              console.log('Photo capturée pour détection de menaces:', imageData);
               toast.success('📸 Photo capturée pour analyse de menaces');
-              // Ici vous pouvez ajouter la logique pour analyser la photo
             }}
             onQRCodeDetected={(qrCode) => {
               (async () => {
                 try {
-                  console.log('QR Code détecté:', qrCode);
                   toast.success(`🔍 QR Code détecté: ${qrCode}`);
                   const raw = (qrCode || '').trim();
                   if (!raw) return;
@@ -1131,9 +1134,24 @@ const Agent: React.FC = () => {
                     return;
                   }
 
-                  if (!isHost) {
-                    console.log(`📤 [WebRTC] Émission capture Rogue: ${targetPlayer.id_player} (CAPTURED)`);
+                  // Vérifier la distance entre l'Agent et le Rogue
+                  if (currentPosition && targetPlayer.latitude && targetPlayer.longitude) {
+                    const agentRange = gameDetails?.agent_range || DEFAULT_AGENT_RANGE;
+                    const distance = calculateDistanceToStartZone(
+                      currentPosition,
+                      targetPlayer.latitude,
+                      targetPlayer.longitude
+                    );
+                    
+                    if (distance > agentRange) {
+                      toast.error(`❌ Trop loin ! Distance: ${distance.toFixed(0)}m (Portée: ${agentRange}m)`);
+                      return;
+                    }
+                  } else {
+                    toast.error('❌ Impossible de vérifier la distance');
+                    return;
                   }
+
                   await updatePlayer(targetPlayer.id_player.toString(), {
                     status: 'CAPTURED',
                     updated_at: new Date().toISOString()
@@ -1155,6 +1173,54 @@ const Agent: React.FC = () => {
             defaultMode="capture"
             className="threat-detection-camera"
           />
+        </IonModal>
+
+        {/* Modal de démarrage de partie */}
+        <IonModal 
+          isOpen={isGameStartModalOpen} 
+          onDidDismiss={() => setIsGameStartModalOpen(false)}
+          backdropDismiss={false}
+        >
+          <IonContent className="ion-padding" style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            background: 'linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%)'
+          }}>
+            <div style={{
+              textAlign: 'center',
+              padding: '40px',
+              borderRadius: '20px',
+              background: 'rgba(0, 0, 0, 0.6)',
+              border: '3px solid #2dd36f',
+              boxShadow: '0 0 50px rgba(45, 211, 111, 0.8)'
+            }}>
+              <h1 style={{ 
+                fontSize: '48px', 
+                marginBottom: '20px',
+                color: '#2dd36f',
+                textShadow: '0 0 20px rgba(45, 211, 111, 0.8)',
+                animation: 'pulse 1.5s ease-in-out infinite'
+              }}>
+                🚀 LA PARTIE COMMENCE !
+              </h1>
+              <p style={{ 
+                fontSize: '24px', 
+                color: '#fff',
+                marginTop: '20px'
+              }}>
+                Le compte à rebours a démarré
+              </p>
+              <div style={{
+                fontSize: '72px',
+                marginTop: '30px',
+                color: '#ffc409',
+                textShadow: '0 0 30px rgba(255, 196, 9, 0.8)'
+              }}>
+                ⏰
+              </div>
+            </div>
+          </IonContent>
         </IonModal>
 
         {/* Modal pour afficher le QR code */}

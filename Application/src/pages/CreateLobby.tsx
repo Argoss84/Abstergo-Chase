@@ -27,6 +27,28 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { generateRandomPoints, generateStartZone, generateStartZoneRogue } from '../utils/utils';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
+import {
+  DEFAULT_OBJECTIVE_NUMBER,
+  DEFAULT_GAME_DURATION,
+  DEFAULT_VICTORY_CONDITION_OBJECTIVES,
+  DEFAULT_HACK_DURATION_CREATE_MS,
+  DEFAULT_OBJECTIVE_ZONE_RADIUS,
+  DEFAULT_ROGUE_RANGE,
+  DEFAULT_AGENT_RANGE,
+  DEFAULT_MAP_RADIUS,
+  DEFAULT_MAX_AGENTS,
+  DEFAULT_MAX_ROGUE,
+  START_ZONE_RADIUS,
+  DEFAULT_MAP_ZOOM_CREATE_LOBBY,
+  COMPASS_DEFAULT_LATITUDE,
+  COMPASS_DEFAULT_LONGITUDE,
+  CREATE_LOBBY_GEOLOCATION_TIMEOUT,
+  CREATE_LOBBY_GEOLOCATION_MAX_AGE,
+  CREATE_LOBBY_GEOLOCATION_RETRY_TIMEOUT,
+  CREATE_LOBBY_GEOLOCATION_RETRY_MAX_AGE,
+  CREATE_LOBBY_GEOLOCATION_FALLBACK_TIMEOUT,
+  MAX_PLAYER_NAME_LENGTH
+} from '../ressources/DefaultValues';
 
 interface GameFormData {
   objectif_number: number;
@@ -74,16 +96,16 @@ const CreateLobby: React.FC = () => {
   const [startZones, setStartZones] = useState<StartZones>({ agent: null, rogue: null });
   const [displayName, setDisplayName] = useState(playerName);
   const [formData, setFormData] = useState<GameFormData>({
-    objectif_number: 3,
-    duration: 900,
-    victory_condition_nb_objectivs: 2,
-    hack_duration_ms: 10000,
-    objectiv_zone_radius: 300,
-    rogue_range: 50,
-    agent_range: 50,
+    objectif_number: DEFAULT_OBJECTIVE_NUMBER,
+    duration: DEFAULT_GAME_DURATION,
+    victory_condition_nb_objectivs: DEFAULT_VICTORY_CONDITION_OBJECTIVES,
+    hack_duration_ms: DEFAULT_HACK_DURATION_CREATE_MS,
+    objectiv_zone_radius: DEFAULT_OBJECTIVE_ZONE_RADIUS,
+    rogue_range: DEFAULT_ROGUE_RANGE,
+    agent_range: DEFAULT_AGENT_RANGE,
     map_center_latitude: '',
     map_center_longitude: '',
-    map_radius: 500,
+    map_radius: DEFAULT_MAP_RADIUS,
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -240,8 +262,8 @@ const CreateLobby: React.FC = () => {
         start_zone_longitude: startZones.agent ? startZones.agent[1].toString() : null,
         start_zone_rogue_latitude: startZones.rogue ? startZones.rogue[0].toString() : null,
         start_zone_rogue_longitude: startZones.rogue ? startZones.rogue[1].toString() : null,
-        max_agents: 3,
-        max_rogue: 2,
+        max_agents: DEFAULT_MAX_AGENTS,
+        max_rogue: DEFAULT_MAX_ROGUE,
         remaining_time: formData.duration,
         winner_type: null,
         is_converging_phase: false,
@@ -289,7 +311,7 @@ const CreateLobby: React.FC = () => {
   };
 
   useEffect(() => {
-    const fallbackPosition: [number, number] = [48.8566, 2.3522];
+    const fallbackPosition: [number, number] = [COMPASS_DEFAULT_LATITUDE, COMPASS_DEFAULT_LONGITUDE];
     
     const setFallbackPosition = () => {
       setUserPosition(fallbackPosition);
@@ -320,7 +342,7 @@ const CreateLobby: React.FC = () => {
     // Try with low accuracy first (faster)
     const timeoutId = setTimeout(() => {
       setFallbackPosition();
-    }, 3000);
+    }, CREATE_LOBBY_GEOLOCATION_FALLBACK_TIMEOUT);
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
@@ -339,8 +361,8 @@ const CreateLobby: React.FC = () => {
             },
             {
               enableHighAccuracy: false,
-              timeout: 5000,
-              maximumAge: 300000 // Accept position up to 5 minutes old
+              timeout: CREATE_LOBBY_GEOLOCATION_RETRY_TIMEOUT,
+              maximumAge: CREATE_LOBBY_GEOLOCATION_RETRY_MAX_AGE
             }
           );
         } else {
@@ -350,8 +372,8 @@ const CreateLobby: React.FC = () => {
       },
       {
         enableHighAccuracy: false,
-        timeout: 10000,
-        maximumAge: 60000 // Accept position up to 1 minute old
+        timeout: CREATE_LOBBY_GEOLOCATION_TIMEOUT,
+        maximumAge: CREATE_LOBBY_GEOLOCATION_MAX_AGE
       }
     );
   }, []);
@@ -386,7 +408,7 @@ const CreateLobby: React.FC = () => {
                 value={displayName}
                 onIonInput={handleNameChange}
                 placeholder="Entrez votre nom"
-                maxlength={20}
+                maxlength={MAX_PLAYER_NAME_LENGTH}
               />
             </IonItem>
 
@@ -395,7 +417,7 @@ const CreateLobby: React.FC = () => {
                 <MapContainer
                   key={mapKey}
                   center={userPosition}
-                  zoom={13}
+                  zoom={DEFAULT_MAP_ZOOM_CREATE_LOBBY}
                   style={{ height: '100%', width: '100%' }}
                 >
                   <ResizeMap />
@@ -439,7 +461,7 @@ const CreateLobby: React.FC = () => {
                       />
                       <Circle
                         center={startZones.agent}
-                        radius={50}
+                        radius={START_ZONE_RADIUS}
                         pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
                       />
                     </>
@@ -457,7 +479,7 @@ const CreateLobby: React.FC = () => {
                       />
                       <Circle
                         center={startZones.rogue}
-                        radius={50}
+                        radius={START_ZONE_RADIUS}
                         pathOptions={{ color: 'green', fillColor: 'green', fillOpacity: 0.1 }}
                       />
                     </>

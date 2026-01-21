@@ -1,5 +1,17 @@
 import { io, Socket } from 'socket.io-client';
 import { GameDetails, GameProp, Player } from '../components/Interfaces';
+import {
+  SESSION_EXPIRY_MS,
+  generateDefaultPlayerName,
+  getDefaultWebSocketUrl,
+  SOCKET_PATH,
+  SOCKET_RECONNECTION_ATTEMPTS,
+  SOCKET_RECONNECTION_DELAY,
+  SOCKET_RECONNECTION_DELAY_MAX,
+  SOCKET_TIMEOUT,
+  STATUS_UPDATE_THROTTLE_MS,
+  DEFAULT_STUN_SERVER
+} from '../ressources/DefaultValues';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error';
 export type SessionScope = 'lobby' | 'game';
@@ -37,12 +49,11 @@ interface SignalMessage {
 }
 
 const SESSION_STORAGE_KEY = 'abstergo-game-session';
-const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 heures
 
 const defaultPlayerName = () => {
   const stored = localStorage.getItem('abstergo-player-name');
   if (stored) return stored;
-  const fallback = `Joueur-${Math.floor(Math.random() * 9999)}`;
+  const fallback = generateDefaultPlayerName();
   localStorage.setItem('abstergo-player-name', fallback);
   return fallback;
 };
@@ -131,9 +142,7 @@ class GameSessionService {
         // Marquer le joueur comme déconnecté avant de fermer
         if ((this.state.lobbyCode || this.state.gameCode) && this.state.playerId) {
           // Utiliser sendBeacon pour envoyer le message même si la page se ferme
-          const url = window.location.hostname === 'localhost'
-            ? 'http://localhost:5174'
-            : 'https://ws.abstergochase.fr';
+          const url = getDefaultWebSocketUrl();
           
           // Essayer d'envoyer via socket si disponible (synchrone)
           if (this.socket?.connected) {
@@ -412,8 +421,8 @@ class GameSessionService {
     const updatedGameDetails = {
       ...this.state.gameDetails,
       is_converging_phase: true,
-      started: true,
-      started_date: new Date().toISOString()
+      started: false,  // La partie n'est pas encore démarrée, juste la phase de convergence
+      started_date: null
     } as GameDetails;
 
     this.updateState({ gameDetails: updatedGameDetails });
@@ -518,9 +527,9 @@ class GameSessionService {
   private updatePlayerStatus(status: string) {
     if (!this.state.playerId || !this.state.gameDetails) return;
     
-    // Throttle: éviter les mises à jour trop fréquentes (max 1 par seconde)
+    // Throttle: éviter les mises à jour trop fréquentes
     const now = Date.now();
-    if (now - this.lastStatusUpdate < 1000) {
+    if (now - this.lastStatusUpdate < STATUS_UPDATE_THROTTLE_MS) {
       return;
     }
     this.lastStatusUpdate = now;
@@ -813,20 +822,17 @@ class GameSessionService {
       return this.socketReady;
     }
 
-    const defaultUrl = window.location.hostname === 'localhost'
-      ? 'http://localhost:5174'
-      : 'https://ws.abstergochase.fr';
-    const url = defaultUrl;
-    const path = '/socket.io';
+    const url = getDefaultWebSocketUrl();
+    const path = SOCKET_PATH;
     this.updateState({ connectionStatus: 'connecting' });
 
     this.socket = io(url, {
       path,
       reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 20000,
+      reconnectionAttempts: SOCKET_RECONNECTION_ATTEMPTS,
+      reconnectionDelay: SOCKET_RECONNECTION_DELAY,
+      reconnectionDelayMax: SOCKET_RECONNECTION_DELAY_MAX,
+      timeout: SOCKET_TIMEOUT,
       transports: ['polling', 'websocket']
     });
     this.socketReady = new Promise((resolve, reject) => {
@@ -1531,7 +1537,7 @@ class GameSessionService {
   }
 
   private getIceServers(): RTCIceServer[] {
-    const servers: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
+    const servers: RTCIceServer[] = [{ urls: DEFAULT_STUN_SERVER }];
     const turnUrl = import.meta.env?.VITE_TURN_URL;
     const turnUser = import.meta.env?.VITE_TURN_USERNAME;
     const turnCredential = import.meta.env?.VITE_TURN_CREDENTIAL;

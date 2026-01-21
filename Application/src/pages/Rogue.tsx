@@ -24,6 +24,24 @@ import { useWakeLock } from '../utils/useWakeLock';
 import { useVibration } from '../hooks/useVibration';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 import { MapController, ResizeMap, useFogRings } from '../utils/GameMapUtils';
+import {
+  DEFAULT_ROUTINE_INTERVAL_MS,
+  DEFAULT_HACK_DURATION_MS,
+  DEFAULT_DETECTION_RADIUS,
+  START_ZONE_RADIUS,
+  DEFAULT_MAP_ZOOM,
+  FOG_RINGS_ROGUE,
+  GEOLOCATION_TIMEOUT,
+  GEOLOCATION_MAX_AGE,
+  GEOLOCATION_WATCH_MAX_AGE,
+  GAME_START_MODAL_AUTO_CLOSE_MS,
+  COMPASS_SIZE_SMALL,
+  COMPASS_DEFAULT_LATITUDE,
+  COMPASS_DEFAULT_LONGITUDE,
+  QR_CODE_SIZE,
+  DEFAULT_ROGUE_RANGE,
+  getRandomPlayerLogo
+} from '../ressources/DefaultValues';
 
 const Rogue: React.FC = () => {
   const history = useHistory();
@@ -51,7 +69,7 @@ const Rogue: React.FC = () => {
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
   // États pour la routine périodique (Host uniquement)
-  const [routineInterval, setRoutineInterval] = useState<number>(2000); // Valeur par défaut
+  const [routineInterval, setRoutineInterval] = useState<number>(DEFAULT_ROUTINE_INTERVAL_MS);
   const [isRoutineActive, setIsRoutineActive] = useState<boolean>(false);
   const [routineExecutionCount, setRoutineExecutionCount] = useState<number>(0);
   const routineIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -90,6 +108,10 @@ const Rogue: React.FC = () => {
   
   // Texte pour le QR code (email + code de partie)
   const [qrCodeText, setQrCodeText] = useState<string>('');
+  
+  // État pour la modal de démarrage de partie
+  const [isGameStartModalOpen, setIsGameStartModalOpen] = useState(false);
+  const gameStartModalShownRef = useRef(false);
 
   const getPlayerLogo = useCallback((playerIdValue: string) => {
     const hash = Array.from(playerIdValue).reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -125,23 +147,57 @@ const Rogue: React.FC = () => {
   // Activer la routine uniquement pour le Host
   useEffect(() => {
     if (isHost) {
-      setRoutineInterval(2000);
+      setRoutineInterval(DEFAULT_ROUTINE_INTERVAL_MS);
       setIsRoutineActive(true);
     } else {
       setIsRoutineActive(false);
     }
   }, [isHost]);
 
+  // Afficher la popup de démarrage quand countdown_started devient true (une seule fois)
+  useEffect(() => {
+    if (gameDetails?.countdown_started && gameDetails?.started && !gameStartModalShownRef.current) {
+      gameStartModalShownRef.current = true;
+      setIsGameStartModalOpen(true);
+      vibrate(patterns.long);
+      
+      // Fermer automatiquement la modal après le délai configuré
+      setTimeout(() => {
+        setIsGameStartModalOpen(false);
+      }, GAME_START_MODAL_AUTO_CLOSE_MS);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameDetails?.countdown_started, gameDetails?.started]);
+
+
   // Effet pour vérifier les conditions de victoire (Host uniquement)
   useEffect(() => {
     if (!isHost || !gameDetails?.started || gameDetails?.winner_type) return;
 
+    // Victoire Agent si tous les Rogues sont capturés
+    const allRogues = gameDetails.players?.filter(p => p.role?.toUpperCase() === 'ROGUE') || [];
+    const capturedRogues = allRogues.filter(p => p.status === 'CAPTURED');
+
+    if (allRogues.length > 0 && capturedRogues.length >= allRogues.length) {
+      console.log('🏆 Tous les Rogues capturés - Victoire des Agents !');
+      updateGameDetails({ 
+        winner_type: 'AGENT',
+        remaining_time: 0 
+      }).then(() => {
+        setTimeout(() => {
+          history.push('/end-game');
+        }, 1000);
+      });
+      return;
+    }
+
+    // Victoire Rogue si le nombre d'objectifs capturés atteint la condition de victoire
     const allObjectives = gameDetails.props || [];
     const capturedObjectives = allObjectives.filter(p => p.state === 'CAPTURED');
+    const victoryCondition = gameDetails.victory_condition_nb_objectivs || allObjectives.length;
 
-    // Victoire Rogue si tous les objectifs sont capturés
-    if (allObjectives.length > 0 && capturedObjectives.length >= allObjectives.length) {
-      console.log('🏆 Tous les objectifs capturés - Victoire des Rogues !');
+    if (allObjectives.length > 0 && capturedObjectives.length >= victoryCondition) {
+      console.log(`🏆 ${capturedObjectives.length}/${victoryCondition} objectifs capturés - Victoire des Rogues !`);
       updateGameDetails({ 
         winner_type: 'ROGUE',
         remaining_time: 0 
@@ -151,28 +207,25 @@ const Rogue: React.FC = () => {
         }, 1000);
       });
     }
-  }, [isHost, gameDetails?.started, gameDetails?.winner_type, gameDetails?.props, updateGameDetails, history]);
+  }, [isHost, gameDetails?.started, gameDetails?.winner_type, gameDetails?.players, gameDetails?.props, gameDetails?.victory_condition_nb_objectivs, updateGameDetails, history]);
 
-  const fogRings = useFogRings(gameDetails, 20);
+  const fogRings = useFogRings(gameDetails, FOG_RINGS_ROGUE);
 
   // Fonctions pour les boutons FAB
 
   const handleVisionMode = () => {
-    console.log('Mode vision activé');
     toast.success('👁️ Mode vision activé');
     vibrate(patterns.short);
   };
 
   const handleHealthCheck = () => {
-    console.log('Ouverture de la modal QR code');
     setIsQRModalOpen(true);
     vibrate(patterns.short);
   };
 
   const handleLocationTracker = () => {
-    console.log('Traceur de localisation activé');
     if (currentPosition && mapRef.current) {
-      mapRef.current.setView(currentPosition, 15);
+      mapRef.current.setView(currentPosition, DEFAULT_MAP_ZOOM);
       toast.success('📍 Carte recentrée sur votre position');
     } else if (currentPosition) {
       toast.info(`📍 Position actuelle: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
@@ -190,7 +243,7 @@ const Rogue: React.FC = () => {
     }
     
     if (isObjectiveInRange) {
-      const hackDuration = gameDetails?.hack_duration_ms || 5000; // 5 secondes par défaut
+      const hackDuration = gameDetails?.hack_duration_ms || DEFAULT_HACK_DURATION_MS;
       
       // Marquer qu'une capture est en cours
       setIsCaptureInProgress(true);
@@ -226,6 +279,7 @@ const Rogue: React.FC = () => {
       
       // Trouver l'objectif à portée pour le capturer
       if (currentPosition && objectiveProps.length > 0) {
+        const rogueRange = gameDetails?.rogue_range || DEFAULT_ROGUE_RANGE;
         const objectiveInRange = objectiveProps
           .filter(prop => prop.visible === true)
           .find(prop => {
@@ -234,16 +288,12 @@ const Rogue: React.FC = () => {
               prop.latitude || '0',
               prop.longitude || '0'
             );
-            const detectionRadius = prop.detection_radius || 30;
-            return distance <= detectionRadius;
+            return distance <= rogueRange;
           });
         
         if (objectiveInRange) {
           try {
             // Marquer l'objectif comme en cours de capture pour la synchro
-            if (!isHost) {
-              console.log(`📤 [WebRTC] Émission capture objectif: ${objectiveInRange.id_prop} (CAPTURING)`);
-            }
             await updateProp(objectiveInRange.id_prop, {
               state: "CAPTURING"
             });
@@ -255,7 +305,7 @@ const Rogue: React.FC = () => {
               )
             );
           } catch (error) {
-            console.error('❌ Erreur lors du marquage de la capture:', error);
+            // Erreur silencieuse
           }
 
           // Fermer le toast et réinitialiser l'état à la fin de l'animation
@@ -266,9 +316,6 @@ const Rogue: React.FC = () => {
             
             try {
               // Mettre à jour l'objectif capturé
-              if (!isHost) {
-                console.log(`📤 [WebRTC] Émission capture objectif: ${objectiveInRange.id_prop} (CAPTURED)`);
-              }
               await updateProp(objectiveInRange.id_prop, {
                 visible: false,
                 state: "CAPTURED"
@@ -287,7 +334,6 @@ const Rogue: React.FC = () => {
               
               // Le useEffect vérifiera automatiquement si tous les objectifs sont capturés
             } catch (error) {
-              console.error('❌ Erreur lors de la capture de l\'objectif:', error);
               toast.error('❌ Erreur lors de la capture de l\'objectif');
             }
             
@@ -329,10 +375,15 @@ const Rogue: React.FC = () => {
       }
 
       vibrate(patterns.long);
+      
+      // Démarrer la partie ET le compte à rebours
       await updateGameDetails({
         started: true,
-        is_converging_phase: false
+        is_converging_phase: false,
+        countdown_started: true,
+        started_date: new Date().toISOString()
       });
+      
       toast.success(`🚀 Partie démarrée avec ${playerCount} joueur(s) !`);
     } catch (error) {
       await handleErrorWithUser('Erreur lors du démarrage de la partie', error, ERROR_CONTEXTS.GAME_START);
@@ -378,21 +429,9 @@ const Rogue: React.FC = () => {
 
   useEffect(() => {
     if (sessionGameDetails) {
-      if (!isHost) {
-        console.log(`📥 [WebRTC] Réception état du jeu:`, {
-          players: sessionGameDetails.players?.length || 0,
-          props: sessionGameDetails.props?.length || 0,
-          remaining_time: sessionGameDetails.remaining_time,
-          is_converging_phase: sessionGameDetails.is_converging_phase,
-          winner_type: sessionGameDetails.winner_type
-        });
-      }
       setGameDetails(sessionGameDetails);
       if (sessionGameDetails.props) {
         setObjectiveProps(sessionGameDetails.props);
-        if (!isHost) {
-          console.log(`${sessionGameDetails.props.length} objectifs synchronisés via WebRTC`);
-        }
       }
     }
   }, [sessionGameDetails, isHost]);
@@ -401,15 +440,11 @@ const Rogue: React.FC = () => {
 
   // Handler pour la fin de partie
   const handleGameEnd = async () => {
-    console.log('⏰ TEMPS ÉCOULÉ - Fin de la partie !');
-    
     // Arrêter le compte à rebours
     setIsCountdownActive(false);
     setCountdown(0);
         
     if (isHost) {
-      console.log('👑 ADMIN - Fin de partie détectée');
-      
       // Mettre à jour remaining_time=0 puis winner_type à "ROGUE" car le temps est écoulé
       const params = new URLSearchParams(location.search);
       const code = params.get('code');
@@ -417,16 +452,8 @@ const Rogue: React.FC = () => {
         try {
           await updateGameDetails({ remaining_time: 0 });
         } catch (_) {}
-        const success = await updateGameWinnerType(code, 'ROGUE');
-        if (success) {
-          console.log('🏆 Winner_type mis à jour: ROGUE (temps écoulé)');
-        } else {
-          console.error('❌ Échec de la mise à jour du winner_type');
-        }
+        await updateGameWinnerType(code, 'ROGUE');
       }
-      
-    } else {
-      console.log('👤 JOUEUR - Fin de partie détectée');
     }
     
     // Rediriger vers la page de fin de partie (pour tous les joueurs)
@@ -435,8 +462,7 @@ const Rogue: React.FC = () => {
 
   useEffect(() => {
     // Choisir un logo de joueur aléatoirement
-    const logoNumber = Math.floor(Math.random() * 6) + 1;
-    setPlayerLogo(`joueur_${logoNumber}.png`);
+    setPlayerLogo(getRandomPlayerLogo());
     
     // Get initial position
     if ("geolocation" in navigator) {
@@ -445,13 +471,12 @@ const Rogue: React.FC = () => {
           setCurrentPosition([position.coords.latitude, position.coords.longitude]);
         },
         (error) => {
-          console.log("Geolocation error on initial position:", error.code, error.message);
           // Don't log error - position will be updated by watchPosition
         },
         {
           enableHighAccuracy: true,
-          timeout: 15000, // Increased timeout to 15 seconds
-          maximumAge: 10000 // Accept cached position up to 10 seconds old
+          timeout: GEOLOCATION_TIMEOUT,
+          maximumAge: GEOLOCATION_MAX_AGE
         }
       );
 
@@ -461,13 +486,12 @@ const Rogue: React.FC = () => {
           setCurrentPosition([position.coords.latitude, position.coords.longitude]);
         },
         (error) => {
-          console.log("Geolocation watch error:", error.code, error.message);
           // Don't log to error handler - watchPosition will keep trying
         },
         {
           enableHighAccuracy: true,
-          maximumAge: 1000, // Accept position up to 1 second old for smoother tracking
-          timeout: 15000 // Increased timeout to 15 seconds
+          maximumAge: GEOLOCATION_WATCH_MAX_AGE,
+          timeout: GEOLOCATION_TIMEOUT
         }
       );
 
@@ -481,9 +505,6 @@ const Rogue: React.FC = () => {
   // La synchronisation se fait via WebRTC pour tous les joueurs
   useEffect(() => {
     if (currentPosition && currentPlayerId) {
-      if (!isHost) {
-        console.log(`📤 [WebRTC] Émission position: ${currentPosition[0].toFixed(6)}, ${currentPosition[1].toFixed(6)}`);
-      }
       updatePlayerPosition(currentPlayerId, currentPosition[0], currentPosition[1]);
     }
   }, [currentPosition, currentPlayerId, isHost]);
@@ -513,8 +534,6 @@ const Rogue: React.FC = () => {
           return prev;
         });
       }, 1000);
-      
-      console.log(`⏰ Compte à rebours démarré: ${Math.floor(countdown / 60)}:${(countdown % 60).toString().padStart(2, '0')}`);
     } else if (countdown === 0) {
       // Arrêter le compte à rebours quand il atteint 0
       if (countdownIntervalRef.current) {
@@ -545,38 +564,19 @@ const Rogue: React.FC = () => {
     pushRemainingTime();
   }, [countdown, isCountdownActive, isHost, gameCode]);
 
-  // Lancer le compte à rebours uniquement si tous les joueurs sont dans leur zone
+  // Lancer le compte à rebours uniquement quand le host a appuyé sur le bouton
   useEffect(() => {
     if (!isHost) {
       return;
     }
-    if (gameDetails?.started && !isCountdownActive) {
-      // Vérifier si tous les joueurs sont dans leur zone de départ
-      const allPlayersInStartZone = gameDetails?.players?.every(p => p.isInStartZone === true) ?? false;
-      
-      // Vérifier si le compte à rebours a déjà été lancé (remaining_time < duration)
-      const countdownAlreadyStarted = 
-        gameDetails.remaining_time !== undefined && 
-        gameDetails.remaining_time !== null && 
-        gameDetails.duration !== undefined &&
-        gameDetails.duration !== null &&
-        gameDetails.remaining_time < gameDetails.duration;
-      
-      // Ne lancer le compte à rebours que si :
-      // - Tous les joueurs sont dans leur zone, OU
-      // - Le compte à rebours a déjà été lancé (reconnexion/refresh)
-      if (allPlayersInStartZone || countdownAlreadyStarted) {
-        const totalSeconds = (gameDetails.remaining_time ?? gameDetails.duration) || 0;
-        if (totalSeconds > 0) {
-          setCountdown(totalSeconds);
-          setIsCountdownActive(true);
-          console.log('⏰ Compte à rebours démarré:', allPlayersInStartZone ? 'tous les joueurs en position' : 'reprise après reconnexion');
-        }
-      } else {
-        console.log('⏸️ Compte à rebours en attente: tous les joueurs doivent être dans leur zone');
+    if (gameDetails?.started && !isCountdownActive && gameDetails?.countdown_started) {
+      const totalSeconds = (gameDetails.remaining_time ?? gameDetails.duration) || 0;
+      if (totalSeconds > 0) {
+        setCountdown(totalSeconds);
+        setIsCountdownActive(true);
       }
     }
-  }, [gameDetails?.started, gameDetails?.duration, gameDetails?.remaining_time, gameDetails?.players, isCountdownActive, isHost]);
+  }, [gameDetails?.started, gameDetails?.countdown_started, gameDetails?.duration, gameDetails?.remaining_time, isCountdownActive, isHost]);
 
   useEffect(() => {
     if (!isHost && gameDetails?.remaining_time !== undefined && gameDetails?.remaining_time !== null) {
@@ -653,8 +653,9 @@ const Rogue: React.FC = () => {
       setRoutePath(route);
     }
     
-    // 6. Vérifier si un objectif est à portée (utilise detection_radius de GameProp)
+    // 6. Vérifier si un objectif est à portée (utilise ROGUE_RANGE du joueur)
     if (currentPosition && objectiveProps.length > 0) {
+      const rogueRange = gameDetails?.rogue_range || DEFAULT_ROGUE_RANGE;
       objectiveInRange = objectiveProps
         .filter(prop => prop.visible === true)
         .some(prop => {
@@ -663,16 +664,11 @@ const Rogue: React.FC = () => {
             prop.latitude || '0',
             prop.longitude || '0'
           );
-          // Utiliser detection_radius de l'objet GameProp, avec une valeur par défaut de 30m
-          const detectionRadius = prop.detection_radius || 30;
-          return distance <= detectionRadius;
+          return distance <= rogueRange;
         });
       
       setIsObjectiveInRange(objectiveInRange);
     }
-    
-    // Console.log unifié avec toutes les informations de la routine
-    console.log(`🔄 Routine #${routineExecutionCount} | État: ${gameState} | Distance: ${distanceToStart ? distanceToStart.toFixed(0) + 'm' : 'N/A'} | Zone départ: ${isInStartZone ? 'OUI' : 'NON'} | Objectif: ${objectiveInRange ? 'À PORTÉE' : 'HORS PORTÉE'}`);
     
      }, [currentPosition, gameDetails, objectiveProps, routineExecutionCount, currentPlayerId]);
 
@@ -701,7 +697,6 @@ const Rogue: React.FC = () => {
       if (routineIntervalRef.current) {
         clearInterval(routineIntervalRef.current);
         routineIntervalRef.current = null;
-        console.log('Routine arrêtée');
       }
     }
     
@@ -762,9 +757,6 @@ const Rogue: React.FC = () => {
         gameDetails.start_zone_rogue_latitude, 
         gameDetails.start_zone_rogue_longitude
       );
-      if (!isHost) {
-        console.log(`📤 [WebRTC] Émission isInStartZone: ${isInStartZone}`);
-      }
       updatePlayerInStartZone(currentPlayerId, isInStartZone);
     }
   }, [currentPosition, gameDetails?.start_zone_rogue_latitude, gameDetails?.start_zone_rogue_longitude, currentPlayerId, isHost]);
@@ -772,6 +764,7 @@ const Rogue: React.FC = () => {
   // Vérifier en temps réel si un objectif est à portée (mise à jour locale)
   useEffect(() => {
     if (currentPosition && objectiveProps.length > 0) {
+      const rogueRange = gameDetails?.rogue_range || DEFAULT_ROGUE_RANGE;
       const objectiveInRange = objectiveProps
         .filter(prop => prop.visible === true)
         .some(prop => {
@@ -780,15 +773,14 @@ const Rogue: React.FC = () => {
             prop.latitude || '0',
             prop.longitude || '0'
           );
-          const detectionRadius = prop.detection_radius || 30;
-          return distance <= detectionRadius;
+          return distance <= rogueRange;
         });
       
       setIsObjectiveInRange(objectiveInRange);
     } else {
       setIsObjectiveInRange(false);
     }
-  }, [currentPosition, objectiveProps]);
+  }, [currentPosition, objectiveProps, gameDetails?.rogue_range]);
 
   const visibleObjectives = objectiveProps.filter(prop => prop.visible === true);
 
@@ -824,7 +816,7 @@ const Rogue: React.FC = () => {
                 parseFloat(gameDetails.map_center_latitude || '0'), 
                 parseFloat(gameDetails.map_center_longitude || '0')
               ]}
-              zoom={15}
+              zoom={DEFAULT_MAP_ZOOM}
               whenReady={() => {
                 // Force a resize after the map is ready
                 setTimeout(() => {
@@ -885,7 +877,7 @@ const Rogue: React.FC = () => {
                   />
                   <Circle
                     center={[parseFloat(gameDetails.start_zone_rogue_latitude), parseFloat(gameDetails.start_zone_rogue_longitude)]}
-                    radius={50}
+                    radius={START_ZONE_RADIUS}
                     pathOptions={{ color: 'green', fillColor: 'green', fillOpacity: 0.1 }}
                   />
                 </>
@@ -1071,6 +1063,54 @@ const Rogue: React.FC = () => {
           </div>
         </div>
 
+        {/* Modal de démarrage de partie */}
+        <IonModal 
+          isOpen={isGameStartModalOpen} 
+          onDidDismiss={() => setIsGameStartModalOpen(false)}
+          backdropDismiss={false}
+        >
+          <IonContent className="ion-padding" style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            background: 'linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%)'
+          }}>
+            <div style={{
+              textAlign: 'center',
+              padding: '40px',
+              borderRadius: '20px',
+              background: 'rgba(0, 0, 0, 0.6)',
+              border: '3px solid #2dd36f',
+              boxShadow: '0 0 50px rgba(45, 211, 111, 0.8)'
+            }}>
+              <h1 style={{ 
+                fontSize: '48px', 
+                marginBottom: '20px',
+                color: '#2dd36f',
+                textShadow: '0 0 20px rgba(45, 211, 111, 0.8)',
+                animation: 'pulse 1.5s ease-in-out infinite'
+              }}>
+                🚀 LA PARTIE COMMENCE !
+              </h1>
+              <p style={{ 
+                fontSize: '24px', 
+                color: '#fff',
+                marginTop: '20px'
+              }}>
+                Le compte à rebours a démarré
+              </p>
+              <div style={{
+                fontSize: '72px',
+                marginTop: '30px',
+                color: '#ffc409',
+                textShadow: '0 0 30px rgba(255, 196, 9, 0.8)'
+              }}>
+                ⏰
+              </div>
+            </div>
+          </IonContent>
+        </IonModal>
+
         {/* Modal pour afficher le QR code */}
         <IonModal isOpen={isQRModalOpen} onDidDismiss={() => setIsQRModalOpen(false)}>
           <IonHeader>
@@ -1086,7 +1126,7 @@ const Rogue: React.FC = () => {
               {qrCodeText ? (
                 <>
                   <h2 className="qr-modal-title">Votre QR Code</h2>
-                  <QRCode value={qrCodeText} size={300} />
+                  <QRCode value={qrCodeText} size={QR_CODE_SIZE} />
                   <p className="qr-modal-email">
                     {playerName}
                   </p>
