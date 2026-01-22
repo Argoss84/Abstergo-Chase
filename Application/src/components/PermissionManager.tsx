@@ -275,7 +275,7 @@ const PermissionManager: React.FC = () => {
     <IonModal
       isOpen={showAlert}
       onDidDismiss={() => setShowAlert(false)}
-      cssClass="permission-modal"
+      className="permission-modal"
       backdropDismiss={false}
     >
       <IonHeader>

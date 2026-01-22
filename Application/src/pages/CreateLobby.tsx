@@ -268,6 +268,7 @@ const CreateLobby: React.FC = () => {
         winner_type: null,
         is_converging_phase: false,
         started: false,
+        countdown_started: false,
         city: null,
         started_date: null,
         props: [],
