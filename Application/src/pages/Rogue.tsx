@@ -96,6 +96,9 @@ const Rogue: React.FC = () => {
   
   // Référence pour stocker l'ID du toast de capture
   const captureToastRef = useRef<string | number | null>(null);
+  
+  // Référence pour stocker le timeout de capture
+  const captureTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Wake Lock pour empêcher l'écran de se mettre en veille
   useWakeLock(true);
@@ -309,7 +312,7 @@ const Rogue: React.FC = () => {
           }
 
           // Fermer le toast et réinitialiser l'état à la fin de l'animation
-          setTimeout(async () => {
+          captureTimeoutRef.current = setTimeout(async () => {
             if (captureToastRef.current) {
               toast.dismiss(captureToastRef.current);
             }
@@ -339,8 +342,13 @@ const Rogue: React.FC = () => {
             
             setIsCaptureInProgress(false);
             captureToastRef.current = null;
+            captureTimeoutRef.current = null;
           }, hackDuration);
         } else {
+          // Fermer le toast si aucun objectif n'est trouvé après l'avoir créé
+          if (captureToastRef.current) {
+            toast.dismiss(captureToastRef.current);
+          }
           setIsCaptureInProgress(false);
           captureToastRef.current = null;
           toast.warning('❌ Aucun objectif à portée');
@@ -781,6 +789,47 @@ const Rogue: React.FC = () => {
       setIsObjectiveInRange(false);
     }
   }, [currentPosition, objectiveProps, gameDetails?.rogue_range]);
+
+  // Cleanup du toast et du timeout de capture lors du démontage ou quand la capture se termine
+  useEffect(() => {
+    return () => {
+      // Nettoyer le timeout s'il existe
+      if (captureTimeoutRef.current) {
+        clearTimeout(captureTimeoutRef.current);
+        captureTimeoutRef.current = null;
+      }
+      
+      // Fermer le toast s'il existe
+      if (captureToastRef.current) {
+        toast.dismiss(captureToastRef.current);
+        captureToastRef.current = null;
+      }
+    };
+  }, []);
+
+  // Détecter si un objectif en cours de capture a été capturé via synchronisation
+  useEffect(() => {
+    if (isCaptureInProgress && captureToastRef.current) {
+      // Vérifier si tous les objectifs visibles ont été capturés
+      const hasVisibleObjectives = objectiveProps.some(prop => prop.visible === true);
+      
+      if (!hasVisibleObjectives) {
+        // Tous les objectifs ont été capturés (probablement via synchronisation)
+        // Fermer le toast et nettoyer l'état
+        if (captureTimeoutRef.current) {
+          clearTimeout(captureTimeoutRef.current);
+          captureTimeoutRef.current = null;
+        }
+        
+        if (captureToastRef.current) {
+          toast.dismiss(captureToastRef.current);
+          captureToastRef.current = null;
+        }
+        
+        setIsCaptureInProgress(false);
+      }
+    }
+  }, [isCaptureInProgress, objectiveProps]);
 
   const visibleObjectives = objectiveProps.filter(prop => prop.visible === true);
 
