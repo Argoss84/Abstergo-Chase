@@ -25,7 +25,8 @@
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "react-router": "^5.3.4",
-    "react-router-dom": "^5.3.4"
+    "react-router-dom": "^5.3.4",
+    "three": "^0.182.0"
   },
   "devDependencies": {
     "@capacitor/cli": "8.0.1",
@@ -35,6 +36,8 @@
     "@testing-library/user-event": "^14.4.3",
     "@types/react": "19.0.10",
     "@types/react-dom": "19.0.4",
+    "@types/three": "^0.182.0",
+    "@types/webxr": "^0.5.24",
     "@vitejs/plugin-legacy": "^7.2.1",
     "@vitejs/plugin-react": "^5.1.2",
     "cypress": "^13.5.0",

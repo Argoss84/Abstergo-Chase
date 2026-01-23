@@ -1,10 +1,15 @@
-import { IonContent, IonPage } from '@ionic/react';
+import { IonButton, IonContent, IonPage } from '@ionic/react';
 
 const Home: React.FC = () => {
   return (
     <IonPage>
       <IonContent fullscreen>
-        <div className="ion-padding">Hello World</div>
+        <div className="ion-padding">
+          <div>Hello World</div>
+          <IonButton routerLink="/ar" expand="block">
+            Open AR
+          </IonButton>
+        </div>
       </IonContent>
     </IonPage>
   );
