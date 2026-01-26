@@ -40,13 +40,10 @@ import {
   DEFAULT_MAX_ROGUE,
   START_ZONE_RADIUS,
   DEFAULT_MAP_ZOOM_CREATE_LOBBY,
-  COMPASS_DEFAULT_LATITUDE,
-  COMPASS_DEFAULT_LONGITUDE,
   CREATE_LOBBY_GEOLOCATION_TIMEOUT,
   CREATE_LOBBY_GEOLOCATION_MAX_AGE,
   CREATE_LOBBY_GEOLOCATION_RETRY_TIMEOUT,
   CREATE_LOBBY_GEOLOCATION_RETRY_MAX_AGE,
-  CREATE_LOBBY_GEOLOCATION_FALLBACK_TIMEOUT,
   MAX_PLAYER_NAME_LENGTH
 } from '../ressources/DefaultValues';
 
@@ -85,11 +82,12 @@ const ResizeMap = () => {
 
 const CreateLobby: React.FC = () => {
   const history = useHistory();
-  const { createLobby, playerName, setPlayerName, lobbyCode, disconnectSocket } = useGameSession();
+  const { createLobby, playerName, setPlayerName, lobbyCode, disconnectSocket, clearSession } = useGameSession();
   const hasDisconnectedSocketRef = useRef(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<[number, number] | null>(null);
   const [userPosition, setUserPosition] = useState<[number, number] | null>(null);
+  const [isLoadingGPS, setIsLoadingGPS] = useState(true);
   const [streets, setStreets] = useState<L.LatLngTuple[][]>([]);
   const [mapKey, setMapKey] = useState(0);
   const [objectives, setObjectives] = useState<Objective[]>([]);
@@ -112,12 +110,14 @@ const CreateLobby: React.FC = () => {
   const [isLoadingStreets, setIsLoadingStreets] = useState(false);
   const [streetsLoadError, setStreetsLoadError] = useState<string | null>(null);
 
+  // Nettoyer les données de session à l'ouverture de la page
   useEffect(() => {
+    clearSession();
     if (!lobbyCode && !hasDisconnectedSocketRef.current) {
       hasDisconnectedSocketRef.current = true;
       disconnectSocket();
     }
-  }, [disconnectSocket, lobbyCode]);
+  }, [clearSession, disconnectSocket, lobbyCode]);
 
   // Initialize displayName with playerName from context
   useEffect(() => {
@@ -312,21 +312,10 @@ const CreateLobby: React.FC = () => {
   };
 
   useEffect(() => {
-    const fallbackPosition: [number, number] = [COMPASS_DEFAULT_LATITUDE, COMPASS_DEFAULT_LONGITUDE];
-    
-    const setFallbackPosition = () => {
-      setUserPosition(fallbackPosition);
-      setMapKey(prev => prev + 1);
-      setFormData(prev => ({
-        ...prev,
-        map_center_latitude: fallbackPosition[0].toString(),
-        map_center_longitude: fallbackPosition[1].toString()
-      }));
-    };
-
     const setPosition = (position: GeolocationPosition) => {
       const newPosition: [number, number] = [position.coords.latitude, position.coords.longitude];
       setUserPosition(newPosition);
+      setIsLoadingGPS(false);
       setMapKey(prev => prev + 1);
       setFormData(prev => ({
         ...prev,
@@ -334,32 +323,28 @@ const CreateLobby: React.FC = () => {
         map_center_longitude: newPosition[1].toString()
       }));
     };
+
+    const handleError = (error: GeolocationPositionError) => {
+      setIsLoadingGPS(false);
+      // Ne pas utiliser de position par défaut, laisser userPosition à null
+      console.warn('Erreur de géolocalisation:', error);
+    };
     
     if (!navigator.geolocation) {
-      setFallbackPosition();
+      setIsLoadingGPS(false);
       return;
     }
 
-    // Try with low accuracy first (faster)
-    const timeoutId = setTimeout(() => {
-      setFallbackPosition();
-    }, CREATE_LOBBY_GEOLOCATION_FALLBACK_TIMEOUT);
-
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        clearTimeout(timeoutId);
         setPosition(position);
       },
       (error) => {
-        clearTimeout(timeoutId);
-        
         // If timeout or position unavailable, try one more time with different settings
         if (error.code === 3 || error.code === 2) {
           navigator.geolocation.getCurrentPosition(
             setPosition,
-            (retryError) => {
-              setFallbackPosition();
-            },
+            handleError,
             {
               enableHighAccuracy: false,
               timeout: CREATE_LOBBY_GEOLOCATION_RETRY_TIMEOUT,
@@ -367,8 +352,8 @@ const CreateLobby: React.FC = () => {
             }
           );
         } else {
-          // Permission denied or other error - use fallback
-          setFallbackPosition();
+          // Permission denied or other error
+          handleError(error);
         }
       },
       {
@@ -414,7 +399,25 @@ const CreateLobby: React.FC = () => {
             </IonItem>
 
             <div style={{ height: '300px', width: '100%', marginTop: '1rem', marginBottom: '1rem' }}>
-              {userPosition && (
+              {isLoadingGPS ? (
+                <div style={{ 
+                  height: '100%', 
+                  width: '100%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  flexDirection: 'column',
+                  backgroundColor: '#f5f5f5',
+                  borderRadius: '8px'
+                }}>
+                  <IonText color="medium">
+                    <p style={{ fontSize: '1rem', margin: '0.5rem 0' }}>Chargement de la position GPS...</p>
+                  </IonText>
+                  <IonText color="medium">
+                    <p style={{ fontSize: '0.85rem', margin: '0.5rem 0', opacity: 0.7 }}>Veuillez autoriser l'accès à votre position</p>
+                  </IonText>
+                </div>
+              ) : userPosition ? (
                 <MapContainer
                   key={mapKey}
                   center={userPosition}
@@ -502,6 +505,24 @@ const CreateLobby: React.FC = () => {
                     />
                   ))}
                 </MapContainer>
+              ) : (
+                <div style={{ 
+                  height: '100%', 
+                  width: '100%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  flexDirection: 'column',
+                  backgroundColor: '#f5f5f5',
+                  borderRadius: '8px'
+                }}>
+                  <IonText color="danger">
+                    <p style={{ fontSize: '1rem', margin: '0.5rem 0' }}>Position GPS non disponible</p>
+                  </IonText>
+                  <IonText color="medium">
+                    <p style={{ fontSize: '0.85rem', margin: '0.5rem 0', opacity: 0.7 }}>Veuillez activer la géolocalisation pour continuer</p>
+                  </IonText>
+                </div>
               )}
             </div>
 
@@ -539,7 +560,7 @@ const CreateLobby: React.FC = () => {
               expand="block" 
               className="ion-margin-bottom"
               onClick={handleGenerateObjectives}
-              disabled={!selectedPosition || isLoadingStreets || !!streetsLoadError}
+              disabled={!selectedPosition || isLoadingStreets || !!streetsLoadError || !userPosition}
             >
               {isLoadingStreets ? 'Chargement des rues...' : 'Générer les objectifs'}
             </IonButton>
@@ -547,7 +568,7 @@ const CreateLobby: React.FC = () => {
             <IonButton 
               expand="block" 
               onClick={handleSubmit} 
-              disabled={isLoading || !selectedPosition || objectives.length === 0 || !displayName.trim()}
+              disabled={isLoading || !selectedPosition || objectives.length === 0 || !displayName.trim() || !userPosition}
             >
               {isLoading ? 'Création en cours...' : 'Créer la partie'}
             </IonButton>
