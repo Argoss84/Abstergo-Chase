@@ -13,6 +13,15 @@ import {
 } from '@ionic/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+// Charger tous les modèles 3D depuis src/objects/ avec Vite
+// Utiliser ?url pour obtenir l'URL des fichiers binaires (.glb, .gltf)
+const modelAssets = import.meta.glob('../objects/*.{glb,gltf}', {
+  eager: false,
+  query: '?url',
+  import: 'default',
+}) as Record<string, () => Promise<string>>;
 
 type GeoPosition = {
   lat: number;
@@ -50,7 +59,7 @@ const ArGps: React.FC = () => {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const objectRef = useRef<THREE.Mesh | null>(null);
+  const objectRef = useRef<THREE.Object3D | null>(null);
   const sessionRef = useRef<XRSession | null>(null);
   const resizeHandlerRef = useRef<(() => void) | null>(null);
   const orientationHandlerRef = useRef<((event: DeviceOrientationEvent) => void) | null>(null);
@@ -63,6 +72,7 @@ const ArGps: React.FC = () => {
   const cubeColorRef = useRef(0x2dd36f);
   const lastCalculatedPositionRef = useRef(new THREE.Vector3(0, 0, -2));
   const smoothedHeadingRef = useRef<number | null>(null);
+  const loaderRef = useRef<GLTFLoader | null>(null);
 
   const [isSupported, setIsSupported] = useState<boolean | null>(null);
   const [isSessionActive, setIsSessionActive] = useState(false);
@@ -77,6 +87,9 @@ const ArGps: React.FC = () => {
   const [compassEnabled, setCompassEnabled] = useState(false);
   const [cubeColor, setCubeColor] = useState(0x2dd36f);
   const [cubeRotation, setCubeRotation] = useState({ x: 0, y: 0 });
+  const [customModel, setCustomModel] = useState<THREE.Group | null>(null);
+  const [modelFileName, setModelFileName] = useState<string>('');
+  const [modelLoadError, setModelLoadError] = useState<string>('');
 
   useEffect(() => {
     let mounted = true;
@@ -189,6 +202,93 @@ const ArGps: React.FC = () => {
     setBearing(nextBearing);
   }, [currentPos, targetPos, heading]);
 
+  const loadModelFromObjects = useCallback((modelPath: string) => {
+    if (!loaderRef.current) {
+      loaderRef.current = new GLTFLoader();
+    }
+
+    const loader = loaderRef.current;
+    setModelLoadError('');
+    
+    loader.load(
+      modelPath,
+      (gltf) => {
+        // Cloner le modèle pour éviter les problèmes de référence
+        const model = gltf.scene.clone();
+        
+        // Calculer la bounding box pour centrer et ajuster la taille
+        const box = new THREE.Box3().setFromObject(model);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        
+        // Centrer le modèle
+        model.position.sub(center);
+        
+        // Ajuster la taille si nécessaire (max 2 mètres dans la plus grande dimension)
+        const maxSize = 2;
+        const maxDimension = Math.max(size.x, size.y, size.z);
+        if (maxDimension > maxSize) {
+          const scale = maxSize / maxDimension;
+          model.scale.set(scale, scale, scale);
+        }
+        
+        setCustomModel(model);
+        const fileName = modelPath.split('/').pop() || modelPath;
+        setModelFileName(fileName);
+        setModelLoadError('');
+      },
+      (progress) => {
+        // Optionnel: afficher la progression du chargement
+        if (progress.total > 0) {
+          const percent = (progress.loaded / progress.total) * 100;
+          setModelLoadError(`Chargement... ${percent.toFixed(0)}%`);
+        }
+      },
+      (error: unknown) => {
+        const errorMessage = error instanceof Error ? error.message : 'Format non supporté';
+        setModelLoadError(`Erreur de chargement: ${errorMessage}`);
+      }
+    );
+  }, []);
+
+  // Charger automatiquement un modèle au démarrage depuis src/objects/
+  useEffect(() => {
+    const tryLoadModel = async () => {
+      // Obtenir tous les chemins de modèles disponibles
+      const modelPaths = Object.keys(modelAssets);
+      
+      // Trier par priorité : model.glb > model.gltf > default.glb > default.gltf > autres
+      const priorityOrder = (path: string) => {
+        if (path.includes('model.glb')) return 1;
+        if (path.includes('model.gltf')) return 2;
+        if (path.includes('default.glb')) return 3;
+        if (path.includes('default.gltf')) return 4;
+        return 5;
+      };
+      
+      const sortedPaths = modelPaths.sort((a, b) => priorityOrder(a) - priorityOrder(b));
+
+      // Essayer de charger le premier modèle disponible
+      for (const path of sortedPaths) {
+        try {
+          const getUrl = modelAssets[path];
+          if (getUrl) {
+            const url = await getUrl();
+            loadModelFromObjects(url);
+            return;
+          }
+        } catch (error) {
+          // Continuer avec le prochain modèle
+          continue;
+        }
+      }
+      // Si aucun modèle n'est trouvé, utiliser le cube par défaut
+      setModelLoadError('');
+    };
+
+    tryLoadModel();
+  }, [loadModelFromObjects]);
+
   const cleanupThree = useCallback(() => {
     const renderer = rendererRef.current;
     if (renderer) {
@@ -204,12 +304,28 @@ const ArGps: React.FC = () => {
     }
 
     if (objectRef.current) {
-      objectRef.current.geometry.dispose();
-      const material = objectRef.current.material;
-      if (Array.isArray(material)) {
-        material.forEach((item) => item.dispose());
+      // Nettoyer selon le type d'objet
+      const obj = objectRef.current;
+      if (obj instanceof THREE.Mesh) {
+        obj.geometry.dispose();
+        const material = obj.material;
+        if (Array.isArray(material)) {
+          material.forEach((item) => item.dispose());
+        } else {
+          material.dispose();
+        }
       } else {
-        material.dispose();
+        // Nettoyer un groupe ou autre objet 3D (modèle 3D)
+        obj.traverse((child: THREE.Object3D) => {
+          if (child instanceof THREE.Mesh) {
+            child.geometry.dispose();
+            if (Array.isArray(child.material)) {
+              child.material.forEach((mat) => mat.dispose());
+            } else {
+              child.material.dispose();
+            }
+          }
+        });
       }
     }
 
@@ -258,12 +374,23 @@ const ArGps: React.FC = () => {
       setCubeRotation({ x: 0, y: 0 });
       setCubeColor(0x2dd36f);
       
-      const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-      const material = new THREE.MeshStandardMaterial({ color: cubeColorRef.current });
-      const cube = new THREE.Mesh(geometry, material);
-      cube.position.copy(targetOffsetRef.current);
+      // Utiliser le modèle personnalisé s'il existe, sinon créer un cube par défaut
+      let object3D: THREE.Object3D;
+      
+      if (customModel) {
+        // Cloner le modèle pour éviter les problèmes de référence
+        object3D = customModel.clone();
+        object3D.position.copy(targetOffsetRef.current);
+      } else {
+        // Créer un cube par défaut
+        const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+        const material = new THREE.MeshStandardMaterial({ color: cubeColorRef.current });
+        object3D = new THREE.Mesh(geometry, material);
+        object3D.position.copy(targetOffsetRef.current);
+      }
+      
       smoothedPositionRef.current.copy(targetOffsetRef.current);
-      scene.add(cube);
+      scene.add(object3D);
 
       // Créer un raycaster pour les interactions
       const raycaster = new THREE.Raycaster();
@@ -274,7 +401,7 @@ const ArGps: React.FC = () => {
       const handleSelect = () => {
         if (!objectRef.current || !raycasterRef.current) return;
         
-        const cube = objectRef.current;
+        const obj = objectRef.current;
         const raycaster = raycasterRef.current;
         
         // Utiliser la position actuelle du contrôleur
@@ -284,16 +411,22 @@ const ArGps: React.FC = () => {
         direction.set(0, 0, -1).applyMatrix4(controller.matrixWorld).sub(position).normalize();
         
         raycaster.set(position, direction);
-        const intersections = raycaster.intersectObject(cube);
+        
+        // Intersecter avec tous les enfants si c'est un groupe
+        const intersections = obj instanceof THREE.Group 
+          ? raycaster.intersectObjects(obj.children, true)
+          : raycaster.intersectObject(obj);
         
         if (intersections.length > 0) {
-          // Changer la couleur du cube au clic
-          const newColor = Math.random() * 0xffffff;
-          cubeColorRef.current = newColor;
-          setCubeColor(newColor);
-          (cube.material as THREE.MeshStandardMaterial).color.setHex(newColor);
+          // Si c'est un cube (Mesh), changer la couleur
+          if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
+            const newColor = Math.random() * 0xffffff;
+            cubeColorRef.current = newColor;
+            setCubeColor(newColor);
+            obj.material.color.setHex(newColor);
+          }
           
-          // Ajouter une rotation
+          // Ajouter une rotation (fonctionne pour tous les objets)
           cubeRotationRef.current = {
             x: cubeRotationRef.current.x + Math.PI / 4,
             y: cubeRotationRef.current.y + Math.PI / 4,
@@ -324,7 +457,7 @@ const ArGps: React.FC = () => {
       rendererRef.current = renderer;
       sceneRef.current = scene;
       cameraRef.current = camera;
-      objectRef.current = cube;
+      objectRef.current = object3D;
       resizeHandlerRef.current = handleResize;
       
       // Réinitialiser la position lissée
@@ -358,16 +491,18 @@ const ArGps: React.FC = () => {
           cube.rotation.x = cubeRotationRef.current.x + time * 0.0005;
           cube.rotation.y = cubeRotationRef.current.y + time * 0.001;
           
-          // Mettre à jour la couleur si elle a changé
-          const material = cube.material as THREE.MeshStandardMaterial;
-          if (material.color.getHex() !== cubeColorRef.current) {
-            material.color.setHex(cubeColorRef.current);
+          // Mettre à jour la couleur si elle a changé (seulement pour les Mesh avec matériau)
+          if (cube instanceof THREE.Mesh && cube.material instanceof THREE.MeshStandardMaterial) {
+            const material = cube.material;
+            if (material.color.getHex() !== cubeColorRef.current) {
+              material.color.setHex(cubeColorRef.current);
+            }
           }
         }
         renderer.render(scene, camera);
       });
     },
-    []
+    [customModel]
   );
 
   const handleSessionEnd = useCallback(() => {
@@ -557,6 +692,22 @@ const ArGps: React.FC = () => {
                   />
                 </IonItem>
               </IonList>
+
+              {modelFileName && (
+                <IonText color="success" style={{ fontSize: '12px', display: 'block', marginTop: 12 }}>
+                  Modèle 3D chargé: {modelFileName} (depuis src/objects/)
+                </IonText>
+              )}
+              {modelLoadError && (
+                <IonText color="warning" style={{ fontSize: '12px', display: 'block', marginTop: 12 }}>
+                  {modelLoadError}
+                </IonText>
+              )}
+              {!modelFileName && !modelLoadError && (
+                <IonText style={{ fontSize: '11px', display: 'block', marginTop: 12, opacity: 0.7 }}>
+                  Modèle 3D: Cube par défaut (placez un fichier .glb ou .gltf dans src/objects/)
+                </IonText>
+              )}
 
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                 <IonButton
