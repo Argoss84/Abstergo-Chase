@@ -50,7 +50,7 @@ export const useWebXR = () => {
       try {
         const sessionInit: XRSessionInit = {
           requiredFeatures: ['local'],
-          optionalFeatures: ['dom-overlay', 'local-floor'],
+          optionalFeatures: ['dom-overlay', 'local-floor', 'hand-tracking'],
         };
         const session = await navigator.xr.requestSession(
           'immersive-ar',
