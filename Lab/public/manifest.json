@@ -3,12 +3,12 @@
   "name": "Lab",
   "icons": [
     {
-      "src": "assets/icon/favicon.png",
+      "src": "assets/icon/lab.png",
       "sizes": "64x64 32x32 24x24 16x16",
-      "type": "image/x-icon"
+      "type": "image/png"
     },
     {
-      "src": "assets/icon/icon.png",
+      "src": "assets/icon/lab.png",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "maskable"

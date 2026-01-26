@@ -56,6 +56,11 @@ const ArGps: React.FC = () => {
   const orientationHandlerRef = useRef<((event: DeviceOrientationEvent) => void) | null>(null);
   const geoWatchIdRef = useRef<number | null>(null);
   const targetOffsetRef = useRef(new THREE.Vector3(0, 0, -2));
+  const smoothedPositionRef = useRef(new THREE.Vector3(0, 0, -2));
+  const raycasterRef = useRef<THREE.Raycaster | null>(null);
+  const controllerRef = useRef<THREE.XRTargetRaySpace | null>(null);
+  const cubeRotationRef = useRef({ x: 0, y: 0 });
+  const cubeColorRef = useRef(0x2dd36f);
 
   const [isSupported, setIsSupported] = useState<boolean | null>(null);
   const [isSessionActive, setIsSessionActive] = useState(false);
@@ -68,6 +73,8 @@ const ArGps: React.FC = () => {
   const [distance, setDistance] = useState<number | null>(null);
   const [bearing, setBearing] = useState<number | null>(null);
   const [compassEnabled, setCompassEnabled] = useState(false);
+  const [cubeColor, setCubeColor] = useState(0x2dd36f);
+  const [cubeRotation, setCubeRotation] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     let mounted = true;
@@ -187,6 +194,14 @@ const ArGps: React.FC = () => {
       }
     }
 
+    if (controllerRef.current) {
+      // Le contrôleur sera nettoyé automatiquement avec la scène
+      controllerRef.current = null;
+    }
+    
+    raycasterRef.current = null;
+    controllerRef.current = null;
+
     renderer?.dispose();
     rendererRef.current = null;
     sceneRef.current = null;
@@ -218,11 +233,59 @@ const ArGps: React.FC = () => {
       const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
       scene.add(light);
 
+      // Réinitialiser les refs au démarrage
+      cubeRotationRef.current = { x: 0, y: 0 };
+      cubeColorRef.current = 0x2dd36f;
+      setCubeRotation({ x: 0, y: 0 });
+      setCubeColor(0x2dd36f);
+      
       const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-      const material = new THREE.MeshStandardMaterial({ color: 0x2dd36f });
+      const material = new THREE.MeshStandardMaterial({ color: cubeColorRef.current });
       const cube = new THREE.Mesh(geometry, material);
       cube.position.copy(targetOffsetRef.current);
+      smoothedPositionRef.current.copy(targetOffsetRef.current);
       scene.add(cube);
+
+      // Créer un raycaster pour les interactions
+      const raycaster = new THREE.Raycaster();
+      raycasterRef.current = raycaster;
+
+      // Ajouter un contrôleur pour les interactions AR
+      const controller = renderer.xr.getController(0);
+      const handleSelect = () => {
+        if (!objectRef.current || !raycasterRef.current) return;
+        
+        const cube = objectRef.current;
+        const raycaster = raycasterRef.current;
+        
+        // Utiliser la position actuelle du contrôleur
+        const position = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+        position.setFromMatrixPosition(controller.matrixWorld);
+        direction.set(0, 0, -1).applyMatrix4(controller.matrixWorld).sub(position).normalize();
+        
+        raycaster.set(position, direction);
+        const intersections = raycaster.intersectObject(cube);
+        
+        if (intersections.length > 0) {
+          // Changer la couleur du cube au clic
+          const newColor = Math.random() * 0xffffff;
+          cubeColorRef.current = newColor;
+          setCubeColor(newColor);
+          (cube.material as THREE.MeshStandardMaterial).color.setHex(newColor);
+          
+          // Ajouter une rotation
+          cubeRotationRef.current = {
+            x: cubeRotationRef.current.x + Math.PI / 4,
+            y: cubeRotationRef.current.y + Math.PI / 4,
+          };
+          setCubeRotation(cubeRotationRef.current);
+        }
+      };
+      
+      controller.addEventListener('selectstart', handleSelect);
+      controllerRef.current = controller;
+      scene.add(controller);
 
       while (container.firstChild) {
         container.removeChild(container.firstChild);
@@ -244,11 +307,30 @@ const ArGps: React.FC = () => {
       cameraRef.current = camera;
       objectRef.current = cube;
       resizeHandlerRef.current = handleResize;
+      
+      // Réinitialiser la position lissée
+      smoothedPositionRef.current.copy(targetOffsetRef.current);
 
       renderer.xr.setSession(session);
-      renderer.setAnimationLoop(() => {
-        if (objectRef.current) {
-          objectRef.current.position.copy(targetOffsetRef.current);
+      
+      renderer.setAnimationLoop((time: number, frame?: XRFrame) => {
+        if (objectRef.current && cameraRef.current) {
+          const cube = objectRef.current;
+          
+          // Lissage de la position (lerp) pour éviter le clignotement
+          const smoothingFactor = 0.15; // Ajustez cette valeur (0-1) pour plus/moins de lissage
+          smoothedPositionRef.current.lerp(targetOffsetRef.current, smoothingFactor);
+          cube.position.copy(smoothedPositionRef.current);
+          
+          // Rotation automatique douce combinée avec la rotation interactive
+          cube.rotation.x = cubeRotationRef.current.x + time * 0.0005;
+          cube.rotation.y = cubeRotationRef.current.y + time * 0.001;
+          
+          // Mettre à jour la couleur si elle a changé
+          const material = cube.material as THREE.MeshStandardMaterial;
+          if (material.color.getHex() !== cubeColorRef.current) {
+            material.color.setHex(cubeColorRef.current);
+          }
         }
         renderer.render(scene, camera);
       });
