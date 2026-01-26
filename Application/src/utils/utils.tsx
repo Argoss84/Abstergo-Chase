@@ -352,21 +352,20 @@ export const fetchRoute = async (start: [number, number], end: [number, number])
   try {
     const url = `https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`;
     const response = await fetch(url);
-    const data = await response.json();
-    
-    if (data.routes && data.routes[0]) {
-      const coordinates = data.routes[0].geometry.coordinates;
-      // Convertir les coordonnées [lng, lat] en [lat, lng] pour Leaflet
-      const routePath = coordinates.map((coord: [number, number]) => [coord[1], coord[0]]);
-      return routePath;
-    } else {
-      // En cas d'erreur, utiliser une ligne droite
-      return [start, end];
+    if (!response.ok) {
+      throw new Error(`OSRM error ${response.status}`);
     }
+    const data = await response.json();
+    if (!data || data.code !== 'Ok' || !data.routes?.[0]?.geometry?.coordinates) {
+      throw new Error('Itinéraire OSRM introuvable');
+    }
+    const coordinates = data.routes[0].geometry.coordinates;
+    // Convertir les coordonnées [lng, lat] en [lat, lng] pour Leaflet
+    const routePath = coordinates.map((coord: [number, number]) => [coord[1], coord[0]]);
+    return routePath;
   } catch (error) {
     console.error('Erreur lors de la récupération du trajet:', error);
-    // En cas d'erreur, utiliser une ligne droite
-    return [start, end];
+    return [];
   }
 };
 

@@ -25,7 +25,6 @@ import { useVibration } from '../hooks/useVibration';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 import { MapController, ResizeMap, useFogRings } from '../utils/GameMapUtils';
 import {
-  DEFAULT_ROUTINE_INTERVAL_MS,
   DEFAULT_HACK_DURATION_MS,
   DEFAULT_DETECTION_RADIUS,
   START_ZONE_RADIUS,
@@ -34,7 +33,8 @@ import {
   GEOLOCATION_TIMEOUT,
   GEOLOCATION_MAX_AGE,
   GEOLOCATION_WATCH_MAX_AGE,
-  GAME_START_MODAL_AUTO_CLOSE_MS,
+  ROUTE_UPDATE_MIN_INTERVAL_MS,
+  ROUTE_UPDATE_MIN_DISTANCE_METERS,
   COMPASS_SIZE_SMALL,
   COMPASS_DEFAULT_LATITUDE,
   COMPASS_DEFAULT_LONGITUDE,
@@ -53,6 +53,7 @@ const Rogue: React.FC = () => {
     joinGame,
     updateGameDetails,
     updateProp,
+    updatePlayer,
     isHost,
     connectionStatus,
     sessionScope
@@ -68,16 +69,15 @@ const Rogue: React.FC = () => {
   const [gameCode, setGameCode] = useState<string | null>(null);
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
-  // États pour la routine périodique (Host uniquement)
-  const [routineInterval, setRoutineInterval] = useState<number>(DEFAULT_ROUTINE_INTERVAL_MS);
-  const [isRoutineActive, setIsRoutineActive] = useState<boolean>(false);
-  const [routineExecutionCount, setRoutineExecutionCount] = useState<number>(0);
-  const routineIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   
   // États pour l'itinéraire en phase de convergence
   const [routePath, setRoutePath] = useState<[number, number][]>([]);
   const [distanceToStartZone, setDistanceToStartZone] = useState<number | null>(null);
+  const lastRouteUpdateRef = useRef(0);
+  const lastRoutePositionRef = useRef<[number, number] | null>(null);
+  const lastRouteStartZoneRef = useRef<string | null>(null);
+  const routeRequestIdRef = useRef(0);
   
   // Référence pour la carte
   const mapRef = useRef<L.Map | null>(null);
@@ -126,7 +126,7 @@ const Rogue: React.FC = () => {
     if (player.status === 'disconnected') return false;
     if (player.status === 'CAPTURED') return false;
     const role = (player.role || '').trim().toUpperCase();
-    if (role === 'AGENT') return false;
+    if (role !== 'ROGUE') return false;
     return true;
   }, []);
 
@@ -147,30 +147,85 @@ const Rogue: React.FC = () => {
     return errorResult;
   };
 
-  // Activer la routine uniquement pour le Host
-  useEffect(() => {
-    if (isHost) {
-      setRoutineInterval(DEFAULT_ROUTINE_INTERVAL_MS);
-      setIsRoutineActive(true);
-    } else {
-      setIsRoutineActive(false);
-    }
-  }, [isHost]);
+  // Référence pour éviter les ACK multiples
+  const hasAcknowledgedRef = useRef(false);
 
-  // Afficher la popup de démarrage quand countdown_started devient true (une seule fois)
+  // Effet pour détecter game_starting et envoyer l'ACK
   useEffect(() => {
-    if (gameDetails?.countdown_started && gameDetails?.started && !gameStartModalShownRef.current) {
-      gameStartModalShownRef.current = true;
-      setIsGameStartModalOpen(true);
-      vibrate(patterns.long);
+    const sendAcknowledgment = async () => {
+      // Quand game_starting passe à true et qu'on n'a pas encore envoyé l'ACK
+      if (gameDetails?.game_starting && !hasAcknowledgedRef.current && playerId) {
+        hasAcknowledgedRef.current = true;
+        setIsGameStartModalOpen(true);
+        vibrate(patterns.long);
+        
+        // Envoyer l'ACK au host
+        try {
+          await updatePlayer(playerId, { hasAcknowledgedStart: true });
+        } catch (error) {
+          console.error('Erreur lors de l\'envoi de l\'ACK:', error);
+        }
+      }
       
-      // Fermer automatiquement la modal après le délai configuré
-      setTimeout(() => {
-        setIsGameStartModalOpen(false);
-      }, GAME_START_MODAL_AUTO_CLOSE_MS);
+      // Réinitialiser le flag quand game_starting repasse à false
+      if (!gameDetails?.game_starting) {
+        hasAcknowledgedRef.current = false;
+      }
+    };
+    
+    sendAcknowledgment();
+  }, [gameDetails?.game_starting, playerId, updatePlayer, vibrate, patterns.long]);
+
+  // Fermer la modal quand la partie démarre vraiment (started devient true)
+  useEffect(() => {
+    if (gameDetails?.started && gameDetails?.countdown_started && isGameStartModalOpen) {
+      // La partie a vraiment démarré, fermer la modal
+      setIsGameStartModalOpen(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameDetails?.countdown_started, gameDetails?.started]);
+  }, [gameDetails?.started, gameDetails?.countdown_started, isGameStartModalOpen]);
+
+  // Host: surveiller les ACKs de tous les joueurs et démarrer la partie quand tout le monde est prêt
+  useEffect(() => {
+    const checkAllAcknowledged = async () => {
+      // Seulement pour le host et quand game_starting est true
+      if (!isHost || !gameDetails?.game_starting || gameDetails?.started) {
+        return;
+      }
+
+      const players = gameDetails?.players || [];
+      if (players.length === 0) {
+        return;
+      }
+
+      // Vérifier si tous les joueurs ont envoyé leur ACK
+      const allAcknowledged = players.every(p => p.hasAcknowledgedStart === true);
+      
+      if (allAcknowledged) {
+        // Tous les joueurs ont reçu l'information, démarrer la partie !
+        try {
+          await updateGameDetails({
+            started: true,
+            countdown_started: true,
+            game_starting: false,
+            started_date: new Date().toISOString()
+          });
+          setGameDetails(prev => prev ? { 
+            ...prev, 
+            started: true, 
+            countdown_started: true, 
+            game_starting: false,
+            started_date: new Date().toISOString() 
+          } as any : prev);
+          
+          toast.success(`🚀 Partie démarrée avec ${players.length} joueur(s) !`);
+        } catch (error) {
+          console.error('Erreur lors du démarrage de la partie:', error);
+        }
+      }
+    };
+
+    checkAllAcknowledged();
+  }, [isHost, gameDetails?.game_starting, gameDetails?.started, gameDetails?.players, updateGameDetails]);
 
 
   // Effet pour vérifier les conditions de victoire (Host uniquement)
@@ -384,15 +439,19 @@ const Rogue: React.FC = () => {
 
       vibrate(patterns.long);
       
-      // Démarrer la partie ET le compte à rebours
-      await updateGameDetails({
-        started: true,
-        is_converging_phase: false,
-        countdown_started: true,
-        started_date: new Date().toISOString()
-      });
+      // Phase 1: Signaler que la partie va commencer et attendre les ACK de tous les joueurs
+      // Réinitialiser hasAcknowledgedStart pour tous les joueurs
+      for (const player of gameDetails?.players || []) {
+        await updatePlayer(player.id_player, { hasAcknowledgedStart: false });
+      }
       
-      toast.success(`🚀 Partie démarrée avec ${playerCount} joueur(s) !`);
+      await updateGameDetails({
+        game_starting: true,
+        is_converging_phase: false
+      });
+      setGameDetails(prev => prev ? { ...prev, game_starting: true, is_converging_phase: false } as any : prev);
+      
+      toast.info(`⏳ En attente de ${playerCount} joueur(s)...`);
     } catch (error) {
       await handleErrorWithUser('Erreur lors du démarrage de la partie', error, ERROR_CONTEXTS.GAME_START);
     }
@@ -598,142 +657,64 @@ const Rogue: React.FC = () => {
     }
   }, [gameDetails?.remaining_time, gameDetails?.winner_type, isHost, history]);
 
-  // Fonction de routine périodique
-  const executeRoutine = useCallback(async () => {
-    
-    // Incrémenter le compteur d'exécutions
-    setRoutineExecutionCount(prev => prev + 1);
-    
-    // Exemple de tâches que la routine peut effectuer :
-    // 1. Vérifier la position actuelle
-    if (currentPosition) {
-      
-      // Mettre à jour la position du joueur en base de données
-      if (currentPlayerId) {
-        updatePlayerPosition(currentPlayerId, currentPosition[0], currentPosition[1]);
+  // Effet pour récupérer le trajet routier en phase de convergence (calcul local pour tous)
+  useEffect(() => {
+    const updateRoute = async () => {
+      if (!gameDetails?.is_converging_phase) {
+        setRoutePath([]);
+        lastRouteUpdateRef.current = 0;
+        lastRoutePositionRef.current = null;
+        lastRouteStartZoneRef.current = null;
+        routeRequestIdRef.current += 1;
+        return;
       }
-    }
-    
-    // 2. Vérifier l'état de la partie
-    let gameState = 'Phase normale';
-    let distanceToStart = null;
-    let isInStartZone = false;
-    let objectiveInRange = false;
-    
-    if (gameDetails) {
-      gameState = gameDetails.is_converging_phase ? 'Phase de convergence' : 'Phase normale';
-    }
-    
-    // 4. Vérifier la distance vers la zone de départ correspondante
-    if (currentPosition && gameDetails?.start_zone_rogue_latitude && gameDetails?.start_zone_rogue_longitude) {
-      distanceToStart = calculateDistanceToStartZone(
-        currentPosition, 
-        gameDetails.start_zone_rogue_latitude, 
-        gameDetails.start_zone_rogue_longitude
-      );
-      
-      // Mettre à jour la distance pour l'affichage dans le header
-      setDistanceToStartZone(distanceToStart);
-      
-      // Vérifier si le joueur est dans la zone de départ Rogue (rayon de 50m)
-      isInStartZone = isPlayerInStartZone(
-        currentPosition, 
-        gameDetails.start_zone_rogue_latitude, 
-        gameDetails.start_zone_rogue_longitude
-      );
-      
-      // Mettre à jour IsInStartZone en base de données si le joueur est identifié
-      if (currentPlayerId) {
-        updatePlayerInStartZone(currentPlayerId, isInStartZone);
+
+      if (!currentPosition || !gameDetails.start_zone_rogue_latitude || !gameDetails.start_zone_rogue_longitude) {
+        return;
       }
-    }
-    
-    // 5. Mettre à jour le trajet si nécessaire (en phase de convergence)
-    if (gameDetails?.is_converging_phase && 
-        currentPosition && 
-        gameDetails.start_zone_rogue_latitude && 
-        gameDetails.start_zone_rogue_longitude) {
+
       const startZone: [number, number] = [
         parseFloat(gameDetails.start_zone_rogue_latitude),
         parseFloat(gameDetails.start_zone_rogue_longitude)
       ];
+      const startZoneKey = `${startZone[0]}:${startZone[1]}`;
+      if (lastRouteStartZoneRef.current !== startZoneKey) {
+        lastRouteStartZoneRef.current = startZoneKey;
+        lastRouteUpdateRef.current = 0;
+        lastRoutePositionRef.current = null;
+      }
+
+      const now = Date.now();
+      const lastUpdate = lastRouteUpdateRef.current;
+      const timeSince = now - lastUpdate;
+      const movedDistance = lastRoutePositionRef.current
+        ? L.latLng(currentPosition).distanceTo(L.latLng(lastRoutePositionRef.current))
+        : Number.POSITIVE_INFINITY;
+
+      // Mettre à jour si :
+      // 1. C'est le premier calcul
+      // 2. Le temps minimum est écoulé (pour garantir une mise à jour régulière)
+      // 3. OU le joueur a bougé d'une distance significative (pour réagir rapidement aux mouvements)
+      const shouldUpdate =
+        lastUpdate === 0 ||
+        timeSince >= ROUTE_UPDATE_MIN_INTERVAL_MS ||
+        movedDistance >= ROUTE_UPDATE_MIN_DISTANCE_METERS;
+
+      if (!shouldUpdate) {
+        return;
+      }
+
+      const requestId = routeRequestIdRef.current + 1;
+      routeRequestIdRef.current = requestId;
+      lastRouteUpdateRef.current = now;
+      lastRoutePositionRef.current = currentPosition;
+
       const route = await fetchRoute(currentPosition, startZone);
-      setRoutePath(route);
-    }
-    
-    // 6. Vérifier si un objectif est à portée (utilise ROGUE_RANGE du joueur)
-    if (currentPosition && objectiveProps.length > 0) {
-      const rogueRange = gameDetails?.rogue_range || DEFAULT_ROGUE_RANGE;
-      objectiveInRange = objectiveProps
-        .filter(prop => prop.visible === true)
-        .some(prop => {
-          const distance = calculateDistanceToStartZone(
-            currentPosition,
-            prop.latitude || '0',
-            prop.longitude || '0'
-          );
-          return distance <= rogueRange;
-        });
-      
-      setIsObjectiveInRange(objectiveInRange);
-    }
-    
-     }, [currentPosition, gameDetails, objectiveProps, routineExecutionCount, currentPlayerId]);
-
-
-
-  // Effet pour gérer la routine périodique (Host uniquement)
-  useEffect(() => {
-    // La routine ne s'exécute que pour le Host
-    if (!isHost) {
-      return;
-    }
-
-    if (isRoutineActive && routineInterval > 0) {
-      // Nettoyer l'intervalle précédent s'il existe
-      if (routineIntervalRef.current) {
-        clearInterval(routineIntervalRef.current);
+      if (requestId !== routeRequestIdRef.current) {
+        return;
       }
-      
-      // Créer un nouvel intervalle
-      routineIntervalRef.current = setInterval(() => {
-        executeRoutine();
-      }, routineInterval);
-      
-    } else {
-      // Arrêter la routine
-      if (routineIntervalRef.current) {
-        clearInterval(routineIntervalRef.current);
-        routineIntervalRef.current = null;
-      }
-    }
-    
-    // Cleanup lors du démontage du composant
-    return () => {
-      if (routineIntervalRef.current) {
-        clearInterval(routineIntervalRef.current);
-        routineIntervalRef.current = null;
-      }
-    };
-  }, [isRoutineActive, routineInterval, executeRoutine, isHost]);
-
-  // Effet pour récupérer le trajet routier en phase de convergence (calcul local pour tous)
-  useEffect(() => {
-    const updateRoute = async () => {
-      if (gameDetails?.is_converging_phase && 
-          currentPosition && 
-          gameDetails.start_zone_rogue_latitude && 
-          gameDetails.start_zone_rogue_longitude) {
-        
-        const startZone: [number, number] = [
-          parseFloat(gameDetails.start_zone_rogue_latitude),
-          parseFloat(gameDetails.start_zone_rogue_longitude)
-        ];
-        
-        const route = await fetchRoute(currentPosition, startZone);
+      if (route.length > 1) {
         setRoutePath(route);
-      } else {
-        setRoutePath([]);
       }
     };
     
@@ -1132,30 +1113,68 @@ const Rogue: React.FC = () => {
               border: '3px solid #2dd36f',
               boxShadow: '0 0 50px rgba(45, 211, 111, 0.8)'
             }}>
-              <h1 style={{ 
-                fontSize: '48px', 
-                marginBottom: '20px',
-                color: '#2dd36f',
-                textShadow: '0 0 20px rgba(45, 211, 111, 0.8)',
-                animation: 'pulse 1.5s ease-in-out infinite'
-              }}>
-                🚀 LA PARTIE COMMENCE !
-              </h1>
-              <p style={{ 
-                fontSize: '24px', 
-                color: '#fff',
-                marginTop: '20px'
-              }}>
-                Le compte à rebours a démarré
-              </p>
-              <div style={{
-                fontSize: '72px',
-                marginTop: '30px',
-                color: '#ffc409',
-                textShadow: '0 0 30px rgba(255, 196, 9, 0.8)'
-              }}>
-                ⏰
-              </div>
+              {gameDetails?.game_starting && !gameDetails?.started ? (
+                <>
+                  <h1 style={{ 
+                    fontSize: '36px', 
+                    marginBottom: '20px',
+                    color: '#ffc409',
+                    textShadow: '0 0 20px rgba(255, 196, 9, 0.8)',
+                    animation: 'pulse 1.5s ease-in-out infinite'
+                  }}>
+                    ⏳ SYNCHRONISATION...
+                  </h1>
+                  <p style={{ 
+                    fontSize: '20px', 
+                    color: '#fff',
+                    marginTop: '20px'
+                  }}>
+                    En attente des autres joueurs
+                  </p>
+                  <div style={{
+                    fontSize: '24px',
+                    marginTop: '20px',
+                    color: '#2dd36f',
+                    fontWeight: 'bold'
+                  }}>
+                    {(gameDetails?.players || []).filter(p => p.hasAcknowledgedStart === true).length} / {(gameDetails?.players || []).length} prêts
+                  </div>
+                  <div style={{
+                    fontSize: '48px',
+                    marginTop: '20px',
+                    animation: 'spin 2s linear infinite'
+                  }}>
+                    🔄
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h1 style={{ 
+                    fontSize: '48px', 
+                    marginBottom: '20px',
+                    color: '#2dd36f',
+                    textShadow: '0 0 20px rgba(45, 211, 111, 0.8)',
+                    animation: 'pulse 1.5s ease-in-out infinite'
+                  }}>
+                    🚀 LA PARTIE COMMENCE !
+                  </h1>
+                  <p style={{ 
+                    fontSize: '24px', 
+                    color: '#fff',
+                    marginTop: '20px'
+                  }}>
+                    Le compte à rebours a démarré
+                  </p>
+                  <div style={{
+                    fontSize: '72px',
+                    marginTop: '30px',
+                    color: '#ffc409',
+                    textShadow: '0 0 30px rgba(255, 196, 9, 0.8)'
+                  }}>
+                    ⏰
+                  </div>
+                </>
+              )}
             </div>
           </IonContent>
         </IonModal>

@@ -449,6 +449,15 @@ const CreateLobby: React.FC = () => {
                       })}
                     />
                   ))}
+                  {formData.objectiv_zone_radius > 0 &&
+                    objectives.map((objective) => (
+                      <Circle
+                        key={`objective-zone-${objective.id}`}
+                        center={objective.position}
+                        radius={formData.objectiv_zone_radius}
+                        pathOptions={{ color: 'red', fillColor: 'red', fillOpacity: 0.08, weight: 1 }}
+                      />
+                    ))}
                   {startZones.agent && (
                     <>
                       <Marker
@@ -593,11 +602,12 @@ const CreateLobby: React.FC = () => {
               </IonItem>
 
               <IonItem>
-                <IonLabel position="stacked">Rayon de la zone d'objectif</IonLabel>
+                <IonLabel position="stacked">Rayon de la zone indicative des objectifs (agents)</IonLabel>
                 <IonInput
                   type="number"
                   value={formData.objectiv_zone_radius}
                   onIonChange={e => handleInputChange('objectiv_zone_radius', parseInt(e.detail.value || '0'))}
+                  min="0"
                 />
               </IonItem>
 

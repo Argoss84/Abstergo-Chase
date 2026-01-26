@@ -26,6 +26,8 @@ export const FOG_RINGS_AGENT = 20; // Nombre d'anneaux de brouillard pour les Ag
 export const GEOLOCATION_TIMEOUT = 15000; // 15 secondes
 export const GEOLOCATION_MAX_AGE = 10000; // 10 secondes (position en cache)
 export const GEOLOCATION_WATCH_MAX_AGE = 1000; // 1 seconde pour le suivi continu
+export const ROUTE_UPDATE_MIN_INTERVAL_MS = 4000; // 4 secondes entre deux recalculs
+export const ROUTE_UPDATE_MIN_DISTANCE_METERS = 5; // 5m de déplacement minimum
 
 // ===== PARAMÈTRES DE CRÉATION DE PARTIE =====
 

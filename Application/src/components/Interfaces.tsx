@@ -41,6 +41,7 @@ export interface GameDetails {
   is_converging_phase: boolean | null;
   started: boolean | null;
   countdown_started: boolean | null;
+  game_starting?: boolean | null;
   props?: GameProp[];
   players?: Player[];
   objective_circles?: ObjectiveCircle[];
@@ -67,4 +68,5 @@ export interface Player {
   updated_at: string | null;
   is_admin: boolean | null;
   displayName?: string;
+  hasAcknowledgedStart?: boolean | null;
 } 
