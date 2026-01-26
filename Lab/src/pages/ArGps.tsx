@@ -61,6 +61,8 @@ const ArGps: React.FC = () => {
   const controllerRef = useRef<THREE.XRTargetRaySpace | null>(null);
   const cubeRotationRef = useRef({ x: 0, y: 0 });
   const cubeColorRef = useRef(0x2dd36f);
+  const lastCalculatedPositionRef = useRef(new THREE.Vector3(0, 0, -2));
+  const smoothedHeadingRef = useRef<number | null>(null);
 
   const [isSupported, setIsSupported] = useState<boolean | null>(null);
   const [isSessionActive, setIsSessionActive] = useState(false);
@@ -164,8 +166,25 @@ const ArGps: React.FC = () => {
 
     const x = nextDistance * Math.sin(relativeRad);
     const z = -nextDistance * Math.cos(relativeRad);
-
-    targetOffsetRef.current.set(x, 0, z);
+    
+    const newPosition = new THREE.Vector3(x, 0, z);
+    
+    // Filtrer les changements trop petits pour éviter les micro-mouvements
+    // Surtout important quand le compas est actif (heading change souvent)
+    const positionChange = lastCalculatedPositionRef.current.distanceTo(newPosition);
+    const minChangeThreshold = 0.5; // Seuil minimum de changement en mètres
+    
+    // Mettre à jour seulement si le changement est significatif
+    // Vérifier si c'est la première initialisation (position initiale est à -2 sur Z)
+    const isInitialPosition = lastCalculatedPositionRef.current.z === -2 && 
+                              lastCalculatedPositionRef.current.x === 0 && 
+                              lastCalculatedPositionRef.current.y === 0;
+    
+    if (positionChange > minChangeThreshold || isInitialPosition) {
+      targetOffsetRef.current.set(x, 0, z);
+      lastCalculatedPositionRef.current.copy(newPosition);
+    }
+    
     setDistance(nextDistance);
     setBearing(nextBearing);
   }, [currentPos, targetPos, heading]);
@@ -318,8 +337,21 @@ const ArGps: React.FC = () => {
           const cube = objectRef.current;
           
           // Lissage de la position (lerp) pour éviter le clignotement
-          const smoothingFactor = 0.15; // Ajustez cette valeur (0-1) pour plus/moins de lissage
-          smoothedPositionRef.current.lerp(targetOffsetRef.current, smoothingFactor);
+          // Facteur réduit pour plus de stabilité, surtout avec le compas actif
+          const smoothingFactor = 0.05; // Valeur plus faible = mouvement plus stable mais moins réactif
+          
+          // Calculer la distance entre la position actuelle lissée et la cible
+          const distanceToTarget = smoothedPositionRef.current.distanceTo(targetOffsetRef.current);
+          
+          // Seuil minimum : ne bouger que si le changement est significatif (> 0.1 mètre)
+          // Cela évite les micro-mouvements dus aux variations du compas
+          if (distanceToTarget > 0.1) {
+            smoothedPositionRef.current.lerp(targetOffsetRef.current, smoothingFactor);
+          } else {
+            // Si très proche, interpolation plus rapide pour finir le mouvement
+            smoothedPositionRef.current.lerp(targetOffsetRef.current, 0.3);
+          }
+          
           cube.position.copy(smoothedPositionRef.current);
           
           // Rotation automatique douce combinée avec la rotation interactive
@@ -389,6 +421,9 @@ const ArGps: React.FC = () => {
     ).requestPermission;
 
     try {
+      // Réinitialiser le heading lissé au démarrage
+      smoothedHeadingRef.current = null;
+      
       if (requestPermission) {
         const permission = await requestPermission();
         if (permission !== 'granted') {
@@ -400,13 +435,44 @@ const ArGps: React.FC = () => {
       const handler = (event: DeviceOrientationEvent) => {
         const webkitHeading = (event as DeviceOrientationEvent & { webkitCompassHeading?: number })
           .webkitCompassHeading;
-        if (typeof webkitHeading === 'number') {
-          setHeading(webkitHeading);
+        if (typeof webkitHeading === 'number' && !isNaN(webkitHeading)) {
+          // Lisser le heading pour éviter les bonds
+          const smoothingFactor = 0.2; // Facteur de lissage (0-1)
+          if (smoothedHeadingRef.current === null) {
+            smoothedHeadingRef.current = webkitHeading;
+          } else {
+            // Gérer le passage par 0/360 degrés
+            let diff = webkitHeading - smoothedHeadingRef.current;
+            if (diff > 180) diff -= 360;
+            if (diff < -180) diff += 360;
+            smoothedHeadingRef.current = (smoothedHeadingRef.current + diff * smoothingFactor + 360) % 360;
+          }
+          setHeading(smoothedHeadingRef.current);
           return;
         }
-        if (event.alpha !== null) {
-          const nextHeading = (360 - event.alpha) % 360;
-          setHeading(nextHeading);
+        if (event.alpha !== null && !isNaN(event.alpha)) {
+          const rawHeading = (360 - event.alpha) % 360;
+          
+          // Lisser le heading pour éviter les bonds
+          const smoothingFactor = 0.2; // Facteur de lissage (0-1)
+          if (smoothedHeadingRef.current === null) {
+            smoothedHeadingRef.current = rawHeading;
+          } else {
+            // Gérer le passage par 0/360 degrés pour un lissage correct
+            let diff = rawHeading - smoothedHeadingRef.current;
+            if (diff > 180) diff -= 360;
+            if (diff < -180) diff += 360;
+            
+            // Filtrer les changements trop brusques (probablement des erreurs)
+            const maxChange = 45; // Maximum de changement accepté en degrés par mise à jour
+            if (Math.abs(diff) > maxChange) {
+              // Ignorer ce changement, probablement une erreur de mesure
+              return;
+            }
+            
+            smoothedHeadingRef.current = (smoothedHeadingRef.current + diff * smoothingFactor + 360) % 360;
+          }
+          setHeading(smoothedHeadingRef.current);
         }
       };
 
