@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client';
+import { toast } from 'react-toastify';
 import { GameDetails, GameProp, Player } from '../components/Interfaces';
 import {
   SESSION_EXPIRY_MS,
@@ -1059,6 +1060,12 @@ class GameSessionService {
     if (type === 'lobby:chat-message' && payload?.playerId != null && typeof payload?.text === 'string') {
       const arr = [...this.state.lobbyChatMessages, { playerId: payload.playerId, playerName: payload.playerName || 'Joueur', text: payload.text, timestamp: payload.timestamp || Date.now() }];
       this.updateState({ lobbyChatMessages: arr.length > 100 ? arr.slice(-100) : arr });
+      return;
+    }
+
+    if (type === 'admin:notification' && payload != null && typeof payload.message === 'string') {
+      const msg = payload.title ? `${payload.title} — ${payload.message}` : payload.message;
+      toast.info(msg);
       return;
     }
 

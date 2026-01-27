@@ -158,6 +158,79 @@ const server = createServer((req, res) => {
     return;
   }
 
+  // API: envoyer une notification à un joueur (clientId)
+  if (req.method === 'POST' && req.url === '/api/notify/player') {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        const clientId = data.clientId;
+        const message = data.message != null ? String(data.message) : '';
+        const title = data.title != null ? String(data.title) : undefined;
+        if (!clientId) {
+          res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+          res.end(JSON.stringify({ success: false, error: 'clientId requis' }));
+          return;
+        }
+        const socket = socketsById.get(clientId);
+        if (!socket || !socket.connected) {
+          res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+          res.end(JSON.stringify({ success: false, error: 'Joueur introuvable ou déconnecté' }));
+          return;
+        }
+        send(socket, { type: 'admin:notification', payload: { message, title, timestamp: Date.now() } });
+        log(`[NOTIFICATION] Envoyée au joueur ${clientId.substring(0, 8)}...`);
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ success: true }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ success: false, error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // API: envoyer une notification à tous les joueurs d'une partie
+  if (req.method === 'POST' && req.url === '/api/notify/game') {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        const gameCode = data.gameCode != null ? String(data.gameCode).toUpperCase() : '';
+        const message = data.message != null ? String(data.message) : '';
+        const title = data.title != null ? String(data.title) : undefined;
+        if (!gameCode) {
+          res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+          res.end(JSON.stringify({ success: false, error: 'gameCode requis' }));
+          return;
+        }
+        const game = games.get(gameCode);
+        if (!game) {
+          res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+          res.end(JSON.stringify({ success: false, error: 'Partie introuvable' }));
+          return;
+        }
+        let count = 0;
+        game.players.forEach((p) => {
+          const s = socketsById.get(p.id);
+          if (s && s.connected) {
+            send(s, { type: 'admin:notification', payload: { message, title, timestamp: Date.now() } });
+            count++;
+          }
+        });
+        log(`[NOTIFICATION] Envoyée à ${count} joueur(s) de la partie ${gameCode}`);
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ success: true, count }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ success: false, error: e.message }));
+      }
+    });
+    return;
+  }
+
   // Page de monitoring accessible via HTTP
   if (req.method === 'GET') {
     const stats = getServerStats();
@@ -348,6 +421,7 @@ const server = createServer((req, res) => {
     .log-lobby { color: #4caf50; }
     .log-erreur { color: #f44336; }
     .log-webrtc { color: #ce9178; }
+    .log-notification { color: #9c27b0; }
     .log-deconnexion { color: #ff9800; }
     .log-avertissement { color: #ffc107; }
     .logs-header {
@@ -481,6 +555,10 @@ const server = createServer((req, res) => {
       font-size: 0.85em;
     }
     .btn-game-data:hover { background: #764ba2; }
+    .dash-section textarea, .dash-section input[type="text"] { width: 100%; max-width: 100%; box-sizing: border-box; padding: 8px; margin: 4px 0; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 0.9em; }
+    .dash-section #gameModalNotifyBtn, .notify-form button { margin-top: 6px; }
+    .notify-form { margin-top: 12px; }
+    .notify-form select { width: 100%; padding: 8px; margin: 4px 0; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 0.9em; box-sizing: border-box; }
   </style>
 </head>
 <body>
@@ -676,13 +754,40 @@ const server = createServer((req, res) => {
       ` : '<div class="no-data">Aucune game en cours</div>'}
     </div>
 
+    <div class="card" id="notifyCard">
+      <h2>📤 Envoi de notifications</h2>
+      <p style="margin-bottom:12px;color:#555;font-size:0.9em;">Envoyer une notification aux clients via le canal de signalisation (Socket.io). Les clients reçoivent un message de type <code>admin:notification</code> avec <code>payload: { message, title?, timestamp }</code>.</p>
+      <div class="notify-form">
+        <h4 style="color:#667eea;margin:0 0 8px 0;font-size:0.95em;">À un joueur</h4>
+        <select id="notifyPlayerSelect"><option value="">— Choisir un joueur —</option></select>
+        <textarea id="notifyPlayerMsg" rows="2" placeholder="Message…"></textarea>
+        <input type="text" id="notifyPlayerTitle" placeholder="Titre (optionnel)" />
+        <button type="button" id="notifyPlayerBtn" class="btn-game-data">Envoyer au joueur</button>
+      </div>
+      <div class="notify-form">
+        <h4 style="color:#667eea;margin:0 0 8px 0;font-size:0.95em;">À tous les joueurs d'une partie</h4>
+        <select id="notifyGameSelect"><option value="">— Choisir une partie —</option></select>
+        <textarea id="notifyGameMsg" rows="2" placeholder="Message…"></textarea>
+        <input type="text" id="notifyGameTitle" placeholder="Titre (optionnel)" />
+        <button type="button" id="notifyGameBtn" class="btn-game-data">Envoyer à la partie</button>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="gameModal">
       <div class="modal-box">
         <div class="modal-header">
           <h3 id="gameModalTitle">Tableau de bord — </h3>
           <button type="button" class="modal-close" id="gameModalClose" aria-label="Fermer">×</button>
         </div>
-        <div class="modal-body" id="gameModalBody"><span class="loading">Chargement…</span></div>
+        <div class="modal-body" id="gameModalBody">
+          <div id="gameModalDashboard"><span class="loading">Chargement…</span></div>
+          <div class="dash-section" id="gameModalNotify">
+            <h4>📤 Envoyer une notification à tous les joueurs</h4>
+            <textarea id="gameModalNotifyMsg" rows="2" placeholder="Message…"></textarea>
+            <input type="text" id="gameModalNotifyTitle" placeholder="Titre (optionnel)" />
+            <button type="button" id="gameModalNotifyBtn">Envoyer</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -702,6 +807,7 @@ const server = createServer((req, res) => {
             else if (message.includes('[LOBBY CRÉÉ]') || message.includes('[LOBBY REJOINT]')) className += ' log-lobby';
             else if (message.includes('[ERREUR]')) className += ' log-erreur';
             else if (message.includes('[WEBRTC]')) className += ' log-webrtc';
+            else if (message.includes('[NOTIFICATION]')) className += ' log-notification';
             else if (message.includes('[DÉCONNEXION]') || message.includes('[LOBBY FERMÉ]') || message.includes('[JOUEUR PARTI]')) className += ' log-deconnexion';
             else if (message.includes('[AVERTISSEMENT]')) className += ' log-avertissement';
             
@@ -878,6 +984,20 @@ const server = createServer((req, res) => {
         } else {
           gamesCard.innerHTML = '<h2>🎯 Games en cours</h2><div class="no-data">Aucune game en cours</div>';
         }
+
+        // Mettre à jour les listes du formulaire de notifications
+        var selPlayer = document.getElementById('notifyPlayerSelect');
+        if (selPlayer) {
+          var curPlayer = selPlayer.value;
+          selPlayer.innerHTML = '<option value="">— Choisir un joueur —</option>' + (stats.clients || []).map(function(c) { return '<option value="' + c.clientId + '">' + c.clientId.substring(0, 8) + '... ' + (c.lobbyCode || '—') + ' / ' + (c.gameCode || '—') + '</option>'; }).join('');
+          if (curPlayer && (stats.clients || []).some(function(c) { return c.clientId === curPlayer; })) selPlayer.value = curPlayer;
+        }
+        var selGame = document.getElementById('notifyGameSelect');
+        if (selGame) {
+          var curGame = selGame.value;
+          selGame.innerHTML = '<option value="">— Choisir une partie —</option>' + (stats.games || []).map(function(g) { return '<option value="' + g.code + '">' + g.code + ' (' + g.playerCount + ' joueurs)</option>'; }).join('');
+          if (curGame && (stats.games || []).some(function(g) { return g.code === curGame; })) selGame.value = curGame;
+        }
         
         // Mettre à jour les logs seulement si nécessaire
         if (stats.logs.length !== lastLogCount) {
@@ -897,6 +1017,7 @@ const server = createServer((req, res) => {
               else if (message.includes('[LOBBY CRÉÉ]') || message.includes('[LOBBY REJOINT]')) className += ' log-lobby';
               else if (message.includes('[ERREUR]')) className += ' log-erreur';
               else if (message.includes('[WEBRTC]')) className += ' log-webrtc';
+              else if (message.includes('[NOTIFICATION]')) className += ' log-notification';
               else if (message.includes('[DÉCONNEXION]') || message.includes('[LOBBY FERMÉ]') || message.includes('[JOUEUR PARTI]')) className += ' log-deconnexion';
               else if (message.includes('[AVERTISSEMENT]')) className += ' log-avertissement';
               
@@ -990,19 +1111,22 @@ const server = createServer((req, res) => {
     function openGameModal(code) {
       const overlay = document.getElementById('gameModal');
       const title = document.getElementById('gameModalTitle');
-      const body = document.getElementById('gameModalBody');
+      const dash = document.getElementById('gameModalDashboard');
+      const notifyBtn = document.getElementById('gameModalNotifyBtn');
       title.textContent = 'Tableau de bord — ' + code + ' · en direct';
-      body.innerHTML = '<span class="loading">Chargement…</span>';
+      if (dash) dash.innerHTML = '<span class="loading">Chargement…</span>';
+      if (notifyBtn) notifyBtn.setAttribute('data-game-code', code);
       overlay.classList.add('open');
       if (gameModalPollId) clearInterval(gameModalPollId);
       function poll() {
         fetch('/api/stats/game/' + code)
           .then(r => r.json())
           .then(data => {
-            if (data.error) { body.innerHTML = '<p class="error">' + (data.error || 'Partie introuvable') + '</p>'; return; }
-            body.innerHTML = renderDashboard(data);
+            if (!dash) return;
+            if (data.error) { dash.innerHTML = '<p class="error">' + (data.error || 'Partie introuvable') + '</p>'; return; }
+            dash.innerHTML = renderDashboard(data);
           })
-          .catch(function() { body.innerHTML = '<p class="error">Erreur de chargement</p>'; });
+          .catch(function() { if (dash) dash.innerHTML = '<p class="error">Erreur de chargement</p>'; });
       }
       poll();
       gameModalPollId = setInterval(poll, 1500);
@@ -1019,6 +1143,45 @@ const server = createServer((req, res) => {
         if (code) openGameModal(code);
       }
       if (e.target.id === 'gameModalClose' || e.target.id === 'gameModal') closeGameModal();
+      if (e.target.id === 'gameModalNotifyBtn') {
+        const code = e.target.getAttribute('data-game-code');
+        const msgEl = document.getElementById('gameModalNotifyMsg');
+        const titleEl = document.getElementById('gameModalNotifyTitle');
+        const msg = msgEl ? msgEl.value.trim() : '';
+        const title = titleEl ? titleEl.value.trim() : '';
+        if (!code) { alert('Partie inconnue'); return; }
+        if (!msg) { alert('Veuillez saisir un message'); return; }
+        fetch('/api/notify/game', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameCode: code, message: msg, title: title || undefined }) })
+          .then(r => r.json())
+          .then(d => { if (d.success) { alert('Envoyé à ' + d.count + ' joueur(s)'); if (msgEl) msgEl.value = ''; if (titleEl) titleEl.value = ''; } else alert('Erreur: ' + (d.error || 'Inconnue')); })
+          .catch(() => alert('Erreur réseau'));
+      }
+      if (e.target.id === 'notifyPlayerBtn') {
+        var cid = document.getElementById('notifyPlayerSelect') && document.getElementById('notifyPlayerSelect').value;
+        var msgEl = document.getElementById('notifyPlayerMsg');
+        var titleEl = document.getElementById('notifyPlayerTitle');
+        var msg = msgEl ? msgEl.value.trim() : '';
+        var title = titleEl ? titleEl.value.trim() : '';
+        if (!cid) { alert('Choisir un joueur'); return; }
+        if (!msg) { alert('Veuillez saisir un message'); return; }
+        fetch('/api/notify/player', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: cid, message: msg, title: title || undefined }) })
+          .then(r => r.json())
+          .then(d => { if (d.success) alert('Notification envoyée'); else alert('Erreur: ' + (d.error || 'Inconnue')); })
+          .catch(function() { alert('Erreur réseau'); });
+      }
+      if (e.target.id === 'notifyGameBtn') {
+        var gcode = document.getElementById('notifyGameSelect') && document.getElementById('notifyGameSelect').value;
+        var msgEl = document.getElementById('notifyGameMsg');
+        var titleEl = document.getElementById('notifyGameTitle');
+        var msg = msgEl ? msgEl.value.trim() : '';
+        var title = titleEl ? titleEl.value.trim() : '';
+        if (!gcode) { alert('Choisir une partie'); return; }
+        if (!msg) { alert('Veuillez saisir un message'); return; }
+        fetch('/api/notify/game', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameCode: gcode, message: msg, title: title || undefined }) })
+          .then(r => r.json())
+          .then(d => { if (d.success) alert('Envoyé à ' + d.count + ' joueur(s)'); else alert('Erreur: ' + (d.error || 'Inconnue')); })
+          .catch(function() { alert('Erreur réseau'); });
+      }
     });
 
     document.getElementById('gameModalClose').addEventListener('click', closeGameModal);
