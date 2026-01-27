@@ -23,6 +23,11 @@ const getRemainingTimeSeconds = (game) => {
   if (!game || typeof game.remainingTimeSeconds !== 'number') {
     return null;
   }
+  // Ne décrémenter en temps réel que si le host a démarré le décompte (started + countdown_started).
+  // Sinon afficher la valeur exacte du host (ex. durée avant le début de partie).
+  if (!game.remainingTimeCountdownActive) {
+    return game.remainingTimeSeconds;
+  }
   const updatedAt = typeof game.remainingTimeUpdatedAt === 'number'
     ? game.remainingTimeUpdatedAt
     : Date.now();
@@ -115,6 +120,41 @@ const server = createServer((req, res) => {
       'Access-Control-Allow-Origin': '*'
     });
     res.end(JSON.stringify(stats));
+    return;
+  }
+
+  // API endpoint pour les données d'une game (pour la modal live)
+  const gameMatch = req.url && req.url.match(/^\/api\/stats\/game\/([A-Za-z0-9]+)/);
+  if (req.method === 'GET' && gameMatch) {
+    const code = gameMatch[1].toUpperCase();
+    const game = games.get(code);
+    if (!game) {
+      res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ error: 'Game not found', code }));
+      return;
+    }
+    const gameData = {
+      code,
+      hostId: game.hostId,
+      playerCount: game.players.size,
+      socketMessageCount: gameSocketMessageCounts.get(code) || 0,
+      remainingTimeSeconds: getRemainingTimeSeconds(game),
+      remainingTimeUpdatedAt: game.remainingTimeUpdatedAt || null,
+      lastHostState: game.lastHostState || null,
+      lastHostStateAt: game.lastHostStateAt || null,
+      lastHostStateHostId: game.lastHostStateHostId || null,
+      reconnectedPlayerIds: game.reconnectedPlayerIds || {},
+      players: Array.from(game.players.values()).map(player => {
+        const socket = socketsById.get(player.id);
+        return {
+          ...player,
+          socketConnected: Boolean(socket?.connected),
+          status: player.status || 'active'
+        };
+      })
+    };
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify(gameData));
     return;
   }
 
@@ -338,6 +378,109 @@ const server = createServer((req, res) => {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.7; }
     }
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-box {
+      background: white;
+      border-radius: 12px;
+      max-width: 720px;
+      width: 100%;
+      max-height: 90vh;
+      overflow: hidden;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+    .modal-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 14px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-header h3 { margin: 0; font-size: 1.05em; }
+    .modal-close {
+      background: rgba(255,255,255,0.25);
+      border: none;
+      color: white;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 1.2em;
+      line-height: 1;
+    }
+    .modal-close:hover { background: rgba(255,255,255,0.4); }
+    .modal-body {
+      padding: 16px 20px;
+      overflow-y: auto;
+      max-height: calc(90vh - 54px);
+      font-size: 0.9em;
+    }
+    .modal-body .loading { color: #667eea; }
+    .modal-body .error { color: #f44336; }
+    .dash-kpis {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    @media (max-width: 500px) {
+      .dash-kpis { grid-template-columns: repeat(2, 1fr); }
+      .modal-box { max-width: 100%; }
+    }
+    .dash-kpi {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 10px 12px;
+      border-radius: 8px;
+      text-align: center;
+    }
+    .dash-kpi .dash-kpi-val { font-size: 1.1em; font-weight: 700; }
+    .dash-kpi .dash-kpi-lbl { font-size: 0.75em; opacity: 0.9; }
+    .dash-section {
+      margin-bottom: 14px;
+    }
+    .dash-section h4 {
+      color: #667eea;
+      margin: 0 0 8px 0;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #e0e0e0;
+      font-size: 0.95em;
+    }
+    .dash-section table { width: 100%; font-size: 0.88em; }
+    .dash-section th, .dash-section td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #eee; }
+    .dash-section th { background: #f5f5f5; color: #555; }
+    .dash-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; }
+    .dash-badge.phase-lobby { background: #e3f2fd; color: #1565c0; }
+    .dash-badge.phase-start { background: #fff3e0; color: #e65100; }
+    .dash-badge.phase-running { background: #e8f5e9; color: #2e7d32; }
+    .dash-badge.phase-done { background: #fce4ec; color: #c2185b; }
+    .dash-badge.role-agent { background: #e3f2fd; color: #0d47a1; }
+    .dash-badge.role-rogue { background: #ffebee; color: #b71c1c; }
+    .dash-badge.ok { background: #e8f5e9; color: #2e7d32; }
+    .dash-badge.no { background: #ffebee; color: #c62828; }
+    .dash-badge.socket-ok { background: #e8f5e9; color: #1b5e20; }
+    .dash-badge.socket-ko { background: #ffebee; color: #b71c1c; }
+    .dash-muted { color: #999; font-size: 0.9em; }
+    .btn-game-data {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85em;
+    }
+    .btn-game-data:hover { background: #764ba2; }
   </style>
 </head>
 <body>
@@ -497,6 +640,7 @@ const server = createServer((req, res) => {
               <th>Messages</th>
               <th>Temps restant</th>
               <th>Détails</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -524,11 +668,22 @@ const server = createServer((req, res) => {
                     }).join('')}
                   </div>
                 </td>
+                <td><button type="button" class="btn-game-data" data-game-code="${game.code}">📊 Tableau de bord</button></td>
               </tr>
             `).join('')}
           </tbody>
         </table>
       ` : '<div class="no-data">Aucune game en cours</div>'}
+    </div>
+
+    <div class="modal-overlay" id="gameModal">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3 id="gameModalTitle">Tableau de bord — </h3>
+          <button type="button" class="modal-close" id="gameModalClose" aria-label="Fermer">×</button>
+        </div>
+        <div class="modal-body" id="gameModalBody"><span class="loading">Chargement…</span></div>
+      </div>
     </div>
 
     <div class="card" id="logsCard">
@@ -560,6 +715,7 @@ const server = createServer((req, res) => {
 
   <script>
     let lastLogCount = 0;
+    let gameModalPollId = null;
 
     const formatRemainingTime = (seconds) => {
       if (seconds === null || seconds === undefined || Number.isNaN(seconds)) {
@@ -684,6 +840,7 @@ const server = createServer((req, res) => {
                   <th>Messages</th>
                   <th>Temps restant</th>
                   <th>Détails</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -711,6 +868,7 @@ const server = createServer((req, res) => {
                         }).join('')}
                       </div>
                     </td>
+                    <td><button type="button" class="btn-game-data" data-game-code="\${game.code}">📊 Tableau de bord</button></td>
                   </tr>
                 \`).join('')}
               </tbody>
@@ -757,6 +915,113 @@ const server = createServer((req, res) => {
         console.error('Erreur lors de la mise à jour des stats:', error);
       }
     }
+
+    function renderDashboard(data) {
+      if (data.error) return '<p class="error">' + (data.error || 'Partie introuvable') + '</p>';
+      var gd = (data.lastHostState && data.lastHostState.gameDetails) ? data.lastHostState.gameDetails : null;
+      var hostPlayers = (data.lastHostState && data.lastHostState.players) ? data.lastHostState.players : [];
+      var props = (data.lastHostState && data.lastHostState.props) ? data.lastHostState.props : [];
+      var hostStateAt = data.lastHostStateAt;
+      var phase = 'Convergence', phaseClass = 'dash-badge phase-lobby', phaseExtra = '';
+      if (gd && gd.winner_type) { phase = 'Terminée'; phaseClass = 'dash-badge phase-done'; phaseExtra = ' · ' + (gd.winner_type || '').toUpperCase(); }
+      else if (gd && gd.started && gd.countdown_started) { phase = 'En cours'; phaseClass = 'dash-badge phase-running'; }
+      else if (gd && gd.game_starting && !gd.started) { phase = 'Démarrage'; phaseClass = 'dash-badge phase-start'; }
+      var t = data.remainingTimeSeconds;
+      if (t == null && gd) t = gd.remaining_time;
+      var timeStr = (t != null && !isNaN(t)) ? (Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0')) : 'n/a';
+      var cap = 0, total = (props && props.length) || 0;
+      if (props) for (var i = 0; i < props.length; i++) if ((props[i].state || '').toUpperCase() === 'CAPTURED') cap++;
+      var objStr = total ? cap + ' / ' + total : '—';
+      var html = '<div class="dash-kpis">';
+      html += '<div class="dash-kpi"><div class="dash-kpi-val"><span class="' + phaseClass + '">' + phase + '</span>' + phaseExtra + '</div><div class="dash-kpi-lbl">Phase</div></div>';
+      html += '<div class="dash-kpi"><div class="dash-kpi-val">' + timeStr + '</div><div class="dash-kpi-lbl">Temps restant</div></div>';
+      html += '<div class="dash-kpi"><div class="dash-kpi-val">' + (data.playerCount || 0) + '</div><div class="dash-kpi-lbl">Joueurs</div></div>';
+      html += '<div class="dash-kpi"><div class="dash-kpi-val">' + objStr + '</div><div class="dash-kpi-lbl">Objectifs</div></div>';
+      html += '</div>';
+      html += '<div class="dash-section"><h4>👥 Joueurs</h4><table><thead><tr><th>Joueur</th><th>Rôle</th><th>Zone départ</th><th>Prêt</th><th>Socket</th><th>Statut</th></tr></thead><tbody>';
+      var pl = data.players || [];
+      for (var i = 0; i < pl.length; i++) {
+        var p = pl[i];
+        var hp = null;
+        for (var j = 0; j < hostPlayers.length; j++) if (hostPlayers[j].id_player === p.id) { hp = hostPlayers[j]; break; }
+        if (!hp && p.isHost && data.lastHostStateHostId) {
+          for (var j = 0; j < hostPlayers.length; j++) if (String(hostPlayers[j].id_player) === String(data.lastHostStateHostId)) { hp = hostPlayers[j]; break; }
+        }
+        if (!hp && data.reconnectedPlayerIds) {
+          for (var oldId in data.reconnectedPlayerIds) if (data.reconnectedPlayerIds[oldId] === p.id) {
+            for (var j = 0; j < hostPlayers.length; j++) if (String(hostPlayers[j].id_player) === String(oldId)) { hp = hostPlayers[j]; break; }
+            if (hp) break;
+          }
+        }
+        var role = (hp && hp.role) ? hp.role : (p.role || '—');
+        var roleCl = (role + '').toUpperCase() === 'AGENT' ? 'dash-badge role-agent' : ((role + '').toUpperCase() === 'ROGUE' ? 'dash-badge role-rogue' : '');
+        var zone = (hp && hp.isInStartZone === true) ? '<span class="dash-badge ok">Oui</span>' : ((hp && hp.isInStartZone === false) ? '<span class="dash-badge no">Non</span>' : '—');
+        var ready = (hp && hp.hasAcknowledgedStart === true) ? '<span class="dash-badge ok">Oui</span>' : '—';
+        var sock = p.socketConnected ? '<span class="dash-badge socket-ok">Connecté</span>' : '<span class="dash-badge socket-ko">Déco</span>';
+        var name = (p.name || p.id || '—').substring(0, 20) + (p.isHost ? ' 👑' : '');
+        html += '<tr><td>' + name + '</td><td>' + (roleCl ? '<span class="' + roleCl + '">' + role + '</span>' : role) + '</td><td>' + zone + '</td><td>' + ready + '</td><td>' + sock + '</td><td>' + (p.status || 'actif') + '</td></tr>';
+      }
+      html += '</tbody></table></div>';
+      if (props && props.length > 0) {
+        html += '<div class="dash-section"><h4>🎯 Objectifs (vue host)</h4><table><thead><tr><th>#</th><th>Nom</th><th>État</th></tr></thead><tbody>';
+        for (var i = 0; i < props.length; i++) {
+          var pr = props[i];
+          var st = (pr.state || '—').toUpperCase();
+          var stLabel = st === 'CAPTURED' ? 'Capturé' : (st === 'VISIBLE' ? 'Visible' : st);
+          html += '<tr><td>' + (pr.id_prop || i + 1) + '</td><td>' + (pr.name || '—') + '</td><td>' + stLabel + '</td></tr>';
+        }
+        html += '</tbody></table></div>';
+      }
+      if (gd) {
+        html += '<div class="dash-section"><h4>⚙️ Règles (vue host)</h4><table><thead><tr><th>Paramètre</th><th>Valeur</th></tr></thead><tbody>';
+        html += '<tr><td>Durée</td><td>' + (gd.duration != null ? gd.duration + ' s' : '—') + '</td></tr>';
+        html += '<tr><td>Objectifs pour victoire</td><td>' + (gd.victory_condition_nb_objectivs != null ? gd.victory_condition_nb_objectivs : '—') + '</td></tr>';
+        html += '<tr><td>Rayon carte</td><td>' + (gd.map_radius != null ? gd.map_radius + ' m' : '—') + '</td></tr>';
+        html += '<tr><td>Hack (ms)</td><td>' + (gd.hack_duration_ms != null ? gd.hack_duration_ms : '—') + '</td></tr>';
+        html += '<tr><td>Rayon zone objectif</td><td>' + (gd.objectiv_zone_radius != null ? gd.objectiv_zone_radius + ' m' : '—') + '</td></tr>';
+        html += '<tr><td>Portée Rogue / Agent</td><td>' + (gd.rogue_range != null ? gd.rogue_range : '—') + ' / ' + (gd.agent_range != null ? gd.agent_range : '—') + '</td></tr>';
+        html += '</tbody></table></div>';
+      }
+      if (hostStateAt) html += '<p class="dash-muted">Dernière synchro host : ' + new Date(hostStateAt).toLocaleTimeString('fr-FR') + '</p>';
+      else if (!gd) html += '<p class="dash-muted">Vue host : en attente de la première synchro du host.</p>';
+      return html;
+    }
+
+    function openGameModal(code) {
+      const overlay = document.getElementById('gameModal');
+      const title = document.getElementById('gameModalTitle');
+      const body = document.getElementById('gameModalBody');
+      title.textContent = 'Tableau de bord — ' + code + ' · en direct';
+      body.innerHTML = '<span class="loading">Chargement…</span>';
+      overlay.classList.add('open');
+      if (gameModalPollId) clearInterval(gameModalPollId);
+      function poll() {
+        fetch('/api/stats/game/' + code)
+          .then(r => r.json())
+          .then(data => {
+            if (data.error) { body.innerHTML = '<p class="error">' + (data.error || 'Partie introuvable') + '</p>'; return; }
+            body.innerHTML = renderDashboard(data);
+          })
+          .catch(function() { body.innerHTML = '<p class="error">Erreur de chargement</p>'; });
+      }
+      poll();
+      gameModalPollId = setInterval(poll, 1500);
+    }
+
+    function closeGameModal() {
+      document.getElementById('gameModal').classList.remove('open');
+      if (gameModalPollId) { clearInterval(gameModalPollId); gameModalPollId = null; }
+    }
+
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('.btn-game-data')) {
+        const code = e.target.closest('.btn-game-data').getAttribute('data-game-code');
+        if (code) openGameModal(code);
+      }
+      if (e.target.id === 'gameModalClose' || e.target.id === 'gameModal') closeGameModal();
+    });
+
+    document.getElementById('gameModalClose').addEventListener('click', closeGameModal);
     
     // Mettre à jour toutes les 2 secondes
     setInterval(updateStats, 2000);
@@ -1275,12 +1540,16 @@ io.on('connection', (socket) => {
           id: clientId,
           name: payload?.playerName || existingPlayer?.name || 'Joueur',
           isHost: existingPlayer?.isHost || false,
-          status: existingPlayer?.status || 'active'
+          status: existingPlayer?.status || 'active',
+          role: existingPlayer?.role ?? undefined
         });
 
         if (game.hostId === oldPlayerId) {
           game.hostId = clientId;
         }
+
+        if (!game.reconnectedPlayerIds) game.reconnectedPlayerIds = {};
+        game.reconnectedPlayerIds[oldPlayerId] = clientId;
 
         socketsById.delete(oldPlayerId);
         socketsById.set(clientId, socket);
@@ -1304,6 +1573,7 @@ io.on('connection', (socket) => {
               type: 'game:peer-reconnected',
               payload: {
                 playerId: clientId,
+                oldPlayerId,
                 playerName: existingPlayer?.name || payload?.playerName || 'Joueur'
               }
             });
@@ -1347,6 +1617,55 @@ io.on('connection', (socket) => {
         return;
       }
 
+      // Si le host est déconnecté et qu'on ajoute un joueur sans oldPlayerId, c'est probablement
+      // le host qui se reconnecte après un refresh (session perdue ou game:rejoin-host non envoyé).
+      // On remplace l'entrée du host au lieu d'ajouter un doublon.
+      const hostSocket = socketsById.get(game.hostId);
+      const hostDisconnected = game.hostId && !hostSocket;
+      if (hostDisconnected && disconnectedGameHosts.has(code)) {
+        const oldHostPlayer = game.players.get(game.hostId);
+        if (oldHostPlayer) {
+          const oldHostId = game.hostId;
+          log(`[RECONNEXION HOST SANS oldPlayerId] Code: ${code}, ancien host: ${oldHostId}, nouveau: ${clientId}`);
+          game.players.delete(oldHostId);
+          game.players.set(clientId, {
+            id: clientId,
+            name: payload?.playerName || oldHostPlayer.name || 'Host',
+            isHost: true,
+            status: oldHostPlayer.status || 'active',
+            role: oldHostPlayer.role ?? undefined
+          });
+          game.hostId = clientId;
+          if (!game.reconnectedPlayerIds) game.reconnectedPlayerIds = {};
+          game.reconnectedPlayerIds[oldHostId] = clientId;
+          const info = disconnectedGameHosts.get(code);
+          if (info) {
+            clearTimeout(info.timeoutId);
+            disconnectedGameHosts.delete(code);
+          }
+          clients.get(socket.id).gameCode = code;
+          clients.get(socket.id).lobbyCode = null;
+
+          send(socket, {
+            type: 'game:joined',
+            payload: {
+              code,
+              playerId: clientId,
+              hostId: clientId,
+              game: getLobbySnapshot(game)
+            }
+          });
+
+          game.players.forEach((p) => {
+            if (p.id !== clientId) {
+              const s = socketsById.get(p.id);
+              if (s) send(s, { type: 'game:host-reconnected', payload: { newHostId: clientId } });
+            }
+          });
+          return;
+        }
+      }
+
       game.players.set(clientId, { id: clientId, name: payload?.playerName || 'Joueur', isHost: false });
       clients.get(socket.id).gameCode = code;
       clients.get(socket.id).lobbyCode = null;
@@ -1361,9 +1680,9 @@ io.on('connection', (socket) => {
         }
       });
 
-      const hostSocket = socketsById.get(game.hostId);
-      if (hostSocket) {
-        send(hostSocket, {
+      const hostSocketForJoin = socketsById.get(game.hostId);
+      if (hostSocketForJoin) {
+        send(hostSocketForJoin, {
           type: 'game:peer-joined',
           payload: {
             playerId: clientId,
@@ -1399,7 +1718,8 @@ io.on('connection', (socket) => {
             id: clientId,
             name: payload?.playerName || oldPlayer.name || 'Host',
             isHost: true,
-            status: oldPlayer.status || 'active'
+            status: oldPlayer.status || 'active',
+            role: oldPlayer.role ?? undefined
           });
         } else {
           game.players.set(clientId, {
@@ -1409,6 +1729,9 @@ io.on('connection', (socket) => {
             status: 'active'
           });
         }
+
+        if (!game.reconnectedPlayerIds) game.reconnectedPlayerIds = {};
+        game.reconnectedPlayerIds[oldPlayerId] = clientId;
 
         socketsById.delete(oldPlayerId);
         socketsById.set(clientId, socket);
@@ -1520,6 +1843,22 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'game:update-remaining-time') {
+      const gameCode = clientInfo?.gameCode;
+      const remaining = payload?.remaining_time;
+      if (gameCode && games.has(gameCode) && typeof remaining === 'number') {
+        const game = games.get(gameCode);
+        if (game && clientInfo?.clientId === game.hostId) {
+          game.remainingTimeSeconds = Math.max(0, Math.floor(remaining));
+          game.remainingTimeUpdatedAt = Date.now();
+          if (payload && 'countdown_started' in payload) {
+            game.remainingTimeCountdownActive = !!payload.countdown_started;
+          }
+        }
+      }
+      return;
+    }
+
     if (type === 'state:sync') {
       const targetId = payload?.targetId;
       const targetSocket = socketsById.get(targetId);
@@ -1528,17 +1867,24 @@ io.on('connection', (socket) => {
         return;
       }
       const gameCode = clientInfo?.gameCode;
-      const remainingTime = payload?.payload?.gameDetails?.remaining_time;
-      if (gameCode && games.has(gameCode) && typeof remainingTime === 'number') {
+      const inner = payload?.payload;
+      const remainingTime = inner?.gameDetails?.remaining_time;
+      if (gameCode && games.has(gameCode)) {
         const game = games.get(gameCode);
         if (game && clientInfo?.clientId === game.hostId) {
-          game.remainingTimeSeconds = remainingTime;
-          game.remainingTimeUpdatedAt = Date.now();
+          if (typeof remainingTime === 'number') {
+            game.remainingTimeSeconds = remainingTime;
+            game.remainingTimeUpdatedAt = Date.now();
+          }
+          game.remainingTimeCountdownActive = !!(inner?.gameDetails?.started && inner?.gameDetails?.countdown_started);
+          game.lastHostState = inner || null;
+          game.lastHostStateAt = Date.now();
+          game.lastHostStateHostId = clientInfo.clientId;
         }
       }
       send(targetSocket, {
         type: 'state:sync',
-        payload: payload?.payload
+        payload: inner
       });
       return;
     }
@@ -1858,9 +2204,11 @@ io.on('connection', (socket) => {
           disconnectedAt: Date.now()
         });
       } else {
-        game.players.delete(clientInfo.clientId);
+        // Ne pas supprimer le joueur de game.players : on garde rôle, etc. pour la reconnexion.
+        // On notifie le host qui marquera le joueur déconnecté ; au game:join avec oldPlayerId
+        // on remplacera l'entrée par le nouveau clientId.
         const hostSocket = socketsById.get(game.hostId);
-        send(hostSocket, { type: 'game:peer-left', payload: { playerId: clientInfo.clientId } });
+        if (hostSocket) send(hostSocket, { type: 'game:peer-left', payload: { playerId: clientInfo.clientId } });
       }
     }
 

@@ -522,6 +522,12 @@ class GameSessionService {
       } as GameDetails;
       this.updateState({ gameDetails: updated });
       this.broadcastState();
+      if (partial.remaining_time !== undefined && this.state.gameCode) {
+        this.sendSocket('game:update-remaining-time', {
+          remaining_time: partial.remaining_time,
+          countdown_started: !!(updated.started && updated.countdown_started),
+        });
+      }
     } else {
       this.sendAction('action:update-game', { changes: partial });
     }
@@ -983,7 +989,7 @@ class GameSessionService {
     }
 
     if (type === 'game:peer-reconnected' && this.state.isHost) {
-      this.handlePeerReconnected(payload.playerId, payload.playerName);
+      this.handlePeerReconnected(payload.playerId, payload.playerName, payload.oldPlayerId);
       return;
     }
 
@@ -1119,8 +1125,8 @@ class GameSessionService {
     this.broadcastState();
   }
 
-  private async handlePeerReconnected(playerId: string, playerName: string) {
-    // Fermer l'ancienne connexion si elle existe
+  private async handlePeerReconnected(playerId: string, playerName: string, oldPlayerId?: string) {
+    // Fermer d'éventuelles connexions existantes pour ce playerId
     const existingPc = this.peerConnections.get(playerId);
     if (existingPc) {
       existingPc.close();
@@ -1131,15 +1137,35 @@ class GameSessionService {
       existingChannel.close();
       this.dataChannels.delete(playerId);
     }
+    if (oldPlayerId) {
+      this.peerConnections.get(oldPlayerId)?.close();
+      this.peerConnections.delete(oldPlayerId);
+      this.dataChannels.get(oldPlayerId)?.close();
+      this.dataChannels.delete(oldPlayerId);
+    }
     this.reconnectAttempts.delete(playerId);
+    this.reconnectAttempts.delete(oldPlayerId ?? '');
 
-    // Mettre à jour le nom du joueur s'il a changé
-    const players = this.state.players.map((player) =>
-      player.id_player === playerId 
-        ? { ...player, displayName: playerName }
-        : player
-    );
-    this.updateState({ players, gameDetails: { ...this.state.gameDetails!, players } });
+    let players = this.state.players;
+
+    // Si on a oldPlayerId, retrouver l'entrée du joueur (gardée par handlePeerLeft) et mettre à jour id_player
+    if (oldPlayerId) {
+      const idx = players.findIndex((p) => p.id_player === oldPlayerId);
+      if (idx >= 0) {
+        players = players.map((p, i) =>
+          i === idx
+            ? { ...p, id_player: playerId, user_id: playerId, displayName: playerName, status: 'active' as const }
+            : p
+        );
+        this.updateState({ players, gameDetails: { ...this.state.gameDetails!, players } });
+      }
+    } else {
+      // Fallback : mise à jour du nom si on trouve déjà le playerId (ancien comportement)
+      players = players.map((p) =>
+        p.id_player === playerId ? { ...p, displayName: playerName } : p
+      );
+      this.updateState({ players, gameDetails: { ...this.state.gameDetails!, players } });
+    }
 
     // Créer une nouvelle connexion WebRTC
     const pc = this.createPeerConnection(playerId, true);
@@ -1149,16 +1175,21 @@ class GameSessionService {
       this.sendSignal(playerId, { type: 'offer', sdp: pc.localDescription });
     }
 
-    // Envoyer l'état actuel une fois la connexion établie
     this.broadcastState();
   }
 
   private handlePeerLeft(playerId: string) {
-    const players = this.state.players.filter((player) => player.id_player !== playerId);
+    // Ne pas retirer le joueur : garder rôle, isInStartZone, etc. pour la reconnexion.
+    // Marquer comme déconnecté et fermer les connexions WebRTC.
+    const players = this.state.players.map((player) =>
+      player.id_player === playerId ? { ...player, status: 'disconnected' as const } : player
+    );
     this.updateState({ players, gameDetails: { ...this.state.gameDetails!, players } });
     const pc = this.peerConnections.get(playerId);
     pc?.close();
     this.peerConnections.delete(playerId);
+    const dc = this.dataChannels.get(playerId);
+    dc?.close();
     this.dataChannels.delete(playerId);
     this.broadcastState();
   }
