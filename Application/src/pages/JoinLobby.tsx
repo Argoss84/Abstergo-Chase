@@ -23,7 +23,7 @@ import { useGameSession } from '../contexts/GameSessionContext';
   const JoinLobby: React.FC = () => {
     const history = useHistory();
     const location = useLocation();
-    const { playerName, setPlayerName, lobbyCode, clearSession } = useGameSession();
+    const { playerName, setPlayerName, lobbyCode, gameCode: sessionGameCode, clearSession, disconnectSocket } = useGameSession();
     const [gameCode, setGameCode] = useState('');
     const [displayName, setDisplayName] = useState(playerName);
 
@@ -83,7 +83,12 @@ import { useGameSession } from '../contexts/GameSessionContext';
       setPlayerName(displayName.trim());
     }
     
-    if (lobbyCode && lobbyCode.toUpperCase() !== normalizedCode) {
+    // Si on a une session (lobby ou game) dont le code ne correspond pas au nouveau :
+    // couper le socket, supprimer toute la session (storage + état) pour éviter toute
+    // redirection vers Agent/Rogue due aux données de l'ancienne partie.
+    const sessionCode = lobbyCode || sessionGameCode;
+    if (sessionCode && sessionCode.toUpperCase() !== normalizedCode) {
+      disconnectSocket();
       clearSession();
     }
 
