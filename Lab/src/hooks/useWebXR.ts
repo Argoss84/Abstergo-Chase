@@ -48,23 +48,14 @@ export const useWebXR = () => {
 
       setStatus('Starting AR session...');
       try {
-        // On mobile, hand-tracking must be in optionalFeatures
-        // Some devices may not support it, so it's optional
         const sessionInit: XRSessionInit = {
           requiredFeatures: ['local'],
-          optionalFeatures: ['dom-overlay', 'local-floor', 'hand-tracking'],
+          optionalFeatures: ['dom-overlay', 'local-floor'],
         };
-        
-        console.log('Requesting AR session with features:', sessionInit);
-        
         const session = await navigator.xr.requestSession(
           'immersive-ar',
           overlayRoot ? ({ ...sessionInit, domOverlay: { root: overlayRoot } } as XRSessionInit) : sessionInit
         );
-
-        // Log enabled features for debugging
-        console.log('Session enabled features:', session.enabledFeatures);
-        console.log('Hand tracking enabled:', session.enabledFeatures?.includes('hand-tracking') ?? false);
 
         session.addEventListener('end', () => {
           setIsSessionActive(false);

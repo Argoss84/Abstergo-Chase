@@ -5,6 +5,8 @@ export interface SceneManagerCallbacks {
   onCubeColorChange?: (color: number) => void;
   onCubeRotationChange?: (rotation: { x: number; y: number }) => void;
   onHandTrackingStatusChange?: (isActive: boolean) => void;
+  onHandTrackingError?: (message: string) => void;
+  enableHandTracking?: boolean;
 }
 
 export class SceneManager {
@@ -146,10 +148,14 @@ export class SceneManager {
 
     renderer.xr.setSession(session);
 
-    this.handTrackingManager = new HandTrackingManager(session, scene, (isActive) => {
-      this.callbacks.onHandTrackingStatusChange?.(isActive);
-    });
-    this.handTrackingManager.start();
+    if (this.callbacks.enableHandTracking !== false) {
+      this.handTrackingManager = new HandTrackingManager(scene, camera, {
+        onStatusChange: (isActive) =>
+          this.callbacks.onHandTrackingStatusChange?.(isActive),
+        onError: (msg) => this.callbacks.onHandTrackingError?.(msg),
+      });
+      void this.handTrackingManager.start(container);
+    }
 
     renderer.setAnimationLoop((time: number) => {
       if (this.object && this.camera) {

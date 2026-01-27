@@ -1,228 +1,206 @@
 import * as THREE from 'three';
+import * as handPoseDetection from '@tensorflow-models/hand-pose-detection';
 import { HandVisualization } from './HandVisualization';
-import type { HandData } from '../../hooks/useHandTracking';
+import type { HandData, HandJoint } from '../../types/handTracking';
 
+export interface HandTrackingCallbacks {
+  onStatusChange?: (isActive: boolean) => void;
+  onError?: (message: string) => void;
+}
+
+/**
+ * Hand tracking via MediaPipe + TensorFlow.js (hand-pose-detection).
+ * En AR, la caméra arrière est souvent utilisée par WebXR : on tente d’abord
+ * "environment", puis en repli "user" (frontale) pour la détection.
+ * @see https://blog.tensorflow.org/2021/11/3D-handpose.html
+ */
 export class HandTrackingManager {
-  private session: XRSession;
   private scene: THREE.Scene;
+  private camera: THREE.Camera;
   private handVisualization: HandVisualization;
-  private animationFrameId: number | null = null;
-  private isActive = false;
-  private referenceSpace: XRReferenceSpace | null = null;
+  private callbacks: HandTrackingCallbacks;
+  private detector: handPoseDetection.HandDetector | null = null;
+  private video: HTMLVideoElement | null = null;
+  private stream: MediaStream | null = null;
+  private rafId: number | null = null;
+  private isRunning = false;
   private hasDetectedHands = false;
-  private onStatusChange?: (isActive: boolean) => void;
+  private detectLoopErrorCount = 0;
 
-  constructor(session: XRSession, scene: THREE.Scene, onStatusChange?: (isActive: boolean) => void) {
-    this.session = session;
+  /** Distance de la main devant la caméra (espace caméra, -Z = devant) */
+  private readonly handBaseZ = -1.2;
+  private readonly scale = 1.0;
+
+  constructor(
+    scene: THREE.Scene,
+    camera: THREE.Camera,
+    callbacks: HandTrackingCallbacks = {}
+  ) {
     this.scene = scene;
-    this.handVisualization = new HandVisualization(scene);
-    this.onStatusChange = onStatusChange;
+    this.camera = camera;
+    this.callbacks = callbacks;
+    this.handVisualization = new HandVisualization(scene, camera);
   }
 
-  async start(): Promise<boolean> {
+  async start(container: HTMLElement): Promise<boolean> {
+    if (this.isRunning) return true;
+
     try {
-      // Check if hand-tracking feature is enabled in the session
-      const hasHandTracking = this.session.enabledFeatures?.includes('hand-tracking') ?? false;
-      console.log('=== Hand Tracking Debug ===');
-      console.log('Session enabled features:', this.session.enabledFeatures);
-      console.log('Hand tracking enabled:', hasHandTracking);
-      
-      if (!hasHandTracking) {
-        console.warn('⚠️ Hand tracking not enabled in session. Make sure "hand-tracking" is in optionalFeatures.');
-        console.warn('This may be normal on some Samsung devices - continuing anyway...');
-      }
-
-      // On Samsung devices, wait longer for input sources to be available
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Request local reference space (better for AR than viewer)
-      // Local space is relative to the initial position, which works better for AR
-      try {
-        this.referenceSpace = await this.session.requestReferenceSpace('local');
-        console.log('✓ Using local reference space for hand tracking');
-      } catch (error) {
-        console.warn('Could not get local reference space:', error);
-        // Try viewer space as fallback
-        try {
-          this.referenceSpace = await this.session.requestReferenceSpace('viewer');
-          console.log('✓ Using viewer reference space for hand tracking');
-        } catch (e) {
-          console.warn('Could not get viewer reference space:', e);
-          return false;
+      console.log('[HandTracking] Chargement MediaPipe…');
+      this.detector = await handPoseDetection.createDetector(
+        handPoseDetection.SupportedModels.MediaPipeHands,
+        {
+          runtime: 'mediapipe',
+          modelType: 'full',
+          maxHands: 2,
+          solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/hands',
         }
-      }
-
-      // Listen for input source changes (important on Samsung devices)
-      this.session.addEventListener('inputsourceschange', (event) => {
-        console.log('Input sources changed:', {
-          added: event.added.length,
-          removed: event.removed.length,
-          total: this.session.inputSources.length
-        });
-        
-        // Check for hand input sources
-        for (let i = 0; i < event.added.length; i++) {
-          const source = event.added[i];
-          if (source.hand) {
-            console.log('🎉 Hand input source added!', source.handedness);
-          }
-        }
-      });
-
-      // Check if we have any hand input sources available
-      let hasHandInputSources = false;
-      for (let i = 0; i < this.session.inputSources.length; i++) {
-        if (this.session.inputSources[i]?.hand !== undefined) {
-          hasHandInputSources = true;
-          console.log('✓ Found hand input source:', this.session.inputSources[i].handedness);
-          break;
-        }
-      }
-      console.log('Initial hand input sources:', hasHandInputSources, 'Total input sources:', this.session.inputSources.length);
-
-      // Start checking for hands - they may not be available immediately on Samsung devices
-      this.isActive = true;
-      this.updateHands();
-      return true;
-    } catch (error) {
-      console.error('❌ Hand tracking initialization error:', error);
+      );
+      console.log('[HandTracking] MediaPipe OK');
+    } catch (err) {
+      const msg = `Hand tracking: échec chargement MediaPipe. ${err instanceof Error ? err.message : String(err)}`;
+      console.error('[HandTracking]', msg);
+      this.callbacks.onError?.(msg);
       return false;
     }
+
+    this.video = document.createElement('video');
+    this.video.autoplay = true;
+    this.video.playsInline = true;
+    this.video.muted = true;
+    this.video.setAttribute('playsinline', 'true');
+    this.video.style.cssText =
+      'position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;left:-9999px;';
+    container.appendChild(this.video);
+
+    try {
+      console.log('[HandTracking] Accès caméra (environment, arrière)…');
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: 640, height: 480 },
+      });
+      console.log('[HandTracking] Caméra arrière OK');
+    } catch {
+      try {
+        console.log('[HandTracking] Caméra arrière indisponible, essai caméra frontale (user)…');
+        this.stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: 320, height: 240 },
+        });
+        console.log('[HandTracking] Caméra frontale OK');
+      } catch (e2) {
+        const msg =
+          'Hand tracking: caméra indisponible (souvent utilisée par la réalité augmentée). Essayez de présenter la main devant la caméra frontale.';
+        console.warn('[HandTracking]', msg, e2);
+        this.callbacks.onError?.(msg);
+        this.cleanup();
+        return false;
+      }
+    }
+
+    this.video.srcObject = this.stream;
+    try {
+      await this.video.play();
+    } catch (e) {
+      const msg = `Hand tracking: la vidéo ne démarre pas. ${e instanceof Error ? e.message : String(e)}`;
+      console.warn('[HandTracking]', msg);
+      this.callbacks.onError?.(msg);
+      this.cleanup();
+      return false;
+    }
+
+    this.isRunning = true;
+    this.detectLoopErrorCount = 0;
+    this.detectLoop();
+    console.log('[HandTracking] Boucle de détection démarrée');
+    return true;
   }
 
-  private updateHands(): void {
-    if (!this.isActive) return;
+  private detectLoop = (): void => {
+    if (!this.isRunning || !this.detector || !this.video) return;
 
-    this.session.requestAnimationFrame((time: number, frame: XRFrame) => {
-      if (!frame || !this.isActive) {
-        this.updateHands();
-        return;
-      }
+    if (this.video.readyState < 2 || this.video.videoWidth === 0) {
+      this.rafId = requestAnimationFrame(this.detectLoop);
+      return;
+    }
 
-      let leftHand: HandData | null = null;
-      let rightHand: HandData | null = null;
-      let hasHands = false;
+    this.detector
+      .estimateHands(this.video, { flipHorizontal: false, staticImageMode: false })
+      .then((hands) => {
+        let leftHand: HandData | null = null;
+        let rightHand: HandData | null = null;
 
-      const inputSources = this.session.inputSources;
+        for (const h of hands) {
+          const kp3 = h.keypoints3D ?? h.keypoints;
+          if (!kp3 || kp3.length === 0) continue;
 
-      // On mobile, input sources may be added dynamically
-      // Listen for input source changes
-      if (this.session.inputSources.length === 0 && !this.hasDetectedHands) {
-        // Keep checking - hands may appear later on mobile
-        this.updateHands();
-        return;
-      }
+          const handedness = h.handedness === 'Left' ? 'left' : 'right';
+          const baseX = handedness === 'left' ? -0.2 : 0.2;
 
-      for (let i = 0; i < inputSources.length; i++) {
-        const inputSource = inputSources[i];
-        if (inputSource?.hand) {
-          hasHands = true;
-          const hand = inputSource.hand;
-          const handedness = inputSource.handedness;
-          const joints = new Map();
-          
-          console.debug(`Processing ${handedness} hand with ${hand.size} joints`);
-
-          for (const [jointName, joint] of hand.entries()) {
-            try {
-              if (frame.getJointPose && this.referenceSpace) {
-                const jointPose = frame.getJointPose(joint, this.referenceSpace);
-                if (jointPose) {
-                  // Transform the joint position using the transform matrix
-                  const transform = jointPose.transform;
-                  const position = {
-                    x: transform.position.x,
-                    y: transform.position.y,
-                    z: transform.position.z,
-                  };
-                  
-                  // Log first joint position for debugging (wrist)
-                  if (jointName === 'wrist' && joints.size === 0) {
-                    console.log(`${handedness} wrist position:`, position, 'radius:', jointPose.radius);
-                  }
-                  
-                  joints.set(jointName, {
-                    position,
-                    radius: Math.max(jointPose.radius || 0.01, 0.015), // Minimum 1.5cm for visibility
-                  });
-                } else {
-                  // Joint pose not available - this is normal for some joints
-                  if (jointName === 'wrist') {
-                    console.warn(`⚠️ ${handedness} wrist pose not available`);
-                  }
-                }
-              } else {
-                if (jointName === 'wrist') {
-                  console.warn(`⚠️ Cannot get ${handedness} wrist pose:`, {
-                    hasGetJointPose: !!frame.getJointPose,
-                    hasReferenceSpace: !!this.referenceSpace
-                  });
-                }
-              }
-            } catch (error) {
-              // Joint might not be available, skip it
-              if (jointName === 'wrist') {
-                console.error(`❌ Error getting ${handedness} wrist:`, error);
-              }
-            }
-          }
-          
-          // Log if we got joints
-          if (joints.size === 0) {
-            console.warn(`⚠️ No joints detected for ${handedness} hand (hand.size = ${hand.size})`);
-          } else {
-            console.debug(`✓ ${handedness} hand: ${joints.size} joints detected`);
+          const joints = new Map<string, HandJoint>();
+          for (let i = 0; i < kp3.length; i++) {
+            const k = kp3[i];
+            const name = (k.name ?? `keypoint_${i}`).replace(/-/g, '_').toLowerCase();
+            const x = typeof k.x === 'number' ? k.x : 0;
+            const y = typeof k.y === 'number' ? k.y : 0;
+            const z = typeof k.z === 'number' ? k.z : 0;
+            // Coordonnées locales au groupe main (MediaPipe 3D en mètres)
+            const px = this.scale * x;
+            const py = this.scale * z;
+            const pz = this.scale * -y;
+            joints.set(name, { position: { x: px, y: py, z: pz }, radius: 0.015 });
           }
 
           const handData: HandData = {
             joints,
             handedness,
+            groupPosition: { x: baseX, y: 0, z: this.handBaseZ },
           };
-
-          if (handedness === 'left') {
-            leftHand = handData;
-          } else if (handedness === 'right') {
-            rightHand = handData;
-          }
+          if (handedness === 'left') leftHand = handData;
+          else rightHand = handData;
         }
-      }
 
-      // Update visualization if we have hands or clear if we don't
-      if (hasHands || leftHand || rightHand) {
-        // Only update if we have joints data
-        const leftHasJoints = leftHand && leftHand.joints.size > 0;
-        const rightHasJoints = rightHand && rightHand.joints.size > 0;
-        
-        if (leftHasJoints || rightHasJoints) {
-          this.handVisualization.updateHands(leftHand, rightHand);
-          if (!this.hasDetectedHands) {
-            this.hasDetectedHands = true;
-            console.log('🎉 Hands detected!', { 
-              leftHand: !!leftHand && leftHand.joints.size > 0, 
-              rightHand: !!rightHand && rightHand.joints.size > 0,
-              leftJoints: leftHand?.joints.size || 0,
-              rightJoints: rightHand?.joints.size || 0
-            });
-            this.onStatusChange?.(true);
-          }
+        const hasHands = !!(leftHand?.joints.size || rightHand?.joints.size);
+        this.handVisualization.updateHands(leftHand, rightHand);
+
+        if (hasHands && !this.hasDetectedHands) {
+          this.hasDetectedHands = true;
+          this.callbacks.onStatusChange?.(true);
+        } else if (!hasHands && this.hasDetectedHands) {
+          this.hasDetectedHands = false;
+          this.callbacks.onStatusChange?.(false);
         }
-      } else if (this.hasDetectedHands) {
-        // Hands were lost
-        this.hasDetectedHands = false;
-        console.log('Hands lost');
-        this.onStatusChange?.(false);
-      }
+      })
+      .catch((e) => {
+        this.detectLoopErrorCount += 1;
+        if (this.detectLoopErrorCount <= 5) {
+          console.warn('[HandTracking] detectLoop:', e);
+        }
+      });
 
-      this.updateHands();
-    });
-  }
+    this.rafId = requestAnimationFrame(this.detectLoop);
+  };
 
   stop(): void {
-    this.isActive = false;
+    this.isRunning = false;
+    if (this.rafId != null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
     this.handVisualization.cleanup();
   }
 
   cleanup(): void {
     this.stop();
+    this.detector?.dispose?.();
+    this.detector = null;
+    if (this.stream) {
+      this.stream.getTracks().forEach((t) => t.stop());
+      this.stream = null;
+    }
+    if (this.video) {
+      this.video.srcObject = null;
+      this.video.remove();
+      this.video = null;
+    }
+    this.callbacks.onStatusChange?.(false);
   }
 }

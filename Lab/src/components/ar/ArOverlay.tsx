@@ -28,7 +28,6 @@ interface ArOverlayProps {
   heading: number | null;
   distance: number | null;
   bearing: number | null;
-  handTrackingActive?: boolean;
 }
 
 export const ArOverlay: React.FC<ArOverlayProps> = ({
@@ -51,7 +50,6 @@ export const ArOverlay: React.FC<ArOverlayProps> = ({
   heading,
   distance,
   bearing,
-  handTrackingActive = false,
 }) => {
   return (
     <div
@@ -73,7 +71,6 @@ export const ArOverlay: React.FC<ArOverlayProps> = ({
       <IonText style={{ fontSize: '11px', lineHeight: '1.3' }}>
         <div style={{ marginBottom: 4 }}>AR: {isSessionActive ? 'ON' : 'OFF'}</div>
         <div style={{ marginBottom: 4 }}>GPS: {geoStatus.length > 20 ? geoStatus.substring(0, 20) + '...' : geoStatus}</div>
-        {handTrackingActive && <div style={{ marginBottom: 4, color: '#2dd36f' }}>✓ Hands</div>}
       </IonText>
 
       {!isSessionActive && (

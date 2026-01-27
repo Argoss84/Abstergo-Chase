@@ -23,7 +23,6 @@ const ArGps: React.FC = () => {
   const [cubeColor, setCubeColor] = useState(0x2dd36f);
   const [cubeRotation, setCubeRotation] = useState({ x: 0, y: 0 });
   const [geoStatusError, setGeoStatusError] = useState<string>('');
-  const [handTrackingActive, setHandTrackingActive] = useState(false);
 
   const { currentPos, geoStatus: geoStatusFromHook } = useGeolocation();
   const geoStatus = geoStatusError || geoStatusFromHook;
@@ -96,7 +95,7 @@ const ArGps: React.FC = () => {
         const sceneManager = new SceneManager({
           onCubeColorChange: setCubeColor,
           onCubeRotationChange: setCubeRotation,
-          onHandTrackingStatusChange: setHandTrackingActive,
+          enableHandTracking: false,
         });
 
         sceneManager.init(
@@ -180,7 +179,6 @@ const ArGps: React.FC = () => {
               heading={heading}
               distance={distance}
               bearing={bearing}
-              handTrackingActive={handTrackingActive}
             />
           </div>
         </div>

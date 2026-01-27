@@ -7,7 +7,10 @@ const Home: React.FC = () => {
         <div className="ion-padding">
           <div>Hello World</div>
           <IonButton routerLink="/ar" expand="block">
-            Open AR
+            AR GPS
+          </IonButton>
+          <IonButton routerLink="/ar-hands" expand="block">
+            Détection des mains
           </IonButton>
         </div>
       </IonContent>
