@@ -16,6 +16,13 @@ import {
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error';
 export type SessionScope = 'lobby' | 'game';
 
+export interface LobbyChatMessage {
+  playerId: string;
+  playerName: string;
+  text: string;
+  timestamp: number;
+}
+
 interface SessionState {
   lobbyCode: string | null;
   gameCode: string | null;
@@ -27,6 +34,7 @@ interface SessionState {
   props: GameProp[];
   connectionStatus: ConnectionStatus;
   sessionScope: SessionScope;
+  lobbyChatMessages: LobbyChatMessage[];
 }
 
 interface PersistedSessionData {
@@ -68,7 +76,8 @@ const createInitialState = (): SessionState => ({
   gameDetails: null,
   props: [],
   connectionStatus: 'idle',
-  sessionScope: 'lobby'
+  sessionScope: 'lobby',
+  lobbyChatMessages: []
 });
 
 interface PendingAction {
@@ -220,9 +229,17 @@ class GameSessionService {
       gameDetails: null,
       props: [],
       connectionStatus: this.socket?.connected ? 'connected' : 'idle',
-      sessionScope: 'lobby'
+      sessionScope: 'lobby',
+      lobbyChatMessages: []
     });
     this.state.playerName = playerName;
+  }
+
+  sendLobbyChat(text: string) {
+    if (!this.state.lobbyCode || this.state.sessionScope !== 'lobby') return;
+    const t = String(text ?? '').trim().substring(0, 500);
+    if (!t) return;
+    this.sendSocket('lobby:chat', { text: t });
   }
 
   leaveGame() {
@@ -249,7 +266,8 @@ class GameSessionService {
       gameDetails: null,
       props: [],
       connectionStatus: this.socket?.connected ? 'connected' : 'idle',
-      sessionScope: 'lobby'
+      sessionScope: 'lobby',
+      lobbyChatMessages: []
     });
     this.state.playerName = playerName;
   }
@@ -438,7 +456,8 @@ class GameSessionService {
       isHost: true,
       connectionStatus: 'connected',
       sessionScope: 'game',
-      gameDetails: updatedGameDetails
+      gameDetails: updatedGameDetails,
+      lobbyChatMessages: []
     });
 
     await this.reestablishAllPeerConnections();
@@ -474,7 +493,8 @@ class GameSessionService {
         playerId: response.playerId,
         isHost: response.playerId === response.hostId,
         connectionStatus: 'connected',
-        sessionScope: 'game'
+        sessionScope: 'game',
+        lobbyChatMessages: []
       });
 
       this.sendSocket('player:status-update', { status: 'active' });
@@ -1030,6 +1050,12 @@ class GameSessionService {
       return;
     }
 
+    if (type === 'lobby:chat-message' && payload?.playerId != null && typeof payload?.text === 'string') {
+      const arr = [...this.state.lobbyChatMessages, { playerId: payload.playerId, playerName: payload.playerName || 'Joueur', text: payload.text, timestamp: payload.timestamp || Date.now() }];
+      this.updateState({ lobbyChatMessages: arr.length > 100 ? arr.slice(-100) : arr });
+      return;
+    }
+
     if (type === 'action:relay' && this.state.isHost) {
       this.handleActionMessage(payload?.action);
     }
@@ -1052,7 +1078,8 @@ class GameSessionService {
       gameDetails: null,
       props: [],
       connectionStatus: 'idle',
-      sessionScope: 'lobby'
+      sessionScope: 'lobby',
+      lobbyChatMessages: []
     });
   }
 
@@ -1427,7 +1454,8 @@ class GameSessionService {
         playerId: response.playerId,
         isHost: response.playerId === response.hostId,
         connectionStatus: 'connected',
-        sessionScope: 'game'
+        sessionScope: 'game',
+        lobbyChatMessages: []
       });
       this.requestResync('socket-reconnect');
     } catch (error) {

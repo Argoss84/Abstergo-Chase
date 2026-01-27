@@ -1772,6 +1772,29 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'lobby:chat') {
+      const { lobbyCode } = clients.get(socket.id) || {};
+      const text = typeof payload?.text === 'string' ? payload.text.trim().substring(0, 500) : '';
+      if (!lobbyCode || !lobbies.has(lobbyCode) || !text) return;
+
+      const lobby = lobbies.get(lobbyCode);
+      const player = lobby.players.get(clientId);
+      if (!player) return;
+
+      const msg = {
+        playerId: clientId,
+        playerName: player.name || 'Joueur',
+        text,
+        timestamp: Date.now()
+      };
+
+      lobby.players.forEach((p) => {
+        const s = socketsById.get(p.id);
+        if (s) send(s, { type: 'lobby:chat-message', payload: msg });
+      });
+      return;
+    }
+
     if (type === 'player:role-update') {
       const { lobbyCode, gameCode } = clients.get(socket.id) || {};
       const targetId = payload?.playerId || clientId;

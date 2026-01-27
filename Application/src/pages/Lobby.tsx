@@ -18,8 +18,15 @@ import {
   IonAvatar,
   IonSelect,
   IonSelectOption,
+  IonFab,
+  IonFabButton,
+  IonBadge,
+  IonIcon,
+  IonInput,
+  IonFooter,
 } from '@ionic/react';
-import { useEffect, useMemo, useState } from 'react';
+import { chatbubbleOutline } from 'ionicons/icons';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useHistory } from 'react-router-dom';
 import { MapContainer, TileLayer, Circle, Marker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -58,11 +65,17 @@ const Lobby: React.FC = () => {
     connectionStatus,
     clearSession,
     leaveLobby,
-    requestLatestState
+    requestLatestState,
+    lobbyChatMessages,
+    sendLobbyChat,
   } = useGameSession();
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
+  const [isChatModalOpen, setIsChatModalOpen] = useState(false);
+  const [lastReadCount, setLastReadCount] = useState(0);
+  const [chatInput, setChatInput] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [mapKey, setMapKey] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState('Connexion au lobby...');
@@ -78,6 +91,30 @@ const Lobby: React.FC = () => {
     () => players.find((player) => player.id_player === playerId),
     [players, playerId]
   );
+
+  const msgs = lobbyChatMessages ?? [];
+  const unreadCount = isChatModalOpen ? 0 : Math.max(0, msgs.length - lastReadCount);
+
+  useEffect(() => {
+    if (isChatModalOpen) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [isChatModalOpen, msgs.length]);
+
+  const handleOpenChat = () => {
+    setIsChatModalOpen(true);
+    setLastReadCount(msgs.length);
+  };
+
+  const handleCloseChat = () => {
+    setIsChatModalOpen(false);
+    setLastReadCount(msgs.length);
+  };
+
+  const handleSendChat = () => {
+    const t = chatInput.trim();
+    if (!t) return;
+    sendLobbyChat(t);
+    setChatInput('');
+  };
 
   const handleErrorWithUser = async (errorMessage: string, error?: any, context?: string) => {
     const errorResult = await handleError(errorMessage, error, {
@@ -846,6 +883,101 @@ const Lobby: React.FC = () => {
             <IonButton expand="block" onClick={() => setIsModalOpen(true)} className="ion-margin-bottom">
               Détails Partie
             </IonButton>
+
+            {!gameDetails.is_converging_phase && (
+              <IonFab slot="fixed" vertical="bottom" horizontal="end" style={{ marginBottom: '16px', marginEnd: '16px', overflow: 'visible' }}>
+                <div style={{ position: 'relative', display: 'inline-flex' }}>
+                  <IonFabButton onClick={handleOpenChat} color="primary">
+                    <IonIcon icon={chatbubbleOutline} />
+                  </IonFabButton>
+                  {unreadCount > 0 && (
+                    <IonBadge
+                      color="danger"
+                      style={{
+                        position: 'absolute',
+                        top: '-4px',
+                        right: '-4px',
+                        minWidth: '22px',
+                        height: '22px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '11px',
+                        padding: '0 6px',
+                        borderRadius: '11px',
+                        zIndex: 10,
+                      }}
+                    >
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </IonBadge>
+                  )}
+                </div>
+              </IonFab>
+            )}
+
+            <IonModal isOpen={isChatModalOpen} onDidDismiss={handleCloseChat}>
+              <IonHeader>
+                <IonToolbar>
+                  <IonTitle>Chat du lobby</IonTitle>
+                  <IonButtons slot="end">
+                    <IonButton onClick={handleCloseChat}>Fermer</IonButton>
+                  </IonButtons>
+                </IonToolbar>
+              </IonHeader>
+              <IonContent className="ion-padding">
+                <div style={{ display: 'flex', flexDirection: 'column', minHeight: '240px' }}>
+                  <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {msgs.length === 0 && (
+                      <IonText color="medium" style={{ textAlign: 'center', padding: '24px', fontSize: '14px' }}>
+                        Aucun message. Envoyez le premier !
+                      </IonText>
+                    )}
+                    {msgs.map((m) => {
+                      const isMe = m.playerId === playerId;
+                      return (
+                        <div
+                          key={`${m.timestamp}-${m.playerId}`}
+                          style={{
+                            alignSelf: isMe ? 'flex-end' : 'flex-start',
+                            maxWidth: '85%',
+                            padding: '8px 12px',
+                            borderRadius: '12px',
+                            backgroundColor: isMe ? 'var(--ion-color-primary)' : 'var(--ion-color-light)',
+                            color: isMe ? 'var(--ion-color-primary-contrast)' : 'var(--ion-color-dark)',
+                          }}
+                        >
+                          <div style={{ fontSize: '11px', opacity: 0.9, marginBottom: '2px' }}>
+                            {isMe ? 'Vous' : m.playerName}
+                          </div>
+                          <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.text}</div>
+                          <div style={{ fontSize: '10px', opacity: 0.8, marginTop: '2px' }}>
+                            {new Date(m.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div ref={messagesEndRef} />
+                  </div>
+                </div>
+              </IonContent>
+              <IonFooter>
+                <IonToolbar>
+                  <div style={{ display: 'flex', gap: '8px', padding: '8px', alignItems: 'center' }}>
+                    <IonInput
+                      value={chatInput}
+                      onIonInput={(e) => setChatInput(String(e.detail.value ?? ''))}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSendChat(); } }}
+                      placeholder="Votre message..."
+                      style={{ flex: 1, '--padding-start': '12px' } as React.CSSProperties}
+                      clearOnEdit={false}
+                    />
+                    <IonButton onClick={handleSendChat} disabled={!chatInput.trim()} color="primary">
+                      Envoyer
+                    </IonButton>
+                  </div>
+                </IonToolbar>
+              </IonFooter>
+            </IonModal>
 
             <IonModal isOpen={isQRModalOpen} onDidDismiss={() => setIsQRModalOpen(false)}>
               <IonHeader>

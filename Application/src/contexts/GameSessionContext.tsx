@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { gameSessionService, SessionState } from '../services/GameSessionService';
 import { GameDetails, GameProp, Player } from '../components/Interfaces';
 
@@ -16,6 +16,7 @@ interface GameSessionContextValue extends SessionState {
   clearSession: () => void;
   leaveLobby: () => void;
   leaveGame: () => void;
+  sendLobbyChat: (text: string) => void;
   hasPersistedSession: () => boolean;
   disconnectSocket: () => void;
 }
@@ -28,6 +29,9 @@ export const GameSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
   useEffect(() => {
     return gameSessionService.subscribe(setState);
   }, []);
+
+  const clearSession = useCallback(() => gameSessionService.clearSession(), []);
+  const disconnectSocket = useCallback(() => gameSessionService.disconnectSocket(), []);
 
   const value: GameSessionContextValue = {
     ...state,
@@ -42,11 +46,12 @@ export const GameSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     updateProp: async (propId, partial) => gameSessionService.updateProp(propId, partial),
     requestLatestState: async () => gameSessionService.requestLatestState(),
     setPlayerName: (name: string) => gameSessionService.setPlayerName(name),
-    clearSession: () => gameSessionService.clearSession(),
+    clearSession,
     leaveLobby: () => gameSessionService.leaveLobby(),
     leaveGame: () => gameSessionService.leaveGame(),
+    sendLobbyChat: (text: string) => gameSessionService.sendLobbyChat(text),
     hasPersistedSession: () => gameSessionService.hasPersistedSession(),
-    disconnectSocket: () => gameSessionService.disconnectSocket()
+    disconnectSocket
   };
 
   return <GameSessionContext.Provider value={value}>{children}</GameSessionContext.Provider>;
