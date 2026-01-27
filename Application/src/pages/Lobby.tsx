@@ -25,8 +25,8 @@ import {
   IonInput,
   IonFooter,
 } from '@ionic/react';
-import { chatbubbleOutline } from 'ionicons/icons';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { chatbubbleOutline, chevronBackOutline } from 'ionicons/icons';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useHistory } from 'react-router-dom';
 import { MapContainer, TileLayer, Circle, Marker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -83,6 +83,8 @@ const Lobby: React.FC = () => {
   const [errorCount, setErrorCount] = useState(0);
   const [isPageVisible, setIsPageVisible] = useState(!document.hidden);
   const [copySuccess, setCopySuccess] = useState(false);
+  const modalOpenRef = useRef<'details' | 'chat' | 'qr' | null>(null);
+  const fromPopstateRef = useRef(false);
 
   useWakeLock(true);
   const { vibrate, patterns } = useVibration();
@@ -100,6 +102,8 @@ const Lobby: React.FC = () => {
   }, [isChatModalOpen, msgs.length]);
 
   const handleOpenChat = () => {
+    window.history.pushState({ modal: 'chat' }, '', window.location.href);
+    modalOpenRef.current = 'chat';
     setIsChatModalOpen(true);
     setLastReadCount(msgs.length);
   };
@@ -108,6 +112,27 @@ const Lobby: React.FC = () => {
     setIsChatModalOpen(false);
     setLastReadCount(msgs.length);
   };
+
+  const handleOpenDetailsModal = () => {
+    window.history.pushState({ modal: 'details' }, '', window.location.href);
+    modalOpenRef.current = 'details';
+    setIsModalOpen(true);
+  };
+
+  const handleOpenQRModal = () => {
+    window.history.pushState({ modal: 'qr' }, '', window.location.href);
+    modalOpenRef.current = 'qr';
+    setIsQRModalOpen(true);
+  };
+
+  const handleDismissModal = useCallback((modal: 'details' | 'chat' | 'qr') => {
+    if (!fromPopstateRef.current) window.history.back();
+    fromPopstateRef.current = false;
+    modalOpenRef.current = null;
+    if (modal === 'details') setIsModalOpen(false);
+    else if (modal === 'chat') { setIsChatModalOpen(false); setLastReadCount(msgs.length); }
+    else if (modal === 'qr') setIsQRModalOpen(false);
+  }, [msgs.length]);
 
   const handleSendChat = () => {
     const t = chatInput.trim();
@@ -276,6 +301,36 @@ const Lobby: React.FC = () => {
     };
   }, []);
 
+  // Fermer les modales au lieu de naviguer lors du bouton retour (navigateur ou matériel)
+  useEffect(() => {
+    const onPopState = () => {
+      fromPopstateRef.current = true;
+      setIsModalOpen(false);
+      setIsChatModalOpen(false);
+      setIsQRModalOpen(false);
+      modalOpenRef.current = null;
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: CustomEvent) => {
+      e.detail.register(101, (processNextHandler: () => void) => {
+        if (modalOpenRef.current) {
+          const w = modalOpenRef.current;
+          modalOpenRef.current = null;
+          if (w === 'details') setIsModalOpen(false);
+          else if (w === 'chat') { setIsChatModalOpen(false); setLastReadCount(msgs.length); }
+          else if (w === 'qr') setIsQRModalOpen(false);
+        } else {
+          processNextHandler();
+        }
+      });
+    };
+    document.addEventListener('ionBackButton', handler as EventListener);
+    return () => document.removeEventListener('ionBackButton', handler as EventListener);
+  }, [msgs.length]);
 
   useEffect(() => {
     if (gameDetails?.is_converging_phase && currentPlayer?.role) {
@@ -642,7 +697,7 @@ const Lobby: React.FC = () => {
                   </IonButton>
                   <IonButton 
                     expand="block" 
-                    onClick={() => setIsQRModalOpen(true)}
+                    onClick={handleOpenQRModal}
                     color="secondary"
                     style={{ flex: 1 }}
                   >
@@ -880,7 +935,7 @@ const Lobby: React.FC = () => {
               </IonButton>
             )}
 
-            <IonButton expand="block" onClick={() => setIsModalOpen(true)} className="ion-margin-bottom">
+            <IonButton expand="block" onClick={handleOpenDetailsModal} className="ion-margin-bottom">
               Détails Partie
             </IonButton>
 
@@ -915,9 +970,14 @@ const Lobby: React.FC = () => {
               </IonFab>
             )}
 
-            <IonModal isOpen={isChatModalOpen} onDidDismiss={handleCloseChat}>
+            <IonModal isOpen={isChatModalOpen} onDidDismiss={() => handleDismissModal('chat')}>
               <IonHeader>
                 <IonToolbar>
+                  <IonButtons slot="start">
+                    <IonButton fill="clear" onClick={() => { handleCloseChat(); }}>
+                      <IonIcon icon={chevronBackOutline} />
+                    </IonButton>
+                  </IonButtons>
                   <IonTitle>Chat du lobby</IonTitle>
                   <IonButtons slot="end">
                     <IonButton onClick={handleCloseChat}>Fermer</IonButton>
@@ -979,9 +1039,14 @@ const Lobby: React.FC = () => {
               </IonFooter>
             </IonModal>
 
-            <IonModal isOpen={isQRModalOpen} onDidDismiss={() => setIsQRModalOpen(false)}>
+            <IonModal isOpen={isQRModalOpen} onDidDismiss={() => handleDismissModal('qr')}>
               <IonHeader>
                 <IonToolbar>
+                  <IonButtons slot="start">
+                    <IonButton fill="clear" onClick={() => setIsQRModalOpen(false)}>
+                      <IonIcon icon={chevronBackOutline} />
+                    </IonButton>
+                  </IonButtons>
                   <IonTitle>QR Code - Rejoindre la partie</IonTitle>
                   <IonButtons slot="end">
                     <IonButton onClick={() => setIsQRModalOpen(false)}>Fermer</IonButton>
@@ -1036,9 +1101,14 @@ const Lobby: React.FC = () => {
               </IonContent>
             </IonModal>
 
-            <IonModal isOpen={isModalOpen} onDidDismiss={() => setIsModalOpen(false)}>
+            <IonModal isOpen={isModalOpen} onDidDismiss={() => handleDismissModal('details')}>
               <IonHeader>
                 <IonToolbar>
+                  <IonButtons slot="start">
+                    <IonButton fill="clear" onClick={() => setIsModalOpen(false)}>
+                      <IonIcon icon={chevronBackOutline} />
+                    </IonButton>
+                  </IonButtons>
                   <IonTitle>Paramètres de la partie</IonTitle>
                   <IonButtons slot="end">
                     <IonButton onClick={() => setIsModalOpen(false)}>Fermer</IonButton>

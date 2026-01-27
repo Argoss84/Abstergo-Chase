@@ -18,8 +18,10 @@ import {
     IonText,
     IonToast,
     IonModal,
+    IonIcon,
 } from '@ionic/react';
-import { useEffect, useRef, useState } from 'react';
+import { chevronBackOutline } from 'ionicons/icons';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { useGameSession } from '../contexts/GameSessionContext';
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Circle, Polyline } from 'react-leaflet';
@@ -85,6 +87,8 @@ const CreateLobby: React.FC = () => {
   const { createLobby, playerName, setPlayerName, lobbyCode, disconnectSocket, clearSession } = useGameSession();
   const hasDisconnectedSocketRef = useRef(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const modalOpenRef = useRef(false);
+  const fromPopstateRef = useRef(false);
   const [selectedPosition, setSelectedPosition] = useState<[number, number] | null>(null);
   const [userPosition, setUserPosition] = useState<[number, number] | null>(null);
   const [isLoadingGPS, setIsLoadingGPS] = useState(true);
@@ -119,6 +123,32 @@ const CreateLobby: React.FC = () => {
     }
   }, [clearSession, disconnectSocket, lobbyCode]);
 
+  // Fermer la modale au lieu de naviguer lors du bouton retour (navigateur ou matériel)
+  useEffect(() => {
+    const onPopState = () => {
+      fromPopstateRef.current = true;
+      setIsModalOpen(false);
+      modalOpenRef.current = false;
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: CustomEvent) => {
+      e.detail.register(101, (processNextHandler: () => void) => {
+        if (modalOpenRef.current) {
+          modalOpenRef.current = false;
+          setIsModalOpen(false);
+        } else {
+          processNextHandler();
+        }
+      });
+    };
+    document.addEventListener('ionBackButton', handler as EventListener);
+    return () => document.removeEventListener('ionBackButton', handler as EventListener);
+  }, []);
+
   // Initialize displayName with playerName from context
   useEffect(() => {
     setDisplayName(playerName);
@@ -131,6 +161,19 @@ const CreateLobby: React.FC = () => {
       shouldShowError: false // Ne pas afficher l'erreur à l'utilisateur dans ce composant
     });
   };
+
+  const handleOpenDetailsModal = () => {
+    window.history.pushState({ modal: 'details' }, '', window.location.href);
+    modalOpenRef.current = true;
+    setIsModalOpen(true);
+  };
+
+  const handleDismissModal = useCallback(() => {
+    if (!fromPopstateRef.current) window.history.back();
+    fromPopstateRef.current = false;
+    modalOpenRef.current = false;
+    setIsModalOpen(false);
+  }, []);
 
   const handleInputChange = (field: keyof GameFormData, value: string | number) => {
     setFormData(prev => ({
@@ -375,7 +418,13 @@ const CreateLobby: React.FC = () => {
       <IonHeader>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonBackButton defaultHref="/home" />
+            {isModalOpen ? (
+              <IonButton fill="clear" onClick={() => setIsModalOpen(false)}>
+                <IonIcon icon={chevronBackOutline} />
+              </IonButton>
+            ) : (
+              <IonBackButton defaultHref="/home" />
+            )}
           </IonButtons>
           <IonTitle>Créer une partie</IonTitle>
         </IonToolbar>
@@ -528,7 +577,7 @@ const CreateLobby: React.FC = () => {
 
             <IonButton 
               expand="block" 
-              onClick={() => setIsModalOpen(true)}
+              onClick={handleOpenDetailsModal}
               className="ion-margin-bottom"
             >
               Détails Partie
@@ -575,9 +624,14 @@ const CreateLobby: React.FC = () => {
           </IonCardContent>
         </IonCard>
 
-        <IonModal isOpen={isModalOpen} onDidDismiss={() => setIsModalOpen(false)}>
+        <IonModal isOpen={isModalOpen} onDidDismiss={handleDismissModal}>
           <IonHeader>
             <IonToolbar>
+              <IonButtons slot="start">
+                <IonButton fill="clear" onClick={() => setIsModalOpen(false)}>
+                  <IonIcon icon={chevronBackOutline} />
+                </IonButton>
+              </IonButtons>
               <IonTitle>Paramètres de la partie</IonTitle>
               <IonButtons slot="end">
                 <IonButton onClick={() => setIsModalOpen(false)}>Fermer</IonButton>
