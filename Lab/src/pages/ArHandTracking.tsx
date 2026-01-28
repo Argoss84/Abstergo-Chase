@@ -17,7 +17,7 @@ import { useCompass } from '../hooks/useCompass';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { useModelLoader } from '../hooks/useModelLoader';
 import type { GeoPosition } from '../types/geolocation';
-import { computeDistanceBearing, toRad } from '../utils/geolocation';
+import { computeDistanceBearing, toDeg, toRad } from '../utils/geolocation';
 
 function disposeObject3D(obj: THREE.Object3D): void {
   obj.traverse((c) => {
@@ -32,6 +32,11 @@ function disposeObject3D(obj: THREE.Object3D): void {
 
 const MODEL_DISTANCE_M = 5;
 const EYE_HEIGHT_M = 1.6; // hauteur des yeux → sol à -EYE_HEIGHT_M
+const MODEL_WORLD_POS = new THREE.Vector3(0, -EYE_HEIGHT_M, -MODEL_DISTANCE_M);
+const PITCH_CLAMP_DEG = 88; // évite le gimbal lock des Euler quand pitch → ±90°
+const GPS_DEAD_ZONE_M = 0.2; // seuil de déplacement GPS pour mettre à jour la cible (réduit le jitter)
+const GPS_LERP = 0.12; // interpolation position caméra (plus faible = plus stable, moins réactif)
+const HAND_DRAG_RAD_PER_PX = 0.012; // rad/pixel pour rotation du modèle par drag main
 
 const ArHandTracking: React.FC = () => {
   const videoContainerRef = useRef<HTMLDivElement | null>(null);
@@ -45,8 +50,13 @@ const ArHandTracking: React.FC = () => {
   const modelRef = useRef<THREE.Object3D | null>(null);
   const headingRef = useRef<number | null>(null);
   const initialHeadingRef = useRef<number | null>(null);
+  const initialPosRef = useRef<GeoPosition | null>(null);
+  const cameraWorldPosRef = useRef(new THREE.Vector3(0, 0, 0));
+  const lastTargetRef = useRef(new THREE.Vector3(0, 0, 0));
   const customModelRef = useRef<THREE.Group | null>(null);
-  const targetOffsetRef = useRef(new THREE.Vector3(0, -EYE_HEIGHT_M, -MODEL_DISTANCE_M));
+  const handFingerTipsRef = useRef<Array<{ x: number; y: number }>>([]);
+  const modelUserRotationYRef = useRef(0);
+  const previousTipXRef = useRef<number | null>(null);
 
   const [handTrackingActive, setHandTrackingActive] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
@@ -57,6 +67,7 @@ const ArHandTracking: React.FC = () => {
   const [distance, setDistance] = useState<number | null>(null);
   const [bearing, setBearing] = useState<number | null>(null);
   const [relativeBearing, setRelativeBearing] = useState<number | null>(null);
+  const [distanceToModel, setDistanceToModel] = useState<number | null>(null);
 
   const [presentToast] = useIonToast();
   const prevHandTrackingRef = useRef<boolean | null>(null);
@@ -89,21 +100,45 @@ const ArHandTracking: React.FC = () => {
     return { lat, lon, accuracy: null, heading: null };
   }, [targetLat, targetLon]);
 
-  // Modèle à 5 m au sol : "devant" = direction du téléphone au chargement. y=-EYE_HEIGHT_M = posé par terre.
+  // Monde figé : modèle en (0, -1.6, -5). Caméra = position GPS (offset initial→courant). Flèche = direction vers le modèle.
   useEffect(() => {
     const h = heading ?? null;
-    if (h != null && !isNaN(h) && initialHeadingRef.current === null) {
-      initialHeadingRef.current = h;
+    if (h != null && !isNaN(h) && initialHeadingRef.current === null) initialHeadingRef.current = h;
+    if (currentPos && initialPosRef.current === null) {
+      initialPosRef.current = { lat: currentPos.lat, lon: currentPos.lon, accuracy: null, heading: null };
     }
+
     const init = initialHeadingRef.current ?? 0;
-    const current = h ?? init;
-    const rel = (init - current + 360) % 360;
-    const relRad = toRad(rel);
-    const x = MODEL_DISTANCE_M * Math.sin(relRad);
-    const z = -MODEL_DISTANCE_M * Math.cos(relRad);
-    targetOffsetRef.current.set(x, -EYE_HEIGHT_M, z);
-    setRelativeBearing(rel);
-  }, [heading]);
+    const currH = h ?? init;
+
+    if (initialPosRef.current && currentPos) {
+      const { distance: d, bearing: b } = computeDistanceBearing(initialPosRef.current, currentPos);
+      const cx = d * Math.sin(toRad(b));
+      const cz = -d * Math.cos(toRad(b));
+      const last = lastTargetRef.current;
+      const dist = Math.sqrt((cx - last.x) ** 2 + (cz - last.z) ** 2);
+      if (dist >= GPS_DEAD_ZONE_M) lastTargetRef.current.set(cx, 0, cz);
+      const t = GPS_LERP;
+      const L = lastTargetRef.current;
+      cameraWorldPosRef.current.set(
+        cameraWorldPosRef.current.x + (L.x - cameraWorldPosRef.current.x) * t,
+        0,
+        cameraWorldPosRef.current.z + (L.z - cameraWorldPosRef.current.z) * t
+      );
+      const dx = 0 - cx;
+      const dz = -MODEL_DISTANCE_M - cz;
+      setDistanceToModel(Math.sqrt(dx * dx + EYE_HEIGHT_M * EYE_HEIGHT_M + dz * dz));
+      const bearingToModel = (toDeg(Math.atan2(-cx, MODEL_DISTANCE_M + cz)) + 360) % 360;
+      const viewAngle = (currH - init + 360) % 360;
+      setRelativeBearing((bearingToModel - viewAngle + 360) % 360);
+    } else {
+      cameraWorldPosRef.current.set(0, 0, 0);
+      lastTargetRef.current.set(0, 0, 0);
+      setDistanceToModel(null);
+      const viewAngle = (currH - init + 360) % 360;
+      setRelativeBearing((0 - viewAngle + 360) % 360);
+    }
+  }, [currentPos, heading]);
 
   // Distance / cap vers la cible GPS (affichage seulement, le modèle n’utilise pas la cible).
   useEffect(() => {
@@ -168,32 +203,68 @@ const ArHandTracking: React.FC = () => {
     };
     window.addEventListener('resize', onResize);
 
+    const raycaster = new THREE.Raycaster();
+    const _ndc = new THREE.Vector2();
+    const _size = new THREE.Vector2();
+
     let rafId: number;
     const loop = (): void => {
       rafId = requestAnimationFrame(loop);
+      camera.position.copy(cameraWorldPosRef.current);
+
       const cm = customModelRef.current;
       if (cm && !modelRef.current && scene) {
         const m = cm.clone();
-        m.position.copy(targetOffsetRef.current);
+        m.position.copy(MODEL_WORLD_POS);
+        m.rotation.set(0, 0, 0);
         scene.add(m);
         modelRef.current = m;
       }
       const model = modelRef.current;
       if (model) {
-        model.position.copy(targetOffsetRef.current);
-        const head = headingRef.current;
-        if (head != null && !isNaN(head)) {
-          model.rotation.y = toRad(-head);
+        model.position.copy(MODEL_WORLD_POS);
+
+        // Interaction main : raycast index → modèle, drag pour rotation Y
+        const tips = handFingerTipsRef.current;
+        if (tips.length > 0 && renderer) {
+          renderer.getSize(_size);
+          const w = _size.x;
+          const h = _size.y;
+          if (w > 0 && h > 0) {
+            _ndc.x = (tips[0].x / w) * 2 - 1;
+            _ndc.y = 1 - (tips[0].y / h) * 2;
+            camera.updateMatrixWorld(true);
+            raycaster.setFromCamera(_ndc, camera);
+            const hits = raycaster.intersectObject(model, true);
+            if (hits.length > 0) {
+              const prev = previousTipXRef.current;
+              if (prev != null) {
+                modelUserRotationYRef.current += (tips[0].x - prev) * HAND_DRAG_RAD_PER_PX;
+              }
+              previousTipXRef.current = tips[0].x;
+            } else {
+              previousTipXRef.current = null;
+            }
+          }
         } else {
-          model.rotation.y += 0.005;
+          previousTipXRef.current = null;
         }
+        model.rotation.set(0, modelUserRotationYRef.current, 0);
       }
+
+      const initH = initialHeadingRef.current ?? 0;
+      const currH = headingRef.current ?? initH;
+      camera.rotation.order = 'YXZ';
+      // initH - currH : quand tu tournes à droite, la scène tourne à gauche → le modèle sort du côté opposé (il reste fixe en monde).
+      camera.rotation.y = toRad(initH - currH);
       const b = betaRef.current;
       const g = gammaRef.current;
       if (b != null && g != null && !isNaN(b) && !isNaN(g)) {
-        camera.rotation.order = 'YXZ';
-        // beta=90° = téléphone droit vers l'horizon → rotation.x=0 pour regarder l'horizon (plan XZ). Modèle au sol visible en bas du champ.
-        camera.rotation.x = toRad(b - 90);
+        let pitchDeg = b - 90;
+        if (pitchDeg > 180) pitchDeg -= 360;
+        if (pitchDeg < -180) pitchDeg += 360;
+        pitchDeg = Math.max(-PITCH_CLAMP_DEG, Math.min(PITCH_CLAMP_DEG, pitchDeg));
+        camera.rotation.x = toRad(pitchDeg);
         camera.rotation.z = toRad(-g);
       }
       if (renderer && scene && camera) {
@@ -240,6 +311,9 @@ const ArHandTracking: React.FC = () => {
       onStatusChange: setHandTrackingActive,
       onError: (msg) => {
         presentToast({ message: msg, duration: 4000, position: 'top', color: 'warning' });
+      },
+      onFingerTips: (tips) => {
+        handFingerTipsRef.current = tips;
       },
       drawVideo: false,
       scaleHandsToViewport: true,
@@ -319,7 +393,7 @@ const ArHandTracking: React.FC = () => {
               </div>
             </div>
           )}
-          {/* Flèche vers le modèle (5 m dans la direction du téléphone au chargement) */}
+          {/* Flèche vers le modèle (fixe) */}
           {relativeBearing != null && (
             <div
               style={{
@@ -434,7 +508,11 @@ const ArHandTracking: React.FC = () => {
                   <span style={{ color: '#ffc409' }}>Chargement…</span>
                 )}
               </div>
-              <div style={{ marginBottom: 2, fontSize: 10, opacity: 0.9 }}>Modèle : 5 m devant, posé au sol (devant = direction du téléphone au chargement)</div>
+              <div style={{ marginBottom: 2, fontSize: 10, opacity: 0.9 }}>Modèle fixe au sol à 5 m (pose au chargement). Approche/éloignement via GPS.</div>
+              <div style={{ marginBottom: 2, fontSize: 10, opacity: 0.9 }}>Interaction : viser l’objet avec l’index et déplacer la main pour le faire tourner.</div>
+              {distanceToModel != null && (
+                <div style={{ marginBottom: 2, fontSize: 10, opacity: 0.9 }}>À {distanceToModel.toFixed(1)} m du modèle</div>
+              )}
               <div style={{ marginBottom: 2, fontSize: 10, opacity: 0.9 }}>Cible GPS (optionnel, pour distance)</div>
               <div style={{ marginBottom: 2, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 <IonInput
@@ -464,9 +542,8 @@ const ArHandTracking: React.FC = () => {
               {(distance != null || bearing != null) && (
                 <div style={{ marginBottom: 4, fontSize: 10, opacity: 0.85 }}>
                   {distance != null && `Cible: ${distance.toFixed(1)} m`}
-                  {distance != null && ' · '}
-                  Modèle: {MODEL_DISTANCE_M} m
-                  {bearing != null && ` · Cap: ${bearing.toFixed(0)}°`}
+                  {distance != null && bearing != null && ' · '}
+                  {bearing != null && `Cap: ${bearing.toFixed(0)}°`}
                 </div>
               )}
               {!isRunning ? (

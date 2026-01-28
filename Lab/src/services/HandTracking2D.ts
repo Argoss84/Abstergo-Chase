@@ -6,6 +6,8 @@ export interface HandTracking2DCallbacks {
   onError?: (message: string) => void;
   /** Appelé quand la vidéo est prête (après play), pour l’utiliser en texture AR par ex. */
   onVideoReady?: (video: HTMLVideoElement) => void;
+  /** Bout des index en coord. écran (viewport), pour interaction 3D / raycast. Une entrée par main. */
+  onFingerTips?: (tips: Array<{ x: number; y: number }>) => void;
 }
 
 export interface HandTracking2DOptions extends HandTracking2DCallbacks {
@@ -158,6 +160,7 @@ export class HandTracking2D {
           ctx.clearRect(0, 0, w, h);
         }
         let hasAny = false;
+        const fingerTips: Array<{ x: number; y: number }> = [];
 
         for (const hand of hands) {
           const kps = hand.keypoints ?? [];
@@ -172,6 +175,8 @@ export class HandTracking2D {
           }
           if (byName.size === 0) continue;
           hasAny = true;
+          const idx = byName.get('index_finger_tip');
+          if (idx) fingerTips.push({ x: idx.x * sx, y: idx.y * sy });
 
           ctx.strokeStyle = hand.handedness === 'Left' ? '#0af' : '#fa0';
           ctx.lineWidth = 2;
@@ -201,6 +206,7 @@ export class HandTracking2D {
           this.hasDetectedHands = false;
           this.callbacks.onStatusChange?.(false);
         }
+        this.callbacks.onFingerTips?.(fingerTips);
       })
       .catch(() => {});
 
