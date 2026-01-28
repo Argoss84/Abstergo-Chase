@@ -95,7 +95,6 @@ const ArGps: React.FC = () => {
         const sceneManager = new SceneManager({
           onCubeColorChange: setCubeColor,
           onCubeRotationChange: setCubeRotation,
-          enableHandTracking: false,
         });
 
         sceneManager.init(

@@ -19,13 +19,14 @@ export class HandTracking2D {
   private rafId: number | null = null;
   private isRunning = false;
   private hasDetectedHands = false;
-  private flipHorizontal = true;
+  /** false pour caméra arrière (environment, image non miroir) ; true pour caméra frontale (selfie) */
+  private flipHorizontal = false;
 
   constructor(callbacks: HandTracking2DCallbacks = {}) {
     this.callbacks = callbacks;
   }
 
-  async start(container: HTMLElement): Promise<boolean> {
+  async start(container: HTMLElement, deviceId?: string): Promise<boolean> {
     if (this.isRunning) return true;
 
     try {
@@ -52,9 +53,13 @@ export class HandTracking2D {
     this.video.style.cssText = 'display:none;';
     container.appendChild(this.video);
 
+    const videoConstraints = deviceId
+      ? { deviceId: { exact: deviceId }, width: 640, height: 480 }
+      : { facingMode: 'environment', width: 640, height: 480 };
+
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: 640, height: 480 },
+        video: videoConstraints,
       });
     } catch (e) {
       const msg = 'Hand tracking: accès à la caméra refusé ou indisponible.';

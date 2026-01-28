@@ -1,4 +1,14 @@
-import { IonButton, IonContent, IonHeader, IonPage, IonTitle, IonToolbar, useIonToast } from '@ionic/react';
+import {
+  IonButton,
+  IonContent,
+  IonHeader,
+  IonPage,
+  IonSelect,
+  IonSelectOption,
+  IonTitle,
+  IonToolbar,
+  useIonToast,
+} from '@ionic/react';
 import { useEffect, useRef, useState } from 'react';
 import { HandTracking2D } from '../services/HandTracking2D';
 
@@ -8,6 +18,8 @@ const ArHandTracking: React.FC = () => {
 
   const [handTrackingActive, setHandTrackingActive] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
 
   const [presentToast] = useIonToast();
   const prevHandTrackingRef = useRef<boolean | null>(null);
@@ -38,7 +50,7 @@ const ArHandTracking: React.FC = () => {
       },
     });
 
-    const ok = await ht.start(containerRef.current);
+    const ok = await ht.start(containerRef.current, selectedDeviceId || undefined);
     if (ok) {
       handTrackingRef.current = ht;
       setIsRunning(true);
@@ -50,6 +62,10 @@ const ArHandTracking: React.FC = () => {
     handTrackingRef.current = null;
     setIsRunning(false);
     setHandTrackingActive(false);
+    // Ré-enumérer les caméras après arrêt (les libellés sont disponibles une fois la permission accordée)
+    navigator.mediaDevices?.enumerateDevices?.()?.then((devices) => {
+      setCameras(devices.filter((d) => d.kind === 'videoinput' && d.deviceId));
+    });
   };
 
   useEffect(() => {
@@ -57,6 +73,13 @@ const ArHandTracking: React.FC = () => {
   }, []);
 
   const canStart = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
+
+  useEffect(() => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    navigator.mediaDevices.enumerateDevices().then((devices) => {
+      setCameras(devices.filter((d) => d.kind === 'videoinput' && d.deviceId));
+    });
+  }, []);
 
   return (
     <IonPage>
@@ -99,6 +122,24 @@ const ArHandTracking: React.FC = () => {
                 maxWidth: 200,
               }}
             >
+              {!isRunning && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ marginBottom: 4, opacity: 0.9 }}>Caméra</div>
+                  <IonSelect
+                    value={selectedDeviceId}
+                    onIonChange={(e) => setSelectedDeviceId(e.detail.value ?? '')}
+                    interface="popover"
+                    style={{ minWidth: 160, '--background': 'rgba(40,40,40,0.95)', '--color': '#fff' } as React.CSSProperties}
+                  >
+                    <IonSelectOption value="">Par défaut</IonSelectOption>
+                    {cameras.map((cam) => (
+                      <IonSelectOption key={cam.deviceId} value={cam.deviceId}>
+                        {cam.label || `Caméra ${cam.deviceId.slice(0, 8)}`}
+                      </IonSelectOption>
+                    ))}
+                  </IonSelect>
+                </div>
+              )}
               <div style={{ marginBottom: 6 }}>
                 Mains : {handTrackingActive ? <span style={{ color: '#2dd36f' }}>détectées</span> : '—'}
               </div>

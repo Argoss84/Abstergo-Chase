@@ -1,12 +1,8 @@
 import * as THREE from 'three';
-import { HandTrackingManager } from './HandTrackingManager';
 
 export interface SceneManagerCallbacks {
   onCubeColorChange?: (color: number) => void;
   onCubeRotationChange?: (rotation: { x: number; y: number }) => void;
-  onHandTrackingStatusChange?: (isActive: boolean) => void;
-  onHandTrackingError?: (message: string) => void;
-  enableHandTracking?: boolean;
 }
 
 export class SceneManager {
@@ -19,7 +15,6 @@ export class SceneManager {
   private resizeHandler: (() => void) | null = null;
   private container: HTMLElement | null = null;
   private session: XRSession | null = null;
-  private handTrackingManager: HandTrackingManager | null = null;
 
   private targetOffset = new THREE.Vector3(0, 0, -2);
   private smoothedPosition = new THREE.Vector3(0, 0, -2);
@@ -148,15 +143,6 @@ export class SceneManager {
 
     renderer.xr.setSession(session);
 
-    if (this.callbacks.enableHandTracking !== false) {
-      this.handTrackingManager = new HandTrackingManager(scene, camera, {
-        onStatusChange: (isActive) =>
-          this.callbacks.onHandTrackingStatusChange?.(isActive),
-        onError: (msg) => this.callbacks.onHandTrackingError?.(msg),
-      });
-      void this.handTrackingManager.start(container);
-    }
-
     renderer.setAnimationLoop((time: number) => {
       if (this.object && this.camera) {
         const cube = this.object;
@@ -242,11 +228,6 @@ export class SceneManager {
 
     this.raycaster = null;
     this.controller = null;
-
-    if (this.handTrackingManager) {
-      this.handTrackingManager.cleanup();
-      this.handTrackingManager = null;
-    }
 
     this.renderer?.dispose();
     this.renderer = null;
