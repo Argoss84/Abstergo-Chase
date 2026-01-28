@@ -4,6 +4,15 @@ import { MEDIAPIPE_BONE_CONNECTIONS } from '../types/handTracking';
 export interface HandTracking2DCallbacks {
   onStatusChange?: (isActive: boolean) => void;
   onError?: (message: string) => void;
+  /** Appelé quand la vidéo est prête (après play), pour l’utiliser en texture AR par ex. */
+  onVideoReady?: (video: HTMLVideoElement) => void;
+}
+
+export interface HandTracking2DOptions extends HandTracking2DCallbacks {
+  /** Dessiner la vidéo sur le canvas (false = fond transparent, pour overlay AR). Défaut: true. */
+  drawVideo?: boolean;
+  /** Adapter le canvas au viewport et mettre à l’échelle les mains (pour overlay AR). Défaut: false. */
+  scaleHandsToViewport?: boolean;
 }
 
 /**
@@ -12,9 +21,12 @@ export interface HandTracking2DCallbacks {
  */
 export class HandTracking2D {
   private callbacks: HandTracking2DCallbacks;
+  private drawVideo: boolean;
+  private scaleHandsToViewport: boolean;
   private detector: handPoseDetection.HandDetector | null = null;
   private video: HTMLVideoElement | null = null;
   private canvas: HTMLCanvasElement | null = null;
+  private container: HTMLElement | null = null;
   private stream: MediaStream | null = null;
   private rafId: number | null = null;
   private isRunning = false;
@@ -22,12 +34,22 @@ export class HandTracking2D {
   /** false pour caméra arrière (environment, image non miroir) ; true pour caméra frontale (selfie) */
   private flipHorizontal = false;
 
-  constructor(callbacks: HandTracking2DCallbacks = {}) {
+  constructor(callbacks: HandTracking2DOptions = {}) {
     this.callbacks = callbacks;
+    this.drawVideo = callbacks.drawVideo !== false;
+    this.scaleHandsToViewport = callbacks.scaleHandsToViewport === true;
   }
 
-  async start(container: HTMLElement, deviceId?: string): Promise<boolean> {
+  async start(
+    container: HTMLElement,
+    deviceId?: string,
+    opts?: { videoContainer?: HTMLElement }
+  ): Promise<boolean> {
     if (this.isRunning) return true;
+
+    this.container = container;
+    const videoParent = opts?.videoContainer ?? container;
+    const showVideoAsLayer = !this.drawVideo && this.scaleHandsToViewport && !!opts?.videoContainer;
 
     try {
       this.detector = await handPoseDetection.createDetector(
@@ -50,8 +72,12 @@ export class HandTracking2D {
     this.video.playsInline = true;
     this.video.muted = true;
     this.video.setAttribute('playsinline', 'true');
-    this.video.style.cssText = 'display:none;';
-    container.appendChild(this.video);
+    if (showVideoAsLayer) {
+      this.video.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;';
+    } else {
+      this.video.style.cssText = 'display:none;';
+    }
+    videoParent.appendChild(this.video);
 
     const videoConstraints = deviceId
       ? { deviceId: { exact: deviceId }, width: 640, height: 480 }
@@ -78,8 +104,14 @@ export class HandTracking2D {
       return false;
     }
 
+    this.callbacks.onVideoReady?.(this.video);
+
     this.canvas = document.createElement('canvas');
-    this.canvas.style.cssText = 'max-width:100%; height:auto; display:block; background:#000;';
+    if (this.scaleHandsToViewport) {
+      this.canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:block;pointer-events:none;';
+    } else {
+      this.canvas.style.cssText = 'max-width:100%; height:auto; display:block; background:#000;';
+    }
     container.appendChild(this.canvas);
 
     this.isRunning = true;
@@ -96,12 +128,23 @@ export class HandTracking2D {
       return;
     }
 
-    const w = this.video.videoWidth;
-    const h = this.video.videoHeight;
+    const vw = this.video.videoWidth;
+    const vh = this.video.videoHeight;
+    let w: number;
+    let h: number;
+    if (this.scaleHandsToViewport && this.container) {
+      w = Math.max(1, this.container.clientWidth);
+      h = Math.max(1, this.container.clientHeight);
+    } else {
+      w = vw;
+      h = vh;
+    }
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
     }
+    const sx = this.scaleHandsToViewport ? w / vw : 1;
+    const sy = this.scaleHandsToViewport ? h / vh : 1;
 
     this.detector
       .estimateHands(this.video, { flipHorizontal: this.flipHorizontal, staticImageMode: false })
@@ -109,7 +152,11 @@ export class HandTracking2D {
         const ctx = this.canvas!.getContext('2d');
         if (!ctx) return;
 
-        ctx.drawImage(this.video!, 0, 0);
+        if (this.drawVideo) {
+          ctx.drawImage(this.video!, 0, 0);
+        } else {
+          ctx.clearRect(0, 0, w, h);
+        }
         let hasAny = false;
 
         for (const hand of hands) {
@@ -133,8 +180,8 @@ export class HandTracking2D {
             const pb = byName.get(b);
             if (pa && pb) {
               ctx.beginPath();
-              ctx.moveTo(pa.x, pa.y);
-              ctx.lineTo(pb.x, pb.y);
+              ctx.moveTo(pa.x * sx, pa.y * sy);
+              ctx.lineTo(pb.x * sx, pb.y * sy);
               ctx.stroke();
             }
           }
@@ -142,7 +189,7 @@ export class HandTracking2D {
           ctx.fillStyle = hand.handedness === 'Left' ? '#0af' : '#fa0';
           for (const [, p] of byName) {
             ctx.beginPath();
-            ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+            ctx.arc(p.x * sx, p.y * sy, 4, 0, Math.PI * 2);
             ctx.fill();
           }
         }
@@ -172,6 +219,7 @@ export class HandTracking2D {
     this.stop();
     this.detector?.dispose?.();
     this.detector = null;
+    this.container = null;
     if (this.stream) {
       this.stream.getTracks().forEach((t) => t.stop());
       this.stream = null;

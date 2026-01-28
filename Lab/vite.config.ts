@@ -8,8 +8,15 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [
     react(),
-    legacy()
+    legacy({ renderLegacyChunks: false }), // désactivé pour n'avoir qu'un seul JS ; remettre true pour support navigateurs anciens
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: () => 'index',
+      },
+    },
+  },
   test: {
     globals: true,
     environment: 'jsdom',
