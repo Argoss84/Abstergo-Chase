@@ -30,6 +30,9 @@ function disposeObject3D(obj: THREE.Object3D): void {
   });
 }
 
+const MODEL_DISTANCE_M = 5;
+const EYE_HEIGHT_M = 1.6; // hauteur des yeux → sol à -EYE_HEIGHT_M
+
 const ArHandTracking: React.FC = () => {
   const videoContainerRef = useRef<HTMLDivElement | null>(null);
   const threeContainerRef = useRef<HTMLDivElement | null>(null);
@@ -41,8 +44,9 @@ const ArHandTracking: React.FC = () => {
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const modelRef = useRef<THREE.Object3D | null>(null);
   const headingRef = useRef<number | null>(null);
+  const initialHeadingRef = useRef<number | null>(null);
   const customModelRef = useRef<THREE.Group | null>(null);
-  const targetOffsetRef = useRef(new THREE.Vector3(0, 0, -2));
+  const targetOffsetRef = useRef(new THREE.Vector3(0, -EYE_HEIGHT_M, -MODEL_DISTANCE_M));
 
   const [handTrackingActive, setHandTrackingActive] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
@@ -59,7 +63,7 @@ const ArHandTracking: React.FC = () => {
 
   const { currentPos, geoStatus } = useGeolocation();
   const { customModel, modelFileName, modelLoadError } = useModelLoader();
-  const { heading, compassEnabled, requestCompass } = useCompass((err) => {
+  const { heading, compassEnabled, requestCompass, betaRef, gammaRef } = useCompass((err) => {
     presentToast({ message: err, duration: 3000, position: 'top', color: 'warning' });
   });
 
@@ -85,27 +89,33 @@ const ArHandTracking: React.FC = () => {
     return { lat, lon, accuracy: null, heading: null };
   }, [targetLat, targetLon]);
 
-  const MODEL_DISTANCE_M = 2;
+  // Modèle à 5 m au sol : "devant" = direction du téléphone au chargement. y=-EYE_HEIGHT_M = posé par terre.
+  useEffect(() => {
+    const h = heading ?? null;
+    if (h != null && !isNaN(h) && initialHeadingRef.current === null) {
+      initialHeadingRef.current = h;
+    }
+    const init = initialHeadingRef.current ?? 0;
+    const current = h ?? init;
+    const rel = (init - current + 360) % 360;
+    const relRad = toRad(rel);
+    const x = MODEL_DISTANCE_M * Math.sin(relRad);
+    const z = -MODEL_DISTANCE_M * Math.cos(relRad);
+    targetOffsetRef.current.set(x, -EYE_HEIGHT_M, z);
+    setRelativeBearing(rel);
+  }, [heading]);
 
+  // Distance / cap vers la cible GPS (affichage seulement, le modèle n’utilise pas la cible).
   useEffect(() => {
     if (!currentPos || !targetPos) {
-      targetOffsetRef.current.set(0, 0, -2);
-      setRelativeBearing(null);
       setDistance(null);
       setBearing(null);
       return;
     }
     const { distance: d, bearing: b } = computeDistanceBearing(currentPos, targetPos);
-    const headingDeg = heading ?? currentPos.heading ?? 0;
-    const rel = (b - headingDeg + 360) % 360;
-    const relRad = toRad(rel);
-    const x = MODEL_DISTANCE_M * Math.sin(relRad);
-    const z = -MODEL_DISTANCE_M * Math.cos(relRad);
-    targetOffsetRef.current.set(x, 0, z);
     setDistance(d);
     setBearing(b);
-    setRelativeBearing(rel);
-  }, [currentPos, targetPos, heading]);
+  }, [currentPos, targetPos]);
 
   useEffect(() => {
     if (prevHandTrackingRef.current === null) {
@@ -177,6 +187,14 @@ const ArHandTracking: React.FC = () => {
         } else {
           model.rotation.y += 0.005;
         }
+      }
+      const b = betaRef.current;
+      const g = gammaRef.current;
+      if (b != null && g != null && !isNaN(b) && !isNaN(g)) {
+        camera.rotation.order = 'YXZ';
+        // beta=90° = téléphone droit vers l'horizon → rotation.x=0 pour regarder l'horizon (plan XZ). Modèle au sol visible en bas du champ.
+        camera.rotation.x = toRad(b - 90);
+        camera.rotation.z = toRad(-g);
       }
       if (renderer && scene && camera) {
         renderer.render(scene, camera);
@@ -301,7 +319,7 @@ const ArHandTracking: React.FC = () => {
               </div>
             </div>
           )}
-          {/* Flèche vers le modèle (à 2 m dans la direction de la cible GPS) */}
+          {/* Flèche vers le modèle (5 m dans la direction du téléphone au chargement) */}
           {relativeBearing != null && (
             <div
               style={{
@@ -416,7 +434,8 @@ const ArHandTracking: React.FC = () => {
                   <span style={{ color: '#ffc409' }}>Chargement…</span>
                 )}
               </div>
-              <div style={{ marginBottom: 2, fontSize: 10, opacity: 0.9 }}>Cible GPS (comme WebXR)</div>
+              <div style={{ marginBottom: 2, fontSize: 10, opacity: 0.9 }}>Modèle : 5 m devant, posé au sol (devant = direction du téléphone au chargement)</div>
+              <div style={{ marginBottom: 2, fontSize: 10, opacity: 0.9 }}>Cible GPS (optionnel, pour distance)</div>
               <div style={{ marginBottom: 2, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 <IonInput
                   type="number"

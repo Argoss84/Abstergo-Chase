@@ -5,6 +5,8 @@ export const useCompass = (onError?: (error: string) => void) => {
   const [compassEnabled, setCompassEnabled] = useState(false);
   const orientationHandlerRef = useRef<((event: DeviceOrientationEvent) => void) | null>(null);
   const smoothedHeadingRef = useRef<number | null>(null);
+  const betaRef = useRef<number | null>(null);
+  const gammaRef = useRef<number | null>(null);
 
   const requestCompass = useCallback(async () => {
     if (compassEnabled) {
@@ -28,6 +30,8 @@ export const useCompass = (onError?: (error: string) => void) => {
       }
 
       const handler = (event: DeviceOrientationEvent) => {
+        if (event.beta != null && !isNaN(event.beta)) betaRef.current = event.beta;
+        if (event.gamma != null && !isNaN(event.gamma)) gammaRef.current = event.gamma;
         const webkitHeading = (event as DeviceOrientationEvent & { webkitCompassHeading?: number })
           .webkitCompassHeading;
         if (typeof webkitHeading === 'number' && !isNaN(webkitHeading)) {
@@ -85,9 +89,24 @@ export const useCompass = (onError?: (error: string) => void) => {
     };
   }, []);
 
+  useEffect(() => {
+    const onOrientation = (e: DeviceOrientationEvent) => {
+      if (e.beta != null && !isNaN(e.beta)) betaRef.current = e.beta;
+      if (e.gamma != null && !isNaN(e.gamma)) gammaRef.current = e.gamma;
+    };
+    window.addEventListener('deviceorientation', onOrientation, true);
+    window.addEventListener('deviceorientationabsolute', onOrientation, true);
+    return () => {
+      window.removeEventListener('deviceorientation', onOrientation, true);
+      window.removeEventListener('deviceorientationabsolute', onOrientation, true);
+    };
+  }, []);
+
   return {
     heading,
     compassEnabled,
     requestCompass,
+    betaRef,
+    gammaRef,
   };
 };
