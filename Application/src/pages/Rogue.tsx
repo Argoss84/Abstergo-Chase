@@ -39,8 +39,15 @@ import {
   COMPASS_DEFAULT_LONGITUDE,
   QR_CODE_SIZE,
   DEFAULT_ROGUE_RANGE,
-  getRandomPlayerLogo
 } from '../ressources/DefaultValues';
+
+const ROGUE_MARKER = 'RogueMarker.png';
+const AGENT_MARKER = 'AgentMarker.png';
+
+const getMarkerForRole = (role: string | null | undefined): string => {
+  const r = (role || '').trim().toUpperCase();
+  return r === 'ROGUE' ? ROGUE_MARKER : AGENT_MARKER;
+};
 
 const Rogue: React.FC = () => {
   const history = useHistory();
@@ -81,8 +88,8 @@ const Rogue: React.FC = () => {
   // Référence pour la carte
   const mapRef = useRef<L.Map | null>(null);
   
-  // Logo du joueur (choisi aléatoirement parmi les 6 disponibles)
-  const [playerLogo, setPlayerLogo] = useState<string>('joueur_1.png');
+  // Logo du joueur (marker Rogue)
+  const playerLogo = ROGUE_MARKER;
   
   // État pour les boutons FAB
   const [isFabOpen, setIsFabOpen] = useState(false);
@@ -114,12 +121,6 @@ const Rogue: React.FC = () => {
   // État pour la modal de démarrage de partie
   const [isGameStartModalOpen, setIsGameStartModalOpen] = useState(false);
   const gameStartModalShownRef = useRef(false);
-
-  const getPlayerLogo = useCallback((playerIdValue: string) => {
-    const hash = Array.from(playerIdValue).reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const logoNumber = (hash % 6) + 1;
-    return `joueur_${logoNumber}.png`;
-  }, []);
 
   const isPlayerVisible = useCallback((player: Player) => {
     if (player.status === 'disconnected') return false;
@@ -528,9 +529,6 @@ const Rogue: React.FC = () => {
   };
 
   useEffect(() => {
-    // Choisir un logo de joueur aléatoirement
-    setPlayerLogo(getRandomPlayerLogo());
-    
     // Get initial position
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
@@ -964,7 +962,7 @@ const Rogue: React.FC = () => {
                       key={`player-${player.id_player}`}
                       position={position}
                       type="player"
-                      playerLogo={getPlayerLogo(player.id_player)}
+                      playerLogo={getMarkerForRole(player.role)}
                       id={`player-${player.id_player}`}
                       label={player.displayName || player.id_player}
                       role={player.role}

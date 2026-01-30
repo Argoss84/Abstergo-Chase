@@ -10,7 +10,7 @@ const logoAssets = import.meta.glob('../ressources/logo/*.png', {
 
 const getLogoUrl = (filename: string) =>
   logoAssets[`../ressources/logo/${filename}`] ||
-  logoAssets['../ressources/logo/joueur_1.png'];
+  logoAssets['../ressources/logo/AgentMarker.png'];
 
 interface PopUpMarkerProps {
   position: [number, number];
@@ -30,7 +30,7 @@ const PopUpMarker: React.FC<PopUpMarkerProps> = ({
   position, 
   type, 
   data, 
-  playerLogo = 'joueur_1.png',
+  playerLogo = 'AgentMarker.png',
   id,
   label,
   role,

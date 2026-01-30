@@ -41,8 +41,9 @@ import {
   QR_CODE_SIZE,
   OBJECTIVE_CIRCLES_SYNC_COOLDOWN_MS,
   DEFAULT_AGENT_RANGE,
-  getRandomPlayerLogo
 } from '../ressources/DefaultValues';
+
+const AGENT_MARKER = 'AgentMarker.png';
 
 const Agent: React.FC = () => {
   const history = useHistory();
@@ -96,8 +97,8 @@ const Agent: React.FC = () => {
   // Référence pour la carte
   const mapRef = useRef<L.Map | null>(null);
   
-  // Logo du joueur (choisi aléatoirement parmi les 6 disponibles)
-  const [playerLogo, setPlayerLogo] = useState<string>('joueur_1.png');
+  // Logo du joueur (marker Agent)
+  const playerLogo = AGENT_MARKER;
 
   // Wake Lock pour empêcher l'écran de se mettre en veille
   useWakeLock(true);
@@ -114,12 +115,6 @@ const Agent: React.FC = () => {
   // État pour la modal de démarrage de partie
   const [isGameStartModalOpen, setIsGameStartModalOpen] = useState(false);
   const gameStartModalShownRef = useRef(false);
-
-  const getPlayerLogo = useCallback((playerIdValue: string) => {
-    const hash = Array.from(playerIdValue).reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const logoNumber = (hash % 6) + 1;
-    return `joueur_${logoNumber}.png`;
-  }, []);
 
   const isPlayerVisible = useCallback((player: Player) => {
     if (player.status === 'disconnected') return false;
@@ -482,9 +477,6 @@ const Agent: React.FC = () => {
   }, [gameDetails?.started, gameDetails?.countdown_started, gameDetails?.duration, gameDetails?.remaining_time, isCountdownActive, isHost]);
 
   useEffect(() => {
-    // Choisir un logo de joueur aléatoirement
-    setPlayerLogo(getRandomPlayerLogo());
-    
     // Get initial position
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
@@ -942,7 +934,7 @@ const Agent: React.FC = () => {
                       key={`player-${player.id_player}`}
                       position={position}
                       type="player"
-                      playerLogo={getPlayerLogo(player.id_player)}
+                      playerLogo={AGENT_MARKER}
                       id={`player-${player.id_player}`}
                       label={player.displayName || player.id_player}
                       role={player.role}

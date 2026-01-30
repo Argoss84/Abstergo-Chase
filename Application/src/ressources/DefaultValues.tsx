@@ -76,9 +76,6 @@ export const SOCKET_TIMEOUT = 20000;
 export const OBJECTIVE_CIRCLES_SYNC_COOLDOWN_MS = 5000; // 5 secondes entre chaque demande de resync
 export const STATUS_UPDATE_THROTTLE_MS = 1000; // 1 seconde entre chaque mise à jour de statut
 
-// ===== VALEURS PAR DÉFAUT POUR LES LOGOS =====
-export const PLAYER_LOGO_COUNT = 6; // Nombre de logos de joueurs disponibles
-
 // ===== SERVEURS ICE (WebRTC) =====
 export const DEFAULT_STUN_SERVER = 'stun:stun.l.google.com:19302';
 
@@ -100,19 +97,3 @@ export const generateDefaultPlayerName = () => {
   return `Joueur-${Math.floor(Math.random() * 9999)}`;
 };
 
-/**
- * Sélectionne aléatoirement un logo de joueur
- */
-export const getRandomPlayerLogo = () => {
-  const logoNumber = Math.floor(Math.random() * PLAYER_LOGO_COUNT) + 1;
-  return `joueur_${logoNumber}.png`;
-};
-
-/**
- * Calcule le logo d'un joueur basé sur son ID
- */
-export const getPlayerLogoFromId = (playerId: string) => {
-  const hash = Array.from(playerId).reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const logoNumber = (hash % PLAYER_LOGO_COUNT) + 1;
-  return `joueur_${logoNumber}.png`;
-};
