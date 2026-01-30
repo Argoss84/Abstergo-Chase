@@ -145,6 +145,22 @@
   box-shadow: 0 0 12px rgba(0, 255, 122, 0.55), inset 0 0 10px rgba(0, 255, 122, 0.2);
 }
 
+/* Halo rouge autour des agents (visible uniquement pour les rogues) */
+.cyber-marker-agent-halo {
+  box-shadow: 0 0 8px rgba(255, 0, 0, 0.9), 0 0 16px rgba(255, 0, 0, 0.6), 0 0 24px rgba(255, 0, 0, 0.4), inset 0 0 8px rgba(255, 0, 0, 0.15) !important;
+  border: 2px solid rgba(255, 0, 0, 0.7) !important;
+  animation: agentHaloPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes agentHaloPulse {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(255, 0, 0, 0.9), 0 0 16px rgba(255, 0, 0, 0.6), 0 0 24px rgba(255, 0, 0, 0.4), inset 0 0 8px rgba(255, 0, 0, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(255, 0, 0, 1), 0 0 24px rgba(255, 0, 0, 0.7), 0 0 36px rgba(255, 0, 0, 0.5), inset 0 0 10px rgba(255, 0, 0, 0.2);
+  }
+}
+
 .cyber-marker-player {
   width: 34px;
   height: 34px;

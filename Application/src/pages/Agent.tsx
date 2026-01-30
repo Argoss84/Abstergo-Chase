@@ -7,7 +7,7 @@ import L from 'leaflet';
 
 import { toast } from 'react-toastify';
 import { 
-  generateRandomPointInCircle, 
+  generateRandomPointInAnnulus, 
   fetchRoute, 
   calculateDistanceToStartZone, 
   isPlayerInStartZone 
@@ -383,12 +383,11 @@ const Agent: React.FC = () => {
     }
   }, [gameDetails?.objective_circles, objectiveCirclesInitialized, applyObjectiveCircles, gameCode]);
 
-  // Si on est un joueur non-host, demander un resync si les cercles manquent
+  // Si on est un joueur non-host, demander un resync si les cercles manquent (phase de convergence ou partie démarrée)
   useEffect(() => {
     if (isHost) return;
     if (objectiveCirclesInitialized) return;
-    // Les cercles doivent être synchronisés quand la partie démarre vraiment
-    const shouldSync = gameDetails?.started && gameDetails?.countdown_started;
+    const shouldSync = gameDetails?.is_converging_phase || (gameDetails?.started && gameDetails?.countdown_started);
     if (!shouldSync) return;
     if (gameDetails?.objective_circles && gameDetails.objective_circles.length > 0) return;
 
@@ -400,16 +399,16 @@ const Agent: React.FC = () => {
   }, [
     isHost,
     objectiveCirclesInitialized,
+    gameDetails?.is_converging_phase,
     gameDetails?.started,
     gameDetails?.countdown_started,
     gameDetails?.objective_circles,
     requestLatestState
   ]);
 
-  // Calculer les cercles d'objectifs une seule fois au démarrage de la partie (host)
+  // Créer les cercles d'objectifs une seule fois (host) : dès la phase de convergence, partagés dans les données de jeu
   useEffect(() => {
-    // Les cercles doivent apparaître quand la partie démarre vraiment (started=true et countdown_started=true)
-    const shouldInitialize = gameDetails?.started && gameDetails?.countdown_started;
+    const shouldInitialize = gameDetails?.is_converging_phase || (gameDetails?.started && gameDetails?.countdown_started);
     
     if (!isHost || !shouldInitialize || !gameDetails?.props || !gameCode || objectiveCirclesInitialized) {
       return;
@@ -426,23 +425,31 @@ const Agent: React.FC = () => {
       return;
     }
 
-    const circles = gameDetails.props.map((prop: GameProp) => ({
-      id_prop: prop.id_prop,
-      center: generateRandomPointInCircle(
-        [parseFloat(prop.latitude || '0'), parseFloat(prop.longitude || '0')],
-        prop.detection_radius || 0
-      ),
-      radius: prop.detection_radius || 0
-    }));
+    const circles = gameDetails.props.map((prop: GameProp) => {
+      const objectiveCenter: [number, number] = [
+        parseFloat(prop.latitude || '0'),
+        parseFloat(prop.longitude || '0')
+      ];
+      const radius = prop.detection_radius || 0;
+      // Centre du cercle affiché dans un anneau autour de l'objectif : objectif à l'intérieur mais jamais au centre
+      const minOffset = Math.max(5, radius * 0.1);
+      const displayCenter = radius > minOffset
+        ? generateRandomPointInAnnulus(objectiveCenter, minOffset, radius)
+        : objectiveCenter;
+      return {
+        id_prop: prop.id_prop,
+        center: displayCenter,
+        radius
+      };
+    });
     applyObjectiveCircles(circles, gameCode);
     updateGameDetails({ objective_circles: circles });
-  }, [isHost, gameDetails?.started, gameDetails?.countdown_started, gameDetails?.props, objectiveCirclesInitialized, gameCode, applyObjectiveCircles, updateGameDetails]);
+  }, [isHost, gameDetails?.is_converging_phase, gameDetails?.started, gameDetails?.countdown_started, gameDetails?.props, objectiveCirclesInitialized, gameCode, applyObjectiveCircles, updateGameDetails]);
 
-  // Fallback: afficher des cercles basés sur les props si l'état n'est pas encore synchronisé
+  // Fallback: afficher des cercles basés sur les props si l'état n'est pas encore synchronisé (phase de convergence ou partie démarrée)
   useEffect(() => {
     if (objectiveCirclesInitialized) return;
-    // Les cercles doivent apparaître quand la partie démarre vraiment
-    const shouldShow = gameDetails?.started && gameDetails?.countdown_started;
+    const shouldShow = gameDetails?.is_converging_phase || (gameDetails?.started && gameDetails?.countdown_started);
     if (!shouldShow) return;
     if (objectiveCircles.length > 0) return;
     if (!gameDetails?.props || gameDetails.props.length === 0) return;
@@ -453,6 +460,7 @@ const Agent: React.FC = () => {
   }, [
     objectiveCirclesInitialized,
     objectiveCircles.length,
+    gameDetails?.is_converging_phase,
     gameDetails?.started,
     gameDetails?.countdown_started,
     gameDetails?.props,
@@ -469,10 +477,6 @@ const Agent: React.FC = () => {
       if (totalSeconds > 0) {
         setCountdown(totalSeconds);
         setIsCountdownActive(true);
-        
-        // Réinitialiser les cercles d'objectifs pour forcer une nouvelle initialisation
-        setObjectiveCirclesInitialized(false);
-        objectiveCirclesBootstrapRef.current = false;
       }
     }
   }, [gameDetails?.started, gameDetails?.countdown_started, gameDetails?.duration, gameDetails?.remaining_time, isCountdownActive, isHost]);
@@ -906,16 +910,17 @@ const Agent: React.FC = () => {
                   />
                 </>
               )}
+              {/* Cercles d'objectifs (partagés par le host, affichés dès la phase de convergence) */}
               {objectiveCircles
                 .filter(isObjectiveCircleVisible)
                 .map((circle) => (
-                <Circle
-                  key={circle.id_prop}
-                  center={circle.center}
-                  radius={circle.radius}
-                  pathOptions={getObjectiveCirclePathOptions(circle)}
-                />
-              ))}
+                  <Circle
+                    key={circle.id_prop}
+                    center={circle.center}
+                    radius={circle.radius}
+                    pathOptions={getObjectiveCirclePathOptions(circle)}
+                  />
+                ))}
               {currentPosition && (
                 <PopUpMarker
                   position={currentPosition}
@@ -995,7 +1000,7 @@ const Agent: React.FC = () => {
                     color: "#0066ff"
                   }]
                 : []),
-              // Cercles d'objectifs (centres des cercles)
+              // Cercles d'objectifs (centres)
               ...objectiveCircles
                 .filter(isObjectiveCircleVisible)
                 .filter(circle => circle.radius > 0)

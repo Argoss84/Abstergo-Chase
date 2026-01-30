@@ -320,6 +320,29 @@ export const generateRandomPointInCircle = (center: [number, number], radius: nu
   return [lat, lng];
 };
 
+/**
+ * Génère un point aléatoire dans un anneau (annulus) autour du centre.
+ * Garantit que l'objectif (centre) sera à l'intérieur d'un cercle de rayon outerRadiusMeters
+ * tracé autour du point retourné, mais jamais au centre (distance >= innerRadiusMeters).
+ * Utilisé pour placer le centre affiché des cercles d'objectifs.
+ */
+export const generateRandomPointInAnnulus = (
+  center: [number, number],
+  innerRadiusMeters: number,
+  outerRadiusMeters: number
+): [number, number] => {
+  if (innerRadiusMeters >= outerRadiusMeters) {
+    return center;
+  }
+  const angle = Math.random() * 2 * Math.PI;
+  // Distribution uniforme en surface dans l'anneau : r² uniforme dans [inner², outer²]
+  const inner2 = innerRadiusMeters * innerRadiusMeters;
+  const outer2 = outerRadiusMeters * outerRadiusMeters;
+  const r = Math.sqrt(inner2 + Math.random() * (outer2 - inner2));
+  const pointMeters = { x: r * Math.cos(angle), y: r * Math.sin(angle) };
+  return toLatLng(pointMeters, center);
+};
+
 // Fonction pour calculer la distance entre deux points géographiques
 export const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
   const R = 6371e3; // Rayon de la Terre en mètres

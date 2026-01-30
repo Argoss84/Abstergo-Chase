@@ -6,7 +6,6 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { toast } from 'react-toastify';
 import { 
-  generateRandomPointInCircle, 
   calculateDistanceToStartZone, 
   isPlayerInStartZone,
   fetchRoute
@@ -126,7 +125,8 @@ const Rogue: React.FC = () => {
     if (player.status === 'disconnected') return false;
     if (player.status === 'CAPTURED') return false;
     const role = (player.role || '').trim().toUpperCase();
-    if (role !== 'ROGUE') return false;
+    // Les rogues voient les autres rogues et les agents
+    if (role !== 'ROGUE' && role !== 'AGENT') return false;
     return true;
   }, []);
 
@@ -958,6 +958,7 @@ const Rogue: React.FC = () => {
                 .map((player) => {
                   const position = getPlayerMarkerPosition(player);
                   if (!position) return null;
+                  const isAgent = (player.role || '').trim().toUpperCase() === 'AGENT';
                   return (
                     <PopUpMarker
                       key={`player-${player.id_player}`}
@@ -969,6 +970,7 @@ const Rogue: React.FC = () => {
                       role={player.role}
                       status={player.status}
                       isSelf={false}
+                      showAgentHalo={isAgent}
                     />
                   );
                 })}

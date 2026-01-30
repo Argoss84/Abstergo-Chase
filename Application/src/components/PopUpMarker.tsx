@@ -22,6 +22,8 @@ interface PopUpMarkerProps {
   role?: string | null;
   status?: string | null;
   isSelf?: boolean;
+  /** Halo rouge autour des agents (visible uniquement pour les rogues) */
+  showAgentHalo?: boolean;
 }
 
 const PopUpMarker: React.FC<PopUpMarkerProps> = ({ 
@@ -33,7 +35,8 @@ const PopUpMarker: React.FC<PopUpMarkerProps> = ({
   label,
   role,
   status,
-  isSelf = false
+  isSelf = false,
+  showAgentHalo = false
 }) => {
   // Configuration des icônes selon le type
   const getIconConfig = () => {
@@ -76,9 +79,10 @@ const PopUpMarker: React.FC<PopUpMarkerProps> = ({
         };
       case 'player': {
         const logoUrl = getLogoUrl(playerLogo);
+        const haloClass = showAgentHalo ? ' cyber-marker-agent-halo' : '';
         return {
           html: `
-            <div class="cyber-marker cyber-marker-player">
+            <div class="cyber-marker cyber-marker-player${haloClass}">
               <img src="${logoUrl}" class="cyber-marker-avatar" />
               <span class="cyber-marker-ring"></span>
               <span class="cyber-marker-pulse"></span>
@@ -208,7 +212,8 @@ const arePlayerMarkersEqual = (
     prev.label === next.label &&
     prev.role === next.role &&
     prev.status === next.status &&
-    prev.isSelf === next.isSelf
+    prev.isSelf === next.isSelf &&
+    prev.showAgentHalo === next.showAgentHalo
   );
 };
 
