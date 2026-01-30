@@ -47,7 +47,7 @@ import SplashScreenAgentImg from '../ressources/splashScreen/SplashScreenAgent.p
 
 const AGENT_MARKER = 'AgentMarker.png';
 
-const SPLASH_MIN_DISPLAY_MS = 1200;
+const SPLASH_MIN_DISPLAY_MS = 3000;
 
 const Agent: React.FC = () => {
   const history = useHistory();
@@ -826,6 +826,50 @@ const Agent: React.FC = () => {
 
   return (
     <IonPage>
+      {/* Splash en premier : couvre toute la page (header + content), min 5 s avant erreur ou jeu */}
+      {isSplashVisible && (
+        <div
+          className="game-splash-overlay"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 10000,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: '#0a0a0f',
+            overflow: 'hidden',
+          }}
+        >
+          <img
+            src={SplashScreenAgentImg}
+            alt="Agents"
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+              objectPosition: 'center',
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              bottom: '24px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              color: 'rgba(56, 128, 255, 0.9)',
+              fontSize: '14px',
+              fontWeight: 600,
+            }}
+          >
+            <span style={{ animation: 'splash-pulse 1.2s ease-in-out infinite' }}>Connexion en cours</span>
+          </div>
+        </div>
+      )}
       <IonHeader>
         <IonToolbar>
           <IonTitle>Agent</IonTitle>
@@ -846,51 +890,6 @@ const Agent: React.FC = () => {
         </IonToolbar>
       </IonHeader>
       <IonContent>
-        {/* Splash screen pendant le chargement (Lobby → Agent) */}
-        {isSplashVisible && (
-          <div
-            className="game-splash-overlay"
-            style={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: 10000,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: '#0a0a0f',
-              overflow: 'hidden',
-            }}
-          >
-            <img
-              src={SplashScreenAgentImg}
-              alt="Agents"
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'contain',
-                objectPosition: 'center',
-              }}
-            />
-            <div
-              style={{
-                position: 'absolute',
-                bottom: '24px',
-                left: '50%',
-                transform: 'translateX(-50%)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                color: 'rgba(56, 128, 255, 0.9)',
-                fontSize: '14px',
-                fontWeight: 600,
-              }}
-            >
-              <span style={{ animation: 'splash-pulse 1.2s ease-in-out infinite' }}>Connexion en cours</span>
-            </div>
-          </div>
-        )}
-
         {error ? (
           <p>{error}</p>
         ) : gameDetails ? (

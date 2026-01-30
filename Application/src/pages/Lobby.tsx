@@ -85,6 +85,18 @@ const Lobby: React.FC = () => {
   const [copySuccess, setCopySuccess] = useState(false);
   const modalOpenRef = useRef<'details' | 'chat' | 'qr' | null>(null);
   const fromPopstateRef = useRef(false);
+  const lobbyNotFoundTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const LOBBY_NOT_FOUND_DELAY_MS = 3000;
+
+  useEffect(() => {
+    return () => {
+      if (lobbyNotFoundTimeoutRef.current) {
+        clearTimeout(lobbyNotFoundTimeoutRef.current);
+        lobbyNotFoundTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   useWakeLock(true);
   const { vibrate, patterns } = useVibration();
@@ -224,10 +236,19 @@ const Lobby: React.FC = () => {
             await joinLobby(code);
             vibrate(patterns.short);
           } catch (err) {
-            // Vérifier si c'est une erreur de lobby inexistant
+            // Ne pas afficher "lobby n'existe plus" quand la partie se lance (redirection vers agent/rogue en cours)
+            if (gameDetails?.is_converging_phase && currentPlayer?.role) {
+              setIsLoading(false);
+              return;
+            }
+            // Vérifier si c'est une erreur de lobby inexistant : attendre 3 s avant d'afficher l'erreur
             const errorMessage = err instanceof Error ? err.message : String(err);
             if (errorMessage.includes('Lobby introuvable') || errorMessage.includes('inexistant')) {
-              setError(`Le lobby "${code}" n'existe pas ou a été fermé.`);
+              if (lobbyNotFoundTimeoutRef.current) clearTimeout(lobbyNotFoundTimeoutRef.current);
+              lobbyNotFoundTimeoutRef.current = setTimeout(() => {
+                lobbyNotFoundTimeoutRef.current = null;
+                setError(`Le lobby "${code}" n'existe pas ou a été fermé.`);
+              }, LOBBY_NOT_FOUND_DELAY_MS);
             } else {
               await handleErrorWithUser('Impossible de rejoindre le lobby', err, ERROR_CONTEXTS.LOBBY_INIT);
             }
@@ -334,6 +355,10 @@ const Lobby: React.FC = () => {
 
   useEffect(() => {
     if (gameDetails?.is_converging_phase && currentPlayer?.role) {
+      if (lobbyNotFoundTimeoutRef.current) {
+        clearTimeout(lobbyNotFoundTimeoutRef.current);
+        lobbyNotFoundTimeoutRef.current = null;
+      }
       if (currentPlayer.role === 'AGENT') {
         history.push(`/agent?code=${gameDetails.code}`);
       } else if (currentPlayer.role === 'ROGUE') {
@@ -472,7 +497,7 @@ const Lobby: React.FC = () => {
             progress={connectionStatus === 'connecting' ? 60 : 50} 
             showSpinner={true} 
           />
-        ) : error ? (
+        ) : error && !(gameDetails?.is_converging_phase && currentPlayer?.role) ? (
           <>
             <IonCard color={error.includes("n'existe pas") || error.includes("fermé") ? "danger" : "warning"} style={{ margin: '1rem' }}>
               <IonCardHeader>
