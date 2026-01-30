@@ -41,7 +41,10 @@ import {
   DEFAULT_ROGUE_RANGE,
 } from '../ressources/DefaultValues';
 
+import SplashScreenRogueImg from '../ressources/splashScreen/SplashScreenRogue.png';
+
 const ROGUE_MARKER = 'RogueMarker.png';
+const SPLASH_MIN_DISPLAY_MS = 1200;
 const AGENT_MARKER = 'AgentMarker.png';
 
 const getMarkerForRole = (role: string | null | undefined): string => {
@@ -121,6 +124,10 @@ const Rogue: React.FC = () => {
   // État pour la modal de démarrage de partie
   const [isGameStartModalOpen, setIsGameStartModalOpen] = useState(false);
   const gameStartModalShownRef = useRef(false);
+
+  // Splash screen pendant le chargement (Lobby → Rogue)
+  const [isSplashVisible, setIsSplashVisible] = useState(true);
+  const splashMountedAtRef = useRef(Date.now());
 
   const isPlayerVisible = useCallback((player: Player) => {
     if (player.status === 'disconnected') return false;
@@ -504,6 +511,18 @@ const Rogue: React.FC = () => {
     }
   }, [sessionGameDetails, isHost]);
 
+  // Masquer le splash quand la partie est prête (gameDetails chargé ou erreur) après un délai minimum
+  useEffect(() => {
+    const readyToHide = gameDetails !== null || error !== null;
+    if (!readyToHide) return;
+
+    const elapsed = Date.now() - splashMountedAtRef.current;
+    const remaining = Math.max(0, SPLASH_MIN_DISPLAY_MS - elapsed);
+
+    const t = setTimeout(() => setIsSplashVisible(false), remaining);
+    return () => clearTimeout(t);
+  }, [gameDetails, error]);
+
 
 
   // Handler pour la fin de partie
@@ -834,6 +853,51 @@ const Rogue: React.FC = () => {
         </IonToolbar>
       </IonHeader>
       <IonContent>
+        {/* Splash screen pendant le chargement (Lobby → Rogue) */}
+        {isSplashVisible && (
+          <div
+            className="game-splash-overlay"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 10000,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: '#0a0a0f',
+              overflow: 'hidden',
+            }}
+          >
+            <img
+              src={SplashScreenRogueImg}
+              alt="Renégat"
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                objectPosition: 'center',
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '24px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                color: 'rgba(255, 140, 0, 0.9)',
+                fontSize: '14px',
+                fontWeight: 600,
+              }}
+            >
+              <span style={{ animation: 'splash-pulse 1.2s ease-in-out infinite' }}>Connexion en cours</span>
+            </div>
+          </div>
+        )}
+
         {error ? (
           <p>{error}</p>
         ) : gameDetails ? (

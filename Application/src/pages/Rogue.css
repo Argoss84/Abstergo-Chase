@@ -601,3 +601,9 @@
   font-size: 0.8rem;
   color: #999;
 }
+
+/* Splash screen overlay (Lobby → Rogue) */
+@keyframes splash-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
