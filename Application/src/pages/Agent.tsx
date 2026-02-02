@@ -338,7 +338,7 @@ const Agent: React.FC = () => {
 
         const needsReconnect =
           sessionScope !== 'game' ||
-          connectionStatus !== 'connected' ||
+          (connectionStatus !== 'connected' && connectionStatus !== 'connecting') ||
           !sessionGameDetails ||
           sessionGameDetails.code !== code;
 

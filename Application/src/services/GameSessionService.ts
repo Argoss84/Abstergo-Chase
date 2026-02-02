@@ -118,32 +118,43 @@ class GameSessionService {
       window.addEventListener('visibilitychange', () => {
         // Gérer le changement de visibilité de la page
         if (!document.hidden) {
-          // Quand l'utilisateur revient sur la page
+          // Quand l'utilisateur revient sur la page (déverrouillage)
           if ((this.state.lobbyCode || this.state.gameCode) && this.state.playerId) {
-            // D'abord vérifier la connexion socket avant de mettre à jour le statut
-            if (!this.socket?.connected) {
-              // Ne pas déclencher de reconnexion pour le host si le socket se reconnecte automatiquement
-              // Socket.io va gérer la reconnexion automatiquement
-              console.log('Socket en cours de reconnexion automatique...');
-            } else {
-              // Socket connecté, mettre à jour le statut à "active"
+            let resumeAttempts = 0;
+            const MAX_RESUME_ATTEMPTS = 20; // ~10 secondes max
+            const tryResume = () => {
+              if (!this.socket?.connected) {
+                if (resumeAttempts++ < MAX_RESUME_ATTEMPTS) {
+                  setTimeout(tryResume, 500);
+                }
+                return;
+              }
+              // Socket connecté
               this.updatePlayerStatus('active');
-              
-              // Vérifier que tout est synchronisé
               if (this.state.isHost) {
-                // Pour le host, rétablir les connexions WebRTC si nécessaire
-                if (this.dataChannels.size === 0 && this.state.players.length > 1) {
+                // Host : vérifier si des canaux WebRTC sont ouverts
+                // (les canaux peuvent être fermés quand le téléphone est verrouillé)
+                const peerIds = (this.state.players || [])
+                  .filter(p => p.id_player !== this.state.playerId)
+                  .map(p => p.id_player);
+                const openChannels = Array.from(this.dataChannels.entries())
+                  .filter(([, dc]) => dc.readyState === 'open').length;
+                const needsReestablish = peerIds.length > 0 && openChannels === 0;
+                if (needsReestablish) {
                   this.reestablishAllPeerConnections();
                 }
               } else {
-                this.requestResync('visibilitychange');
+                // Non-host : demander un resync si le canal host est fermé
+                if (!this.hostChannel || this.hostChannel.readyState !== 'open') {
+                  this.requestResync('visibilitychange');
+                }
               }
-            }
+            };
+            tryResume();
           }
         } else {
-          // Quand l'utilisateur quitte la page - marquer comme away
+          // Quand l'utilisateur quitte la page (verrouillage) - marquer comme away
           if ((this.state.lobbyCode || this.state.gameCode) && this.state.playerId) {
-            // Mettre à jour le statut à "away" (via WebRTC ET socket.io)
             this.updatePlayerStatus('away');
           }
         }
@@ -1302,6 +1313,7 @@ class GameSessionService {
       }
     };
     channel.onclose = () => {
+      this.dataChannels.delete(peerId);
       if (isHostChannel) {
         this.hostChannel = null;
         this.requestResync('datachannel-closed');

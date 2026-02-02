@@ -83,11 +83,14 @@ const Lobby: React.FC = () => {
   const [errorCount, setErrorCount] = useState(0);
   const [isPageVisible, setIsPageVisible] = useState(!document.hidden);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [syncButtonReady, setSyncButtonReady] = useState(false);
   const modalOpenRef = useRef<'details' | 'chat' | 'qr' | null>(null);
   const fromPopstateRef = useRef(false);
   const lobbyNotFoundTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncDelayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const LOBBY_NOT_FOUND_DELAY_MS = 3000;
+  const SYNC_BUTTON_DELAY_MS = 5000;
 
   useEffect(() => {
     return () => {
@@ -95,8 +98,36 @@ const Lobby: React.FC = () => {
         clearTimeout(lobbyNotFoundTimeoutRef.current);
         lobbyNotFoundTimeoutRef.current = null;
       }
+      if (syncDelayTimeoutRef.current) {
+        clearTimeout(syncDelayTimeoutRef.current);
+        syncDelayTimeoutRef.current = null;
+      }
     };
   }, []);
+
+  // Délai de 5 s avant d'afficher le bouton de synchronisation (depuis JoinLobby)
+  const isWaitingForSync = connectionStatus === 'connected' && !!lobbyCode && !gameDetails;
+  useEffect(() => {
+    if (!isWaitingForSync) {
+      setSyncButtonReady(false);
+      if (syncDelayTimeoutRef.current) {
+        clearTimeout(syncDelayTimeoutRef.current);
+        syncDelayTimeoutRef.current = null;
+      }
+      return;
+    }
+    setSyncButtonReady(false);
+    syncDelayTimeoutRef.current = setTimeout(() => {
+      syncDelayTimeoutRef.current = null;
+      setSyncButtonReady(true);
+    }, SYNC_BUTTON_DELAY_MS);
+    return () => {
+      if (syncDelayTimeoutRef.current) {
+        clearTimeout(syncDelayTimeoutRef.current);
+        syncDelayTimeoutRef.current = null;
+      }
+    };
+  }, [isWaitingForSync]);
 
   useWakeLock(true);
   const { vibrate, patterns } = useVibration();
@@ -1215,25 +1246,33 @@ const Lobby: React.FC = () => {
               </IonContent>
             </IonModal>
           </>
-        ) : connectionStatus === 'connected' && lobbyCode ? (
-          <IonCard style={{ margin: '1rem' }}>
-            <IonCardHeader>
-              <IonCardTitle>En attente des données du lobby...</IonCardTitle>
-            </IonCardHeader>
-            <IonCardContent>
-              <IonText>
-                <p>Connexion établie. En attente de la synchronisation des données du lobby.</p>
-              </IonText>
-              <IonButton 
-                expand="block" 
-                color="primary"
-                onClick={() => requestLatestState()} 
-                style={{ marginTop: '1rem' }}
-              >
-                🔄 Demander la synchronisation
-              </IonButton>
-            </IonCardContent>
-          </IonCard>
+        ) : isWaitingForSync ? (
+          syncButtonReady ? (
+            <IonCard style={{ margin: '1rem' }}>
+              <IonCardHeader>
+                <IonCardTitle>En attente des données du lobby...</IonCardTitle>
+              </IonCardHeader>
+              <IonCardContent>
+                <IonText>
+                  <p>Connexion établie. En attente de la synchronisation des données du lobby.</p>
+                </IonText>
+                <IonButton 
+                  expand="block" 
+                  color="primary"
+                  onClick={() => requestLatestState()} 
+                  style={{ marginTop: '1rem' }}
+                >
+                  🔄 Demander la synchronisation
+                </IonButton>
+              </IonCardContent>
+            </IonCard>
+          ) : (
+            <Loading 
+              message="Synchronisation des données du lobby..." 
+              progress={50} 
+              showSpinner={true} 
+            />
+          )
         ) : null}
       </IonContent>
     </IonPage>

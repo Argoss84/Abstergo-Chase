@@ -31,6 +31,14 @@ interface DeviceOrientationData {
   gamma: number;
 }
 
+/** Calcule le delta angulaire le plus court entre prev et next (en degrés 0-360) */
+const shortestAngleDelta = (prev: number, next: number): number => {
+  let delta = next - prev;
+  if (delta > 180) delta -= 360;
+  if (delta < -180) delta += 360;
+  return delta;
+};
+
 const Compass: React.FC<CompassProps> = ({
   targetPoints = [],
   currentPosition,
@@ -42,6 +50,9 @@ const Compass: React.FC<CompassProps> = ({
   const [deviceOrientation, setDeviceOrientation] = useState<DeviceOrientationData | null>(null);
   const [compassHeading, setCompassHeading] = useState<number>(0);
   const requestRef = useRef<number | undefined>(undefined);
+  /** Valeur "déroulée" pour éviter les sauts à la traversée du Nord (0°/360°) */
+  const unwrappedHeadingRef = useRef<number>(0);
+  const isFirstHeadingRef = useRef<boolean>(true);
 
   // Calculer le bearing vers la cible
   const calculateBearing = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -102,12 +113,18 @@ const Compass: React.FC<CompassProps> = ({
         };
         setDeviceOrientation(orientationData);
         
-        const heading = calculateCompassHeading(
+        const rawHeading = calculateCompassHeading(
           orientationData.alpha,
           orientationData.beta,
           orientationData.gamma
         );
-        setCompassHeading(heading);
+        const prev = unwrappedHeadingRef.current;
+        const prevNormalized = ((prev % 360) + 360) % 360;
+        const delta = shortestAngleDelta(prevNormalized, rawHeading);
+        const newUnwrapped = isFirstHeadingRef.current ? rawHeading : prev + delta;
+        isFirstHeadingRef.current = false;
+        unwrappedHeadingRef.current = newUnwrapped;
+        setCompassHeading(newUnwrapped);
       }
     };
 
