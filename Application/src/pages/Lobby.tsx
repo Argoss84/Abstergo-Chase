@@ -39,6 +39,34 @@ import Loading from '../components/Loading';
 import { useGameSession } from '../contexts/GameSessionContext';
 import QRCode from '../components/QRCode';
 
+const OBJECTIVE_NAMES = [
+  'Serveur de données',
+  'Cache secret',
+  'Base de repli',
+  'Point de contact',
+  'Relais de communication',
+  'Coffre-fort numérique',
+  'Zone d\'extraction',
+  'Poste de commande',
+  'Antenne relais',
+  'Bunker caché',
+  'Centre de contrôle',
+  'Dépôt sécurisé',
+  'Point de rendez-vous',
+  'Station d\'écoute',
+  'Archive confidentielle',
+  'Terminal de liaison',
+  'Refuge temporaire',
+  'Nœud de réseau',
+  'Salle des serveurs',
+  'Point de chute',
+];
+
+const pickRandomObjectives = (count: number): string[] => {
+  const shuffled = [...OBJECTIVE_NAMES].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, Math.min(count, shuffled.length));
+};
+
 const ResizeMap = () => {
   const map = useMap();
   useEffect(() => {
@@ -136,6 +164,11 @@ const Lobby: React.FC = () => {
     () => players.find((player) => player.id_player === playerId),
     [players, playerId]
   );
+
+  const randomObjectiveNames = useMemo(() => {
+    const count = gameDetails?.objectif_number ?? 0;
+    return count > 0 ? pickRandomObjectives(count) : [];
+  }, [gameDetails?.objectif_number]);
 
   const msgs = lobbyChatMessages ?? [];
   const unreadCount = isChatModalOpen ? 0 : Math.max(0, msgs.length - lastReadCount);
@@ -1193,6 +1226,18 @@ const Lobby: React.FC = () => {
                       <p>{gameDetails.objectif_number}</p>
                     </IonLabel>
                   </IonItem>
+                  {randomObjectiveNames.length > 0 && (
+                    <IonItem>
+                      <IonLabel>
+                        <h2>Noms des objectifs</h2>
+                        <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
+                          {randomObjectiveNames.map((name, i) => (
+                            <li key={i} style={{ marginBottom: '4px' }}>{name}</li>
+                          ))}
+                        </ul>
+                      </IonLabel>
+                    </IonItem>
+                  )}
                   <IonItem>
                     <IonLabel>
                       <h2>Durée</h2>
