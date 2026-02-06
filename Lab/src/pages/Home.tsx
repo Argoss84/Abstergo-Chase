@@ -15,6 +15,9 @@ const Home: React.FC = () => {
           <IonButton routerLink="/db-test" expand="block">
             Test MySQL
           </IonButton>
+          <IonButton routerLink="/test-crud" expand="block">
+            CRUD Table test
+          </IonButton>
         </div>
       </IonContent>
     </IonPage>
