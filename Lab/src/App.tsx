@@ -4,6 +4,7 @@ import { IonReactRouter } from '@ionic/react-router';
 import Home from './pages/Home';
 import ArGps from './pages/ArGps';
 import ArHandTracking from './pages/ArHandTracking';
+import DbTest from './pages/DbTest';
 
 /* Core CSS required for Ionic components to work properly */
 import '@ionic/react/css/core.css';
@@ -49,6 +50,9 @@ const App: React.FC = () => (
         </Route>
         <Route exact path="/ar-hands">
           <ArHandTracking />
+        </Route>
+        <Route exact path="/db-test">
+          <DbTest />
         </Route>
       </IonRouterOutlet>
     </IonReactRouter>

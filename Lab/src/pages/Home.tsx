@@ -12,6 +12,9 @@ const Home: React.FC = () => {
           <IonButton routerLink="/ar-hands" expand="block">
             Détection des mains
           </IonButton>
+          <IonButton routerLink="/db-test" expand="block">
+            Test MySQL
+          </IonButton>
         </div>
       </IonContent>
     </IonPage>
