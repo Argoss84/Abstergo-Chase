@@ -1,0 +1,25 @@
+# Configuration Apache pour WebSocket sur O2Switch
+# À placer dans le dossier public de votre application
+
+RewriteEngine On
+
+# Activer le proxy WebSocket
+RewriteCond %{HTTP:Upgrade} =websocket [NC]
+RewriteRule /(.*)           ws://localhost:5174/$1 [P,L]
+
+# Rediriger le reste en HTTP normal
+RewriteCond %{HTTP:Upgrade} !=websocket [NC]
+RewriteRule /(.*)           http://localhost:5174/$1 [P,L]
+
+# Configuration du proxy
+<IfModule mod_proxy.c>
+    ProxyPreserveHost On
+    ProxyRequests Off
+    
+    # Timeouts pour WebSocket
+    ProxyTimeout 86400
+    
+    # Headers
+    RequestHeader set X-Forwarded-Proto "https"
+    RequestHeader set X-Forwarded-Port "443"
+</IfModule>

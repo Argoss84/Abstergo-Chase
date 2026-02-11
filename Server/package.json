@@ -1,0 +1,26 @@
+{
+  "name": "abstergo-chase-server",
+  "version": "1.0.0",
+  "description": "Serveur de signalisation WebRTC pour Abstergo Chase",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "websocket",
+    "webrtc",
+    "signaling",
+    "server"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "socket.io": "^4.8.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

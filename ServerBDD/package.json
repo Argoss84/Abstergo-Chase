@@ -1,0 +1,27 @@
+{
+  "name": "abstergo-chase-serverbdd",
+  "version": "1.0.0",
+  "description": "Serveur API pour la base de données MySQL/MariaDB (Abstergo Chase)",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "mysql",
+    "mariadb",
+    "api",
+    "database"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "express": "^4.21.0",
+    "mysql2": "^3.16.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

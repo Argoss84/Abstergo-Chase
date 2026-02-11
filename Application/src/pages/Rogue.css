@@ -1,0 +1,609 @@
+/* Map container styles */
+.map-container {
+  height: calc(100vh - 56px);
+  width: 100%;
+  position: relative;
+}
+
+.map-container .leaflet-container {
+  height: 100%;
+  width: 100%;
+}
+
+/* Style futuriste pour l'affichage de la durée dans le header */
+.duration-display {
+  background: linear-gradient(135deg, #ff6b35, #f7931e);
+  color: white;
+  padding: 6px 16px;
+  border-radius: 25px;
+  font-weight: bold;
+  font-size: 16px;
+  box-shadow: 0 4px 15px rgba(255, 107, 53, 0.4);
+  animation: durationGlow 3s ease-in-out infinite;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+}
+
+@keyframes durationGlow {
+  0% {
+    box-shadow: 0 4px 15px rgba(255, 107, 53, 0.4);
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+  }
+  50% {
+    box-shadow: 0 6px 25px rgba(255, 107, 53, 0.7), 0 0 30px rgba(255, 107, 53, 0.3);
+    text-shadow: 0 0 15px rgba(255, 255, 255, 1), 0 0 25px rgba(255, 255, 255, 0.5);
+  }
+  100% {
+    box-shadow: 0 4px 15px rgba(255, 107, 53, 0.4);
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+  }
+}
+
+/* Style pour le compte à rebours actif */
+.duration-display.countdown-active {
+  background: linear-gradient(135deg, #ff4757, #ff3838);
+  animation: countdownPulse 1s ease-in-out infinite;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+}
+
+@keyframes countdownPulse {
+  0% {
+    box-shadow: 0 4px 15px rgba(255, 71, 87, 0.4);
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+  }
+  50% {
+    box-shadow: 0 6px 25px rgba(255, 71, 87, 0.8), 0 0 40px rgba(255, 71, 87, 0.5);
+    text-shadow: 0 0 20px rgba(255, 255, 255, 1), 0 0 30px rgba(255, 255, 255, 0.8);
+  }
+  100% {
+    box-shadow: 0 4px 15px rgba(255, 71, 87, 0.4);
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+  }
+}
+
+/* Style pour le compteur de distance dans le header */
+.distance-counter {
+  background: linear-gradient(135deg, #00ff41, #00cc33);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-weight: bold;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(0, 255, 65, 0.3);
+  animation: pulse 2s ease-in-out infinite;
+  margin-right: 16px;
+}
+
+/* Cyberpunk marker styles */
+.custom-div-icon {
+  background: transparent;
+  border: none;
+}
+
+.cyber-marker {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 10, 20, 0.85);
+  border: 1px solid rgba(0, 255, 154, 0.35);
+  box-shadow: 0 0 10px rgba(0, 255, 154, 0.35), inset 0 0 8px rgba(0, 255, 154, 0.2);
+  color: #00ff9a;
+}
+
+.cyber-marker-core {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 10px currentColor;
+  z-index: 2;
+}
+
+.cyber-marker-glow,
+.cyber-marker-pulse,
+.cyber-marker-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+
+.cyber-marker-glow {
+  box-shadow: 0 0 12px currentColor;
+  opacity: 0.6;
+}
+
+.cyber-marker-pulse {
+  border: 1px solid currentColor;
+  animation: cyberPulse 1.6s ease-out infinite;
+  opacity: 0.8;
+}
+
+.cyber-marker-objective {
+  color: #d14cff;
+  border-color: rgba(209, 76, 255, 0.6);
+  box-shadow: 0 0 12px rgba(209, 76, 255, 0.55), inset 0 0 10px rgba(209, 76, 255, 0.2);
+}
+
+.cyber-marker-start {
+  color: #00b3ff;
+  border-color: rgba(0, 179, 255, 0.6);
+  box-shadow: 0 0 12px rgba(0, 179, 255, 0.55), inset 0 0 10px rgba(0, 179, 255, 0.2);
+}
+
+.cyber-marker-rogue {
+  color: #00ff7a;
+  border-color: rgba(0, 255, 122, 0.6);
+  box-shadow: 0 0 12px rgba(0, 255, 122, 0.55), inset 0 0 10px rgba(0, 255, 122, 0.2);
+}
+
+/* Halo rouge autour des agents (visible uniquement pour les rogues) */
+.cyber-marker-agent-halo {
+  box-shadow: 0 0 8px rgba(255, 0, 0, 0.9), 0 0 16px rgba(255, 0, 0, 0.6), 0 0 24px rgba(255, 0, 0, 0.4), inset 0 0 8px rgba(255, 0, 0, 0.15) !important;
+  border: 2px solid rgba(255, 0, 0, 0.7) !important;
+  animation: agentHaloPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes agentHaloPulse {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(255, 0, 0, 0.9), 0 0 16px rgba(255, 0, 0, 0.6), 0 0 24px rgba(255, 0, 0, 0.4), inset 0 0 8px rgba(255, 0, 0, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(255, 0, 0, 1), 0 0 24px rgba(255, 0, 0, 0.7), 0 0 36px rgba(255, 0, 0, 0.5), inset 0 0 10px rgba(255, 0, 0, 0.2);
+  }
+}
+
+.cyber-marker-player {
+  width: 34px;
+  height: 34px;
+  color: #00e5ff;
+  border-color: rgba(0, 229, 255, 0.7);
+  box-shadow: 0 0 14px rgba(0, 229, 255, 0.6), inset 0 0 12px rgba(0, 229, 255, 0.25);
+}
+
+.cyber-marker-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 229, 255, 0.75);
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.5);
+  z-index: 2;
+}
+
+.cyber-marker-ring {
+  border: 1px dashed rgba(0, 229, 255, 0.7);
+  animation: cyberSpin 6s linear infinite;
+  opacity: 0.7;
+}
+
+.cyber-marker-default {
+  color: #7f8ea3;
+  border-color: rgba(127, 142, 163, 0.6);
+  box-shadow: 0 0 8px rgba(127, 142, 163, 0.4), inset 0 0 6px rgba(127, 142, 163, 0.2);
+}
+
+@keyframes cyberPulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  70% {
+    transform: scale(1.65);
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes cyberSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Cyberpunk popup styles */
+.leaflet-popup-content-wrapper {
+  background: linear-gradient(135deg, #05070f, #0b1326);
+  border-radius: 10px;
+  border: 1px solid rgba(0, 255, 154, 0.45);
+  box-shadow: 0 0 20px rgba(0, 255, 154, 0.35), inset 0 0 16px rgba(0, 255, 154, 0.12);
+  color: #e6f7ff;
+  font-family: "Courier New", monospace;
+}
+
+.leaflet-popup-content {
+  margin: 10px 12px;
+}
+
+.leaflet-popup-tip {
+  background: #0b1326;
+  border: 1px solid rgba(0, 255, 154, 0.45);
+  box-shadow: 0 0 12px rgba(0, 255, 154, 0.4);
+}
+
+.leaflet-popup-close-button {
+  color: #00ff9a !important;
+  text-shadow: 0 0 6px rgba(0, 255, 154, 0.8);
+}
+
+.objective-popup,
+.start-zone-popup,
+.start-zone-rogue-popup,
+.player-popup,
+.default-popup {
+  text-align: left;
+  min-width: 210px;
+}
+
+.objective-popup h3,
+.start-zone-popup h3,
+.start-zone-rogue-popup h3,
+.player-popup h3,
+.default-popup h3 {
+  margin: 0 0 8px 0;
+  font-size: 15px;
+  letter-spacing: 0.5px;
+}
+
+.objective-popup p,
+.start-zone-popup p,
+.start-zone-rogue-popup p,
+.player-popup p,
+.default-popup p {
+  margin: 4px 0;
+  font-size: 12px;
+  color: #b9c7d9;
+}
+
+.objective-popup strong,
+.start-zone-popup strong,
+.start-zone-rogue-popup strong,
+.player-popup strong,
+.default-popup strong {
+  color: #e6f7ff;
+  font-weight: 700;
+}
+
+.cyber-popup-objective .objective-popup h3 {
+  color: #d14cff;
+}
+
+.cyber-popup-start-zone .start-zone-popup h3 {
+  color: #00b3ff;
+}
+
+.cyber-popup-start-zone-rogue .start-zone-rogue-popup h3 {
+  color: #00ff7a;
+}
+
+.cyber-popup-player .player-popup h3 {
+  color: #00e5ff;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 2px 8px rgba(0, 255, 65, 0.3);
+  }
+  50% {
+    box-shadow: 0 4px 16px rgba(0, 255, 65, 0.6);
+  }
+  100% {
+    box-shadow: 0 2px 8px rgba(0, 255, 65, 0.3);
+  }
+}
+
+/* Animation pour l'effet néon pulsant sur la route */
+@keyframes neonPulse {
+  0% {
+    opacity: 0.3;
+    filter: drop-shadow(0 0 5px #008000) drop-shadow(0 0 10px #008000);
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 10px #008000) drop-shadow(0 0 20px #008000) drop-shadow(0 0 30px #008000);
+  }
+  100% {
+    opacity: 0.3;
+    filter: drop-shadow(0 0 5px #008000) drop-shadow(0 0 10px #008000);
+  }
+}
+
+.neon-pulse-route {
+  animation: neonPulse 2s ease-in-out infinite;
+}
+
+/* Style spécifique pour la ligne de route avec effet néon */
+.leaflet-interactive.neon-pulse-route {
+  stroke: #008000 !important;
+  stroke-width: 2px !important;
+  filter: drop-shadow(0 0 3px #008000);
+}
+
+/* Routine controls styles */
+.routine-interval-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.routine-status-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.routine-info {
+  font-size: 0.9em;
+  color: #666;
+}
+
+.routine-player-info {
+  font-size: 0.9em;
+  color: #666;
+  margin-top: 10px;
+}
+
+.routine-user-info {
+  font-size: 0.9em;
+  color: #666;
+  margin-top: 10px;
+}
+
+.routine-updates-info {
+  font-size: 0.9em;
+  color: #666;
+  margin-top: 10px;
+  padding: 8px;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+}
+
+/* Effet pulse glow rouge pour le bouton radioOutline quand un objectif est à portée */
+.objective-in-range {
+  animation: objectivePulseGlow 1.5s ease-in-out infinite !important;
+  box-shadow: 0 0 20px rgba(255, 0, 0, 0.8) !important;
+  border: 2px solid rgba(255, 0, 0, 0.6) !important;
+  border-radius: 50% !important;
+}
+
+@keyframes objectivePulseGlow {
+  0% {
+    box-shadow: 0 0 20px rgba(255, 0, 0, 0.8);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(255, 0, 0, 1), 0 0 60px rgba(255, 0, 0, 0.6);
+    transform: scale(1.1);
+  }
+  100% {
+    box-shadow: 0 0 20px rgba(255, 0, 0, 0.8);
+    transform: scale(1);
+  }
+}
+
+/* Style pour l'icône à l'intérieur du bouton quand un objectif est à portée */
+.objective-in-range ion-icon {
+  color: #ff0000 !important;
+  filter: drop-shadow(0 0 8px rgba(255, 0, 0, 0.8));
+}
+
+/* Style pour le bouton quand une capture est en cours */
+.capture-in-progress {
+  opacity: 0.5 !important;
+  pointer-events: none !important;
+  animation: capturePulse 2s ease-in-out infinite !important;
+}
+
+@keyframes capturePulse {
+  0%, 100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.05);
+  }
+}
+
+.capture-in-progress ion-icon {
+  color: #666 !important;
+  filter: none !important;
+}
+
+/* Styles pour le toast hacker agressif */
+.hacker-toast-container {
+  background: linear-gradient(135deg, #000000, #1a1a1a) !important;
+  border: 2px solid #00ff41 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 0 30px rgba(0, 255, 65, 0.8), inset 0 0 20px rgba(0, 255, 65, 0.1) !important;
+  color: #00ff41 !important;
+  font-family: 'Courier New', monospace !important;
+  font-weight: bold !important;
+  text-transform: uppercase !important;
+  letter-spacing: 1px !important;
+  animation: hackerGlow 2s ease-in-out infinite !important;
+}
+
+@keyframes hackerGlow {
+  0% {
+    box-shadow: 0 0 30px rgba(0, 255, 65, 0.8), inset 0 0 20px rgba(0, 255, 65, 0.1);
+    border-color: #00ff41;
+  }
+  50% {
+    box-shadow: 0 0 50px rgba(0, 255, 65, 1), 0 0 80px rgba(0, 255, 65, 0.5), inset 0 0 30px rgba(0, 255, 65, 0.2);
+    border-color: #00ff00;
+  }
+  100% {
+    box-shadow: 0 0 30px rgba(0, 255, 65, 0.8), inset 0 0 20px rgba(0, 255, 65, 0.1);
+    border-color: #00ff41;
+  }
+}
+
+.hacker-toast {
+  padding: 15px;
+  min-width: 300px;
+  text-align: center;
+}
+
+.hacker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+  padding: 10px;
+  background: linear-gradient(90deg, rgba(0, 255, 65, 0.1), rgba(0, 255, 65, 0.2), rgba(0, 255, 65, 0.1));
+  border-radius: 5px;
+  border: 1px solid rgba(0, 255, 65, 0.3);
+}
+
+.hacker-icon {
+  font-size: 20px;
+  animation: hackerIconPulse 1s ease-in-out infinite;
+}
+
+@keyframes hackerIconPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.8;
+  }
+}
+
+.hacker-title {
+  font-size: 14px;
+  font-weight: bold;
+  text-shadow: 0 0 10px rgba(0, 255, 65, 0.8);
+  animation: hackerTextGlow 1.5s ease-in-out infinite;
+}
+
+@keyframes hackerTextGlow {
+  0%, 100% {
+    text-shadow: 0 0 10px rgba(0, 255, 65, 0.8);
+  }
+  50% {
+    text-shadow: 0 0 20px rgba(0, 255, 65, 1), 0 0 30px rgba(0, 255, 65, 0.6);
+  }
+}
+
+.hacker-progress {
+  margin: 15px 0;
+}
+
+.hacker-progress-bar {
+  width: 100%;
+  height: 8px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(0, 255, 65, 0.5);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.hacker-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00ff41, #00cc33, #00ff41);
+  width: 0%;
+  animation: hackerProgressFill linear forwards;
+  box-shadow: 0 0 10px rgba(0, 255, 65, 0.8);
+}
+
+@keyframes hackerProgressFill {
+  0% {
+    width: 0%;
+  }
+  100% {
+    width: 100%;
+  }
+}
+
+.hacker-status {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #00ff41;
+  text-shadow: 0 0 5px rgba(0, 255, 65, 0.8);
+  animation: hackerStatusBlink 1s ease-in-out infinite;
+}
+
+@keyframes hackerStatusBlink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.hacker-timer {
+  margin-top: 10px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  border: 1px solid rgba(0, 255, 65, 0.3);
+}
+
+.hacker-time {
+  font-size: 16px;
+  font-weight: bold;
+  color: #00ff41;
+  text-shadow: 0 0 8px rgba(0, 255, 65, 0.8);
+  animation: hackerTimePulse 1s ease-in-out infinite;
+}
+
+@keyframes hackerTimePulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+/* Styles pour la modal QR Code */
+.qr-modal-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.qr-modal-title {
+  text-align: center;
+  margin-bottom: 1rem;
+}
+
+.qr-modal-email {
+  text-align: center;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.qr-modal-code {
+  text-align: center;
+  font-size: 0.8rem;
+  color: #999;
+}
+
+/* Splash screen overlay (Lobby → Rogue) */
+@keyframes splash-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
