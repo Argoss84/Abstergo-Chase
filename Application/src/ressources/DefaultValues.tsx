@@ -67,7 +67,7 @@ export const COMPASS_DEFAULT_LONGITUDE = 2.3522;
 export const QR_CODE_SIZE = 300; // Taille du QR code en pixels
 
 // ===== PARAMÈTRES DE RECONNEXION =====
-export const SOCKET_RECONNECTION_ATTEMPTS = 10;
+export const SOCKET_RECONNECTION_ATTEMPTS = Infinity; // Toujours réessayer la reconnexion transport
 export const SOCKET_RECONNECTION_DELAY = 1000;
 export const SOCKET_RECONNECTION_DELAY_MAX = 5000;
 export const SOCKET_TIMEOUT = 20000;

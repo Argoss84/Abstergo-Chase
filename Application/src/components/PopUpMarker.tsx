@@ -24,6 +24,8 @@ interface PopUpMarkerProps {
   isSelf?: boolean;
   /** Halo rouge autour des agents (visible uniquement pour les rogues) */
   showAgentHalo?: boolean;
+  /** Cap de l'appareil en degrés (0 = Nord). Affiche une flèche directionnelle si fourni. */
+  heading?: number | null;
 }
 
 const PopUpMarker: React.FC<PopUpMarkerProps> = ({ 
@@ -36,7 +38,8 @@ const PopUpMarker: React.FC<PopUpMarkerProps> = ({
   role,
   status,
   isSelf = false,
-  showAgentHalo = false
+  showAgentHalo = false,
+  heading = null
 }) => {
   // Configuration des icônes selon le type
   const getIconConfig = () => {
@@ -80,9 +83,13 @@ const PopUpMarker: React.FC<PopUpMarkerProps> = ({
       case 'player': {
         const logoUrl = getLogoUrl(playerLogo);
         const haloClass = showAgentHalo ? ' cyber-marker-agent-halo' : '';
+        const headingArrow = (isSelf && heading != null)
+          ? `<span class="cyber-marker-heading" style="transform:rotate(${heading}deg)"></span>`
+          : '';
         return {
           html: `
             <div class="cyber-marker cyber-marker-player${haloClass}">
+              ${headingArrow}
               <img src="${logoUrl}" class="cyber-marker-avatar" />
               <span class="cyber-marker-ring"></span>
               <span class="cyber-marker-pulse"></span>
@@ -204,6 +211,10 @@ const arePlayerMarkersEqual = (
     return false;
   }
 
+  // Pour le heading, arrondir à 2° pour éviter les re-renders excessifs
+  const prevHeading = prev.heading != null ? Math.round(prev.heading / 2) : null;
+  const nextHeading = next.heading != null ? Math.round(next.heading / 2) : null;
+
   return (
     prev.position[0] === next.position[0] &&
     prev.position[1] === next.position[1] &&
@@ -213,7 +224,8 @@ const arePlayerMarkersEqual = (
     prev.role === next.role &&
     prev.status === next.status &&
     prev.isSelf === next.isSelf &&
-    prev.showAgentHalo === next.showAgentHalo
+    prev.showAgentHalo === next.showAgentHalo &&
+    prevHeading === nextHeading
   );
 };
 

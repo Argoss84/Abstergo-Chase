@@ -1,6 +1,6 @@
 import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonButtons, IonLabel, IonModal } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, Circle, Polyline, Polygon, Pane } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -24,6 +24,7 @@ import QRCode from '../components/QRCode';
 import { useGameSession } from '../contexts/GameSessionContext';
 import { useWakeLock } from '../utils/useWakeLock';
 import { useVibration } from '../hooks/useVibration';
+import { useDeviceHeading } from '../hooks/useDeviceHeading';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 import { MapController, ResizeMap, useFogRings } from '../utils/GameMapUtils';
 import {
@@ -63,6 +64,8 @@ const Agent: React.FC = () => {
     connectionStatus,
     sessionScope,
     requestLatestState,
+    forceReconnect,
+    getIsInRoom,
     players: sessionPlayers
   } = useGameSession();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
@@ -109,6 +112,9 @@ const Agent: React.FC = () => {
 
   // Hook pour la vibration
   const { vibrate, patterns } = useVibration();
+
+  // Cap de l'appareil (orientation boussole)
+  const deviceHeading = useDeviceHeading();
   
   // État pour la modal du QR code
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
@@ -123,6 +129,9 @@ const Agent: React.FC = () => {
   // Splash screen pendant le chargement (Lobby → Agent)
   const [isSplashVisible, setIsSplashVisible] = useState(true);
   const splashMountedAtRef = useRef(Date.now());
+
+  // Ref pour forcer le joinGame au premier montage (même si la session restaurée semble OK)
+  const hasInitialJoinRef = useRef(false);
 
   const isPlayerVisible = useCallback((player: Player) => {
     if (player.status === 'disconnected') return false;
@@ -337,6 +346,7 @@ const Agent: React.FC = () => {
         }
 
         const needsReconnect =
+          !hasInitialJoinRef.current ||
           sessionScope !== 'game' ||
           (connectionStatus !== 'connected' && connectionStatus !== 'connecting') ||
           !sessionGameDetails ||
@@ -344,6 +354,7 @@ const Agent: React.FC = () => {
 
         if (needsReconnect) {
           await joinGame(code);
+          hasInitialJoinRef.current = true;
         }
 
         setQrCodeText(`${playerId};${code}`);
@@ -366,6 +377,49 @@ const Agent: React.FC = () => {
       setGameDetails(sessionGameDetails);
     }
   }, [sessionGameDetails, isHost]);
+
+  // Moniteur de reconnexion : vérifie périodiquement que la connexion est saine
+  // et force une reconnexion si l'état semble incohérent
+  useEffect(() => {
+    if (!gameCode || !playerId) return;
+
+    const checkConnection = async () => {
+      // Si le socket est connecté mais qu'on n'est pas dans le room serveur
+      if (connectionStatus === 'connected' && !getIsInRoom()) {
+        console.warn('Agent: socket connecté mais pas dans le room, tentative de rejoin...');
+        try {
+          await joinGame(gameCode);
+        } catch (err) {
+          console.warn('Agent: rejoin échoué, force reconnexion...', err);
+          try {
+            await forceReconnect();
+          } catch {
+            // Sera réessayé au prochain interval
+          }
+        }
+      }
+      // Si déconnecté depuis trop longtemps, forcer la reconnexion
+      else if (connectionStatus === 'error' || connectionStatus === 'idle') {
+        console.warn('Agent: état de connexion anormal, force reconnexion...');
+        try {
+          await forceReconnect();
+        } catch {
+          // Sera réessayé au prochain interval
+        }
+      }
+    };
+
+    // Vérification initiale après un court délai (laisser le temps au socket de se connecter)
+    const initialCheck = setTimeout(checkConnection, 8000);
+
+    // Vérification périodique toutes les 15 secondes
+    const interval = setInterval(checkConnection, 15000);
+
+    return () => {
+      clearTimeout(initialCheck);
+      clearInterval(interval);
+    };
+  }, [gameCode, playerId, connectionStatus, joinGame, forceReconnect, getIsInRoom]);
 
   // Masquer le splash quand la partie est prête (gameDetails chargé ou erreur) après un délai minimum
   useEffect(() => {
@@ -824,6 +878,34 @@ const Agent: React.FC = () => {
 
   const fogRings = useFogRings(gameDetails, FOG_RINGS_AGENT);
 
+  // Indicateur de connexion discret
+  const connectionIndicator = useMemo(() => {
+    const inRoom = getIsInRoom();
+    let cssModifier: string;
+    let label: string;
+
+    if (connectionStatus === 'connected' && inRoom) {
+      cssModifier = 'connected';
+      label = 'Connecté';
+    } else if (connectionStatus === 'connecting' || (connectionStatus === 'connected' && !inRoom)) {
+      cssModifier = 'connecting';
+      label = 'Reconnexion…';
+    } else {
+      cssModifier = 'error';
+      label = 'Déconnecté';
+    }
+
+    return (
+      <span
+        key={`conn-${cssModifier}-${connectionStatus}`}
+        className={`connection-indicator connection-indicator--${cssModifier}`}
+      >
+        <span className="connection-dot" />
+        {cssModifier !== 'connected' && <span>{label}</span>}
+      </span>
+    );
+  }, [connectionStatus, getIsInRoom]);
+
   return (
     <IonPage>
       {/* Splash en premier : couvre toute la page (header + content), min 5 s avant erreur ou jeu */}
@@ -872,7 +954,7 @@ const Agent: React.FC = () => {
       )}
       <IonHeader>
         <IonToolbar>
-          <IonTitle>Agent</IonTitle>
+          <IonTitle>Agent {connectionIndicator}</IonTitle>
           {((isHost && countdown !== null && isCountdownActive) || (!isHost && gameDetails?.remaining_time !== null && gameDetails?.remaining_time !== undefined)) ? (
             <IonLabel slot="primary" className="duration-display countdown-active">
               ⏰ {Math.floor(((isHost ? countdown : gameDetails?.remaining_time) || 0) / 60)}:{(((isHost ? countdown : gameDetails?.remaining_time) || 0) % 60).toString().padStart(2, '0')}
@@ -985,6 +1067,7 @@ const Agent: React.FC = () => {
                   id="player-position"
                   label={playerName || 'Vous'}
                   isSelf={true}
+                  heading={deviceHeading}
                 />
               )}
               {(gameDetails?.players || [])

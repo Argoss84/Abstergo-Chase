@@ -415,6 +415,24 @@
   }
 }
 
+/* Flèche directionnelle sur le marqueur du joueur */
+.cyber-marker-heading {
+  position: absolute;
+  width: 0;
+  height: 0;
+  top: -10px;
+  left: 50%;
+  margin-left: -6px;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 14px solid rgba(0, 229, 255, 0.85);
+  filter: drop-shadow(0 0 4px rgba(0, 229, 255, 0.7));
+  z-index: 3;
+  transform-origin: 6px 27px; /* pivot = centre du marqueur (34x34, centre à 17,17) */
+  transition: transform 0.15s linear;
+  pointer-events: none;
+}
+
 @keyframes cyberSpin {
   from {
     transform: rotate(0deg);
@@ -528,6 +546,77 @@
   text-align: center;
   font-size: 0.8rem;
   color: #999;
+}
+
+/* ===== Indicateur de connexion discret ===== */
+.connection-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  line-height: 1;
+  white-space: nowrap;
+  transition: opacity 0.4s ease, background 0.4s ease;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
+.connection-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background 0.4s ease, box-shadow 0.4s ease;
+}
+
+/* Connecté — vert discret, disparaît après quelques secondes */
+.connection-indicator--connected {
+  background: rgba(45, 211, 111, 0.12);
+  color: #2dd36f;
+  opacity: 1;
+  animation: connFadeOut 6s ease forwards;
+}
+.connection-indicator--connected .connection-dot {
+  background: #2dd36f;
+  box-shadow: 0 0 4px rgba(45, 211, 111, 0.6);
+}
+
+/* Connexion en cours — orange pulsant */
+.connection-indicator--connecting {
+  background: rgba(255, 196, 9, 0.15);
+  color: #ffc409;
+  opacity: 1;
+}
+.connection-indicator--connecting .connection-dot {
+  background: #ffc409;
+  box-shadow: 0 0 6px rgba(255, 196, 9, 0.7);
+  animation: connPulse 1.2s ease-in-out infinite;
+}
+
+/* Erreur / déconnecté — rouge */
+.connection-indicator--error {
+  background: rgba(235, 68, 90, 0.15);
+  color: #eb445a;
+  opacity: 1;
+}
+.connection-indicator--error .connection-dot {
+  background: #eb445a;
+  box-shadow: 0 0 6px rgba(235, 68, 90, 0.7);
+  animation: connPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes connPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.75); }
+}
+
+@keyframes connFadeOut {
+  0%, 70% { opacity: 1; }
+  100% { opacity: 0; pointer-events: none; }
 }
 
 /* Splash screen overlay (Lobby → Agent) */

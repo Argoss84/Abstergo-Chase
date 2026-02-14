@@ -1,6 +1,6 @@
 import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonLabel, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonModal } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, Circle, Polyline, Polygon, Pane } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -21,6 +21,7 @@ import QRCode from '../components/QRCode';
 import { useGameSession } from '../contexts/GameSessionContext';
 import { useWakeLock } from '../utils/useWakeLock';
 import { useVibration } from '../hooks/useVibration';
+import { useDeviceHeading } from '../hooks/useDeviceHeading';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 import { MapController, ResizeMap, useFogRings } from '../utils/GameMapUtils';
 import {
@@ -65,7 +66,9 @@ const Rogue: React.FC = () => {
     updatePlayer,
     isHost,
     connectionStatus,
-    sessionScope
+    sessionScope,
+    forceReconnect,
+    getIsInRoom
   } = useGameSession();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
   const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
@@ -114,6 +117,9 @@ const Rogue: React.FC = () => {
 
   // Hook pour la vibration
   const { vibrate, patterns } = useVibration();
+
+  // Cap de l'appareil (orientation boussole)
+  const deviceHeading = useDeviceHeading();
   
   // État pour la modal du QR code
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
@@ -128,6 +134,9 @@ const Rogue: React.FC = () => {
   // Splash screen pendant le chargement (Lobby → Rogue)
   const [isSplashVisible, setIsSplashVisible] = useState(true);
   const splashMountedAtRef = useRef(Date.now());
+
+  // Ref pour forcer le joinGame au premier montage (même si la session restaurée semble OK)
+  const hasInitialJoinRef = useRef(false);
 
   const isPlayerVisible = useCallback((player: Player) => {
     if (player.status === 'disconnected') return false;
@@ -478,6 +487,7 @@ const Rogue: React.FC = () => {
         }
 
         const needsReconnect =
+          !hasInitialJoinRef.current ||
           sessionScope !== 'game' ||
           (connectionStatus !== 'connected' && connectionStatus !== 'connecting') ||
           !sessionGameDetails ||
@@ -485,6 +495,7 @@ const Rogue: React.FC = () => {
 
         if (needsReconnect) {
           await joinGame(code);
+          hasInitialJoinRef.current = true;
         }
 
         setQrCodeText(`${playerId};${code}`);
@@ -510,6 +521,42 @@ const Rogue: React.FC = () => {
       }
     }
   }, [sessionGameDetails, isHost]);
+
+  // Moniteur de reconnexion : vérifie périodiquement que la connexion est saine
+  useEffect(() => {
+    if (!gameCode || !playerId) return;
+
+    const checkConnection = async () => {
+      if (connectionStatus === 'connected' && !getIsInRoom()) {
+        console.warn('Rogue: socket connecté mais pas dans le room, tentative de rejoin...');
+        try {
+          await joinGame(gameCode);
+        } catch (err) {
+          console.warn('Rogue: rejoin échoué, force reconnexion...', err);
+          try {
+            await forceReconnect();
+          } catch {
+            // Sera réessayé au prochain interval
+          }
+        }
+      } else if (connectionStatus === 'error' || connectionStatus === 'idle') {
+        console.warn('Rogue: état de connexion anormal, force reconnexion...');
+        try {
+          await forceReconnect();
+        } catch {
+          // Sera réessayé au prochain interval
+        }
+      }
+    };
+
+    const initialCheck = setTimeout(checkConnection, 8000);
+    const interval = setInterval(checkConnection, 15000);
+
+    return () => {
+      clearTimeout(initialCheck);
+      clearInterval(interval);
+    };
+  }, [gameCode, playerId, connectionStatus, joinGame, forceReconnect, getIsInRoom]);
 
   // Masquer le splash quand la partie est prête (gameDetails chargé ou erreur) après un délai minimum
   useEffect(() => {
@@ -831,6 +878,34 @@ const Rogue: React.FC = () => {
 
   const visibleObjectives = objectiveProps.filter(prop => prop.visible === true);
 
+  // Indicateur de connexion discret
+  const connectionIndicator = useMemo(() => {
+    const inRoom = getIsInRoom();
+    let cssModifier: string;
+    let label: string;
+
+    if (connectionStatus === 'connected' && inRoom) {
+      cssModifier = 'connected';
+      label = 'Connecté';
+    } else if (connectionStatus === 'connecting' || (connectionStatus === 'connected' && !inRoom)) {
+      cssModifier = 'connecting';
+      label = 'Reconnexion…';
+    } else {
+      cssModifier = 'error';
+      label = 'Déconnecté';
+    }
+
+    return (
+      <span
+        key={`conn-${cssModifier}-${connectionStatus}`}
+        className={`connection-indicator connection-indicator--${cssModifier}`}
+      >
+        <span className="connection-dot" />
+        {cssModifier !== 'connected' && <span>{label}</span>}
+      </span>
+    );
+  }, [connectionStatus, getIsInRoom]);
+
   return (
     <IonPage>
       {/* Splash en premier : couvre toute la page (header + content), min 5 s avant erreur ou jeu */}
@@ -879,7 +954,7 @@ const Rogue: React.FC = () => {
       )}
       <IonHeader>
         <IonToolbar>
-          <IonTitle>Rogue</IonTitle>
+          <IonTitle>Rogue {connectionIndicator}</IonTitle>
           {((isHost && countdown !== null && isCountdownActive) || (!isHost && gameDetails?.remaining_time !== null && gameDetails?.remaining_time !== undefined)) ? (
             <IonLabel slot="primary" className="duration-display countdown-active">
               ⏰ {Math.floor(((isHost ? countdown : gameDetails?.remaining_time) || 0) / 60)}:{(((isHost ? countdown : gameDetails?.remaining_time) || 0) % 60).toString().padStart(2, '0')}
@@ -1011,6 +1086,7 @@ const Rogue: React.FC = () => {
                     id="player-position"
                     label={playerName || 'Vous'}
                     isSelf={true}
+                    heading={deviceHeading}
                   />
                 )}
               {(gameDetails?.players || [])
