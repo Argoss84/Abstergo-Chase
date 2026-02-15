@@ -161,6 +161,31 @@
   }
 }
 
+.cyber-marker-player-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.cyber-marker-player-wrapper .cyber-marker {
+  pointer-events: auto;
+}
+
+.cyber-marker-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(0, 229, 255, 0.95);
+  text-shadow: 0 0 6px rgba(0, 229, 255, 0.8), 0 1px 2px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+  max-width: 52px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  line-height: 1.1;
+}
+
 .cyber-marker-player {
   width: 34px;
   height: 34px;

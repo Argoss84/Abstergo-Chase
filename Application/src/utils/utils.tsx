@@ -370,10 +370,10 @@ export const checkIfInStartZone = (position: [number, number], startZoneLat: str
   return distance <= radius;
 };
 
-// Fonction pour récupérer le trajet routier
+// Fonction pour récupérer le trajet routier (piétons, phase de convergence)
 export const fetchRoute = async (start: [number, number], end: [number, number]): Promise<[number, number][]> => {
   try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`;
+    const url = `https://router.project-osrm.org/route/v1/walking/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`;
     const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`OSRM error ${response.status}`);

@@ -36,6 +36,8 @@ interface SessionState {
   connectionStatus: ConnectionStatus;
   sessionScope: SessionScope;
   lobbyChatMessages: LobbyChatMessage[];
+  agentChatMessages: LobbyChatMessage[];
+  rogueChatMessages: LobbyChatMessage[];
 }
 
 interface PersistedSessionData {
@@ -78,7 +80,9 @@ const createInitialState = (): SessionState => ({
   props: [],
   connectionStatus: 'idle',
   sessionScope: 'lobby',
-  lobbyChatMessages: []
+  lobbyChatMessages: [],
+  agentChatMessages: [],
+  rogueChatMessages: []
 });
 
 interface PendingAction {
@@ -261,7 +265,9 @@ class GameSessionService {
       props: [],
       connectionStatus: this.socket?.connected ? 'connected' : 'idle',
       sessionScope: 'lobby',
-      lobbyChatMessages: []
+      lobbyChatMessages: [],
+      agentChatMessages: [],
+      rogueChatMessages: []
     });
     this.state.playerName = playerName;
   }
@@ -271,6 +277,20 @@ class GameSessionService {
     const t = String(text ?? '').trim().substring(0, 500);
     if (!t) return;
     this.sendSocket('lobby:chat', { text: t });
+  }
+
+  sendAgentChat(text: string) {
+    if (!this.state.gameCode || this.state.sessionScope !== 'game') return;
+    const t = String(text ?? '').trim().substring(0, 500);
+    if (!t) return;
+    this.sendSocket('game:chat:agent', { text: t });
+  }
+
+  sendRogueChat(text: string) {
+    if (!this.state.gameCode || this.state.sessionScope !== 'game') return;
+    const t = String(text ?? '').trim().substring(0, 500);
+    if (!t) return;
+    this.sendSocket('game:chat:rogue', { text: t });
   }
 
   leaveGame() {
@@ -299,7 +319,9 @@ class GameSessionService {
       props: [],
       connectionStatus: this.socket?.connected ? 'connected' : 'idle',
       sessionScope: 'lobby',
-      lobbyChatMessages: []
+      lobbyChatMessages: [],
+      agentChatMessages: [],
+      rogueChatMessages: []
     });
     this.state.playerName = playerName;
   }
@@ -492,7 +514,9 @@ class GameSessionService {
       connectionStatus: 'connected',
       sessionScope: 'game',
       gameDetails: updatedGameDetails,
-      lobbyChatMessages: []
+      lobbyChatMessages: [],
+      agentChatMessages: [],
+      rogueChatMessages: []
     });
 
     await this.reestablishAllPeerConnections();
@@ -531,7 +555,9 @@ class GameSessionService {
         isHost: response.playerId === response.hostId,
         connectionStatus: 'connected',
         sessionScope: 'game',
-        lobbyChatMessages: []
+        lobbyChatMessages: [],
+        agentChatMessages: [],
+        rogueChatMessages: []
       });
 
       this.sendSocket('player:status-update', { status: 'active' });
@@ -1184,6 +1210,18 @@ class GameSessionService {
       return;
     }
 
+    if (type === 'game:chat-agent-message' && payload?.playerId != null && typeof payload?.text === 'string') {
+      const arr = [...this.state.agentChatMessages, { playerId: payload.playerId, playerName: payload.playerName || 'Joueur', text: payload.text, timestamp: payload.timestamp || Date.now() }];
+      this.updateState({ agentChatMessages: arr.length > 100 ? arr.slice(-100) : arr });
+      return;
+    }
+
+    if (type === 'game:chat-rogue-message' && payload?.playerId != null && typeof payload?.text === 'string') {
+      const arr = [...this.state.rogueChatMessages, { playerId: payload.playerId, playerName: payload.playerName || 'Joueur', text: payload.text, timestamp: payload.timestamp || Date.now() }];
+      this.updateState({ rogueChatMessages: arr.length > 100 ? arr.slice(-100) : arr });
+      return;
+    }
+
     if (type === 'admin:notification' && payload != null && typeof payload.message === 'string') {
       const msg = payload.title ? `${payload.title} — ${payload.message}` : payload.message;
       toast.info(msg);
@@ -1214,7 +1252,9 @@ class GameSessionService {
       props: [],
       connectionStatus: 'idle',
       sessionScope: 'lobby',
-      lobbyChatMessages: []
+      lobbyChatMessages: [],
+      agentChatMessages: [],
+      rogueChatMessages: []
     });
   }
 
@@ -1649,7 +1689,9 @@ class GameSessionService {
           isHost: response.playerId === response.hostId,
           connectionStatus: 'connected',
           sessionScope: 'game',
-          lobbyChatMessages: []
+          lobbyChatMessages: [],
+          agentChatMessages: [],
+          rogueChatMessages: []
         });
         this.sendSocket('player:status-update', { status: 'active' });
         this.requestResync('socket-reconnect');

@@ -86,17 +86,26 @@ const PopUpMarker: React.FC<PopUpMarkerProps> = ({
         const headingArrow = (isSelf && heading != null)
           ? `<span class="cyber-marker-heading" style="transform:rotate(${heading}deg)"></span>`
           : '';
+        const escapedLabel = (label || (isSelf ? 'Vous' : 'Joueur'))
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+        const displayName = escapedLabel.length > 12 ? escapedLabel.slice(0, 10) + '…' : escapedLabel;
         return {
           html: `
-            <div class="cyber-marker cyber-marker-player${haloClass}">
-              ${headingArrow}
-              <img src="${logoUrl}" class="cyber-marker-avatar" />
-              <span class="cyber-marker-ring"></span>
-              <span class="cyber-marker-pulse"></span>
+            <div class="cyber-marker-player-wrapper">
+              <div class="cyber-marker cyber-marker-player${haloClass}">
+                ${headingArrow}
+                <img src="${logoUrl}" class="cyber-marker-avatar" />
+                <span class="cyber-marker-ring"></span>
+                <span class="cyber-marker-pulse"></span>
+              </div>
+              <span class="cyber-marker-label">${displayName}</span>
             </div>
           `,
-          size: [34, 34],
-          anchor: [17, 17],
+          size: [56, 50],
+          anchor: [28, 17],
         };
       }
       default:

@@ -19,6 +19,8 @@ interface GameSessionContextValue extends SessionState {
   leaveLobby: () => void;
   leaveGame: () => void;
   sendLobbyChat: (text: string) => void;
+  sendAgentChat: (text: string) => void;
+  sendRogueChat: (text: string) => void;
   hasPersistedSession: () => boolean;
   disconnectSocket: () => void;
 }
@@ -54,6 +56,8 @@ export const GameSessionProvider: React.FC<{ children: React.ReactNode }> = ({ c
     leaveLobby: () => gameSessionService.leaveLobby(),
     leaveGame: () => gameSessionService.leaveGame(),
     sendLobbyChat: (text: string) => gameSessionService.sendLobbyChat(text),
+    sendAgentChat: (text: string) => gameSessionService.sendAgentChat(text),
+    sendRogueChat: (text: string) => gameSessionService.sendRogueChat(text),
     hasPersistedSession: () => gameSessionService.hasPersistedSession(),
     disconnectSocket
   };

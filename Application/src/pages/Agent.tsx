@@ -1,4 +1,4 @@
-import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonButtons, IonLabel, IonModal } from '@ionic/react';
+import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonButtons, IonLabel, IonModal, IonInput, IonFooter, IonBadge } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, Circle, Polyline, Polygon, Pane } from 'react-leaflet';
@@ -14,7 +14,7 @@ import {
 } from '../utils/utils';
 import { updatePlayerPosition, updatePlayerInStartZone } from '../utils/PlayerUtils';
 import { updateGameWinnerType } from '../utils/AdminUtils';
-import { add, apertureOutline, camera, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, settings, skullOutline } from 'ionicons/icons';
+import { add, apertureOutline, camera, chatbubbleOutline, chevronBackOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, settings, skullOutline } from 'ionicons/icons';
 import './Agent.css';
 import { GameProp, GameDetails, ObjectiveCircle, Player } from '../components/Interfaces';
 import PopUpMarker from '../components/PopUpMarker';
@@ -66,13 +66,19 @@ const Agent: React.FC = () => {
     requestLatestState,
     forceReconnect,
     getIsInRoom,
-    players: sessionPlayers
+    players: sessionPlayers,
+    agentChatMessages,
+    sendAgentChat,
   } = useGameSession();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
   const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [objectiveCircles, setObjectiveCircles] = useState<ObjectiveCircle[]>([]);
   const [isFabOpen, setIsFabOpen] = useState(false);
+  const [isChatModalOpen, setIsChatModalOpen] = useState(false);
+  const [lastReadChatCount, setLastReadChatCount] = useState(0);
+  const [chatInput, setChatInput] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [routePath, setRoutePath] = useState<[number, number][]>([]);
   const [distanceToStartZone, setDistanceToStartZone] = useState<number | null>(null);
@@ -260,6 +266,27 @@ const Agent: React.FC = () => {
     }
     setIsCameraModalOpen(true);
     vibrate(patterns.short);
+  };
+
+  // Chat entre agents
+  const agentMsgs = agentChatMessages ?? [];
+  const chatUnreadCount = isChatModalOpen ? 0 : Math.max(0, agentMsgs.length - lastReadChatCount);
+  useEffect(() => {
+    if (isChatModalOpen) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [isChatModalOpen, agentMsgs.length]);
+  const handleOpenAgentChat = () => {
+    setIsChatModalOpen(true);
+    setLastReadChatCount(agentMsgs.length);
+  };
+  const handleCloseAgentChat = () => {
+    setIsChatModalOpen(false);
+    setLastReadChatCount(agentMsgs.length);
+  };
+  const handleSendAgentChat = () => {
+    const t = chatInput.trim();
+    if (!t) return;
+    sendAgentChat(t);
+    setChatInput('');
   };
 
 
@@ -972,6 +999,57 @@ const Agent: React.FC = () => {
         </IonToolbar>
       </IonHeader>
       <IonContent>
+        {/* Panneau phase de convergence : joueurs en zone de départ */}
+        {gameDetails?.is_converging_phase && Array.isArray(gameDetails?.players) && gameDetails.players.length > 0 && (
+          <div
+            style={{
+              position: 'fixed',
+              top: '56px',
+              left: '8px',
+              right: '8px',
+              maxWidth: '320px',
+              zIndex: 1000,
+              background: 'rgba(10, 15, 25, 0.92)',
+              border: '1px solid rgba(0, 229, 255, 0.4)',
+              borderRadius: '12px',
+              padding: '10px 12px',
+              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5)',
+              fontSize: '13px',
+            }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: '8px', color: '#00e5ff' }}>
+              🎯 Zone de départ
+            </div>
+            {(gameDetails.players || []).map((p) => {
+              const inZone = p.isInStartZone === true;
+              const name = p.displayName || p.id_player?.slice(0, 8) || 'Joueur';
+              const isYou = p.id_player === playerId;
+              const roleLabel = (p.role || '').toUpperCase() === 'AGENT' ? 'Agent' : 'Rogue';
+              return (
+                <div
+                  key={p.id_player}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '4px 0',
+                    borderBottom: '1px solid rgba(255,255,255,0.08)',
+                  }}
+                >
+                  <span style={{ color: '#fff' }}>
+                    {name}
+                    {isYou && <span style={{ color: '#00e5ff', marginLeft: '4px' }}>(Vous)</span>}
+                    <span style={{ color: 'rgba(255,255,255,0.6)', marginLeft: '6px', fontSize: '11px' }}>{roleLabel}</span>
+                  </span>
+                  <span style={{ color: inZone ? '#2dd36f' : '#ff4961', fontWeight: 600 }}>
+                    {inZone ? '✅ En zone' : '❌ Pas en zone'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {error ? (
           <p>{error}</p>
         ) : gameDetails ? (
@@ -1183,6 +1261,38 @@ const Agent: React.FC = () => {
             </IonFabButton>
           </div>
         </div>
+
+        {/* Chat entre agents */}
+        {gameDetails && (
+          <IonFab slot="fixed" vertical="bottom" horizontal="end" style={{ marginBottom: '16px', marginEnd: '16px', overflow: 'visible' }}>
+            <div style={{ position: 'relative', display: 'inline-flex' }}>
+              <IonFabButton onClick={handleOpenAgentChat} color="primary">
+                <IonIcon icon={chatbubbleOutline} />
+              </IonFabButton>
+              {chatUnreadCount > 0 && (
+                <IonBadge
+                  color="danger"
+                  style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    minWidth: '22px',
+                    height: '22px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '11px',
+                    padding: '0 6px',
+                    borderRadius: '11px',
+                    zIndex: 10,
+                  }}
+                >
+                  {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
+                </IonBadge>
+              )}
+            </div>
+          </IonFab>
+        )}
 
         {/* Bouton flottant centré pour démarrer la partie (admin uniquement) */}
         {isHost && !gameDetails?.started && Array.isArray(gameDetails?.players) && gameDetails!.players!.length > 0 && gameDetails!.players!.every(p => p.isInStartZone === true) && (
@@ -1436,6 +1546,76 @@ const Agent: React.FC = () => {
               )}
             </div>
           </IonContent>
+        </IonModal>
+
+        {/* Modal chat agents */}
+        <IonModal isOpen={isChatModalOpen} onDidDismiss={handleCloseAgentChat}>
+          <IonHeader>
+            <IonToolbar>
+              <IonButtons slot="start">
+                <IonButton fill="clear" onClick={handleCloseAgentChat}>
+                  <IonIcon icon={chevronBackOutline} />
+                </IonButton>
+              </IonButtons>
+              <IonTitle>Chat Agents</IonTitle>
+              <IonButtons slot="end">
+                <IonButton onClick={handleCloseAgentChat}>Fermer</IonButton>
+              </IonButtons>
+            </IonToolbar>
+          </IonHeader>
+          <IonContent className="ion-padding">
+            <div style={{ display: 'flex', flexDirection: 'column', minHeight: '240px' }}>
+              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {agentMsgs.length === 0 && (
+                  <IonText color="medium" style={{ textAlign: 'center', padding: '24px', fontSize: '14px' }}>
+                    Aucun message. Envoyez le premier !
+                  </IonText>
+                )}
+                {agentMsgs.map((m) => {
+                  const isMe = m.playerId === playerId;
+                  return (
+                    <div
+                      key={`${m.timestamp}-${m.playerId}`}
+                      style={{
+                        alignSelf: isMe ? 'flex-end' : 'flex-start',
+                        maxWidth: '85%',
+                        padding: '8px 12px',
+                        borderRadius: '12px',
+                        backgroundColor: isMe ? 'var(--ion-color-primary)' : 'var(--ion-color-light)',
+                        color: isMe ? 'var(--ion-color-primary-contrast)' : 'var(--ion-color-dark)',
+                      }}
+                    >
+                      <div style={{ fontSize: '11px', opacity: 0.9, marginBottom: '2px' }}>
+                        {isMe ? 'Vous' : m.playerName}
+                      </div>
+                      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.text}</div>
+                      <div style={{ fontSize: '10px', opacity: 0.8, marginTop: '2px' }}>
+                        {new Date(m.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={messagesEndRef} />
+              </div>
+            </div>
+          </IonContent>
+          <IonFooter>
+            <IonToolbar>
+              <div style={{ display: 'flex', gap: '8px', padding: '8px', alignItems: 'center' }}>
+                <IonInput
+                  value={chatInput}
+                  onIonInput={(e) => setChatInput(String(e.detail.value ?? ''))}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSendAgentChat(); } }}
+                  placeholder="Votre message..."
+                  style={{ flex: 1, '--padding-start': '12px' } as React.CSSProperties}
+                  clearOnEdit={false}
+                />
+                <IonButton onClick={handleSendAgentChat} disabled={!chatInput.trim()} color="primary">
+                  Envoyer
+                </IonButton>
+              </div>
+            </IonToolbar>
+          </IonFooter>
         </IonModal>
 
       </IonContent>
