@@ -1,4 +1,5 @@
 import L from "leaflet";
+import concaveman from "concaveman";
 
 const METERS_PER_DEGREE_LAT = 111320;
 
@@ -278,6 +279,104 @@ const isPointInCircle = (
 ) => {
   const distance = L.latLng(point).distanceTo(L.latLng(center));
   return distance <= radius;
+};
+
+const dedupeByGrid = (points: [number, number][], cellSizeMeters: number, center: [number, number]) => {
+  const seen = new Set<string>();
+  const out: [number, number][] = [];
+  for (const p of points) {
+    const m = toMeters(p, center);
+    const key = `${Math.round(m.x / cellSizeMeters)}:${Math.round(m.y / cellSizeMeters)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
+  }
+  return out;
+};
+
+const convexHullClosedMeters = (pts: { x: number; y: number }[]) => {
+  if (pts.length < 3) return pts.length ? [...pts, pts[0]] : [];
+  const points = [...pts].sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x));
+  const cross = (o: any, a: any, b: any) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower: any[] = [];
+  for (const p of points) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper: any[] = [];
+  for (let i = points.length - 1; i >= 0; i--) {
+    const p = points[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  upper.pop();
+  lower.pop();
+  const hull = [...lower, ...upper];
+  return hull.length ? [...hull, hull[0]] : [];
+};
+
+const getStreetPointsForBoundary = (center: [number, number], radius: number, streets: L.LatLngTuple[][]) => {
+  const points: [number, number][] = [];
+  for (const street of streets) {
+    for (const node of street) {
+      if (node == null || !Array.isArray(node) || node.length < 2) continue;
+      const p = [node[0], node[1]] as [number, number];
+      points.push(p);
+    }
+  }
+  const intersections = getCircleStreetIntersections(center, radius, streets) as [number, number][];
+  return dedupePoints([...points, ...intersections], 2);
+};
+
+/**
+ * Calcule le contour extérieur des rues dans la zone.
+ * - Utilise un concave hull (concaveman) pour coller au contour des rues extérieures.
+ * - Fallback: enveloppe convexe si pas assez de points.
+ * Retourne un anneau fermé [lat,lng][].
+ */
+export const getOuterStreetContour = (
+  center: [number, number],
+  radius: number,
+  streets: L.LatLngTuple[][]
+): [number, number][] => {
+  const sanitizedStreets: [number, number][][] = streets
+    .map((street) =>
+      street.filter((p): p is [number, number] => p != null && Array.isArray(p) && p.length >= 2)
+    )
+    .filter((street) => street.length >= 2);
+
+  if (sanitizedStreets.length === 0) return [];
+
+  // IMPORTANT: on ne passe que des polylines sans `undefined` aux étapes suivantes,
+  // sinon les calculs d'intersection peuvent échouer et renvoyer un contour vide.
+  const raw = getStreetPointsForBoundary(center, radius, sanitizedStreets as unknown as L.LatLngTuple[][]);
+  // Réduire le nombre de points pour garder de bonnes perfs.
+  const reduced = dedupeByGrid(raw, Math.max(8, radius * 0.01), center);
+  if (reduced.length < 3) return reduced.length ? [...reduced, reduced[0]] : [];
+
+  const meters = reduced.map((p) => toMeters(p, center));
+  const input = meters.map((m) => [m.x, m.y] as [number, number]);
+
+  // Paramètres: concavity plus petit => plus concave (plus proche des rues)
+  // lengthThreshold plus grand => ignore petites entailles/bruit
+  const concavity = 2;
+  const lengthThreshold = Math.max(25, radius * 0.03);
+  let hullXY: [number, number][];
+  try {
+    hullXY = concaveman(input, concavity, lengthThreshold) as [number, number][];
+  } catch {
+    hullXY = [];
+  }
+
+  const ring =
+    hullXY && hullXY.length >= 3
+      ? hullXY.map(([x, y]) => toLatLng({ x, y }, center))
+      : convexHullClosedMeters(meters).map((m) => toLatLng(m, center));
+
+  if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) {
+    ring.push(ring[0]);
+  }
+  return ring;
 };
 
 export const clipPolyline = (

@@ -1098,6 +1098,34 @@ const Agent: React.FC = () => {
                   />
                 ))}
               </Pane>
+              {gameDetails.map_streets && gameDetails.map_streets.length > 0 ? (
+                gameDetails.map_streets.length === 1 && gameDetails.map_streets[0].length >= 3 ? (
+                  <Polygon
+                    positions={gameDetails.map_streets[0]}
+                    pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.12, weight: 2.5 }}
+                  />
+                ) : (
+                  gameDetails.map_streets.map((street, index) => {
+                    if (!Array.isArray(street) || street.length < 2) return null;
+                    return (
+                      <Polyline
+                        key={`zone-street-${index}`}
+                        positions={street}
+                        pathOptions={{ color: 'blue', weight: 2.5, opacity: 0.9 }}
+                      />
+                    );
+                  })
+                )
+              ) : (
+                <Circle
+                  center={[
+                    parseFloat(gameDetails.map_center_latitude || '0'),
+                    parseFloat(gameDetails.map_center_longitude || '0')
+                  ]}
+                  radius={gameDetails.map_radius || 750}
+                  pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.08, weight: 2.5 }}
+                />
+              )}
               {gameDetails.start_zone_latitude && gameDetails.start_zone_longitude && (
                 <>
                   <PopUpMarker

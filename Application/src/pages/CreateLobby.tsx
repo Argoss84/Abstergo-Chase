@@ -24,10 +24,11 @@ import { chevronBackOutline } from 'ionicons/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { useGameSession } from '../contexts/GameSessionContext';
+
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Circle, CircleMarker, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { generateRandomPoints, generateStartZone, generateStartZoneRogue } from '../utils/utils';
+import { generateRandomPoints, generateStartZone, generateStartZoneRogue, getOuterStreetContour } from '../utils/utils';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 import {
   DEFAULT_OBJECTIVE_NUMBER,
@@ -113,6 +114,7 @@ const CreateLobby: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingStreets, setIsLoadingStreets] = useState(false);
   const [streetsLoadError, setStreetsLoadError] = useState<string | null>(null);
+  const [outerContour, setOuterContour] = useState<[number, number][]>([]);
 
   // Nettoyer les données de session à l'ouverture de la page
   useEffect(() => {
@@ -315,7 +317,8 @@ const CreateLobby: React.FC = () => {
         city: null,
         started_date: null,
         props: [],
-        players: []
+        players: [],
+        map_streets: outerContour.length >= 3 ? [outerContour] : null
       };
       const propsData = objectives.map((obj, index) => ({
         id_prop: gameId + index,
@@ -413,6 +416,23 @@ const CreateLobby: React.FC = () => {
     }
   }, [selectedPosition]);
 
+  useEffect(() => {
+    if (!selectedPosition) {
+      setOuterContour([]);
+      return;
+    }
+    if (isLoadingStreets || streetsLoadError) {
+      setOuterContour([]);
+      return;
+    }
+    if (streets.length === 0) {
+      setOuterContour([]);
+      return;
+    }
+    const contour = getOuterStreetContour(selectedPosition, formData.map_radius, streets);
+    setOuterContour(contour.length >= 3 ? contour : []);
+  }, [selectedPosition, streets, formData.map_radius, isLoadingStreets, streetsLoadError]);
+
   return (
     <IonPage id="CreateLobby-page">
       <IonHeader>
@@ -506,11 +526,23 @@ const CreateLobby: React.FC = () => {
                   {selectedPosition && (
                     <>
                       <Marker position={selectedPosition} />
-                      <Circle
-                        center={selectedPosition}
-                        radius={formData.map_radius}
-                        pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
-                      />
+                      {outerContour.length >= 3 ? (
+                        <Polygon
+                          positions={outerContour}
+                          pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.12, weight: 2.5 }}
+                        />
+                      ) : (
+                        <Circle
+                          center={selectedPosition}
+                          radius={formData.map_radius}
+                          pathOptions={{
+                            color: 'blue',
+                            fillColor: 'blue',
+                            fillOpacity: 0.08,
+                            ...(isLoadingStreets ? { dashArray: '6 8' } : null)
+                          }}
+                        />
+                      )}
                     </>
                   )}
                   {objectives.map((objective) => (
@@ -570,13 +602,17 @@ const CreateLobby: React.FC = () => {
                       />
                     </>
                   )}
-                  {streets.map((street, index) => (
-                    <Polyline
-                      key={index}
-                      positions={street}
-                      pathOptions={{ color: 'gray', weight: 2 }}
-                    />
-                  ))}
+                  {streets.map((street, index) => {
+                    const validPositions = street.filter((p): p is [number, number] => p != null && Array.isArray(p) && p.length >= 2);
+                    if (validPositions.length < 2) return null;
+                    return (
+                      <Polyline
+                        key={index}
+                        positions={validPositions}
+                        pathOptions={{ color: 'gray', weight: 2, opacity: 0.7 }}
+                      />
+                    );
+                  })}
                 </MapContainer>
               ) : (
                 <div style={{ 
