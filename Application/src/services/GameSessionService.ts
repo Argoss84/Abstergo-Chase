@@ -103,6 +103,7 @@ class GameSessionService {
   private gameJoinInProgress = false;
   private gameHostReconnectInProgress = false;
   private lastStatusUpdate = 0;
+  private persistSnapshotIntervalId: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -848,6 +849,50 @@ class GameSessionService {
     if ((this.state.lobbyCode || this.state.gameCode) && this.state.playerId) {
       this.persistSession();
     }
+
+    // Replay : envoyer des snapshots périodiques au ServerBDD (host uniquement)
+    const gd = this.state.gameDetails;
+    const shouldPersist =
+      this.state.isHost &&
+      this.state.gameCode &&
+      gd?.started &&
+      gd?.countdown_started &&
+      !gd?.winner_type;
+    if (shouldPersist) {
+      this.schedulePersistSnapshot();
+    } else {
+      this.clearPersistSnapshotInterval();
+    }
+  }
+
+  private schedulePersistSnapshot() {
+    if (this.persistSnapshotIntervalId) return;
+    this.persistSnapshotIntervalId = setInterval(() => {
+      if (!this.state.isHost || !this.state.gameCode || !this.state.gameDetails) {
+        this.clearPersistSnapshotInterval();
+        return;
+      }
+      const gd = this.state.gameDetails;
+      if (!gd.started || !gd.countdown_started || gd.winner_type) {
+        this.clearPersistSnapshotInterval();
+        return;
+      }
+      this.sendSocket('game:persist-snapshot', {
+        gameCode: this.state.gameCode,
+        state: {
+          gameDetails: gd,
+          players: this.state.players,
+          props: this.state.props
+        }
+      });
+    }, 5000);
+  }
+
+  private clearPersistSnapshotInterval() {
+    if (this.persistSnapshotIntervalId) {
+      clearInterval(this.persistSnapshotIntervalId);
+      this.persistSnapshotIntervalId = null;
+    }
   }
 
 
@@ -1583,6 +1628,7 @@ class GameSessionService {
 
 
   private cleanupConnections() {
+    this.clearPersistSnapshotInterval();
     this.peerConnections.forEach((pc) => pc.close());
     this.peerConnections.clear();
     this.dataChannels.forEach((channel) => channel.close());

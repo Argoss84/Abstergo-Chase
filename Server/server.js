@@ -8,6 +8,24 @@ dotenv.config();
 
 const PORT = process.env.SIGNALING_PORT || 5174;
 const SOCKET_IO_PATH = process.env.SOCKET_IO_PATH || '/socket.io';
+const BDD_URL = process.env.BDD_URL || 'http://localhost:5175';
+
+// Helper : persister vers ServerBDD (replay)
+const persistToBdd = async (path, method, body) => {
+  if (!BDD_URL) return;
+  try {
+    const res = await fetch(`${BDD_URL}${path}`, {
+      method: method || 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    if (!res.ok) {
+      log(`[BDD] ${method} ${path} erreur: ${res.status}`);
+    }
+  } catch (err) {
+    log(`[BDD] Erreur ${path}:`, err.message);
+  }
+};
 
 const formatRemainingTime = (seconds) => {
   if (seconds === null || seconds === undefined || Number.isNaN(seconds)) {
@@ -1649,6 +1667,8 @@ io.on('connection', (socket) => {
       games.set(code, game);
       gameSocketMessageCounts.set(code, gameSocketMessageCounts.get(code) || 0);
 
+      persistToBdd('/api/game-sessions', 'POST', { game_code: code });
+
       lobby.players.forEach((player) => {
         const playerSocket = socketsById.get(player.id);
         if (playerSocket) {
@@ -2022,6 +2042,62 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'game:persist-snapshot') {
+      const gameCode = (payload?.gameCode || clientInfo?.gameCode || '').toString().trim().toUpperCase();
+      const state = payload?.state;
+      if (!gameCode || !state) return;
+      const game = games.get(gameCode);
+      if (!game || game.hostId !== clientId) return;
+      const gd = state.gameDetails || {};
+      const players = state.players || [];
+      const props = state.props || [];
+      let gamePhase = 'converging';
+      if (gd.winner_type) gamePhase = 'ended';
+      else if (gd.started && gd.countdown_started) gamePhase = 'running';
+      const playersForReplay = players.map((p) => ({
+        id_player: p.id_player,
+        role: p.role,
+        latitude: p.latitude,
+        longitude: p.longitude,
+        status: p.status,
+        displayName: p.displayName || p.name
+      }));
+      const propsForReplay = props.map((pr) => ({
+        id_prop: pr.id_prop,
+        state: pr.state,
+        visible: pr.visible,
+        latitude: pr.latitude,
+        longitude: pr.longitude,
+        name: pr.name
+      }));
+      persistToBdd('/api/game-replay/snapshot', 'POST', {
+        game_code: gameCode,
+        snapshot_timestamp: new Date().toISOString(),
+        remaining_time_seconds: gd.remaining_time ?? null,
+        game_phase: gamePhase,
+        players_json: playersForReplay,
+        props_json: propsForReplay
+      });
+      persistToBdd('/api/game-sessions', 'POST', {
+        game_code: gameCode,
+        config_json: gd.id_game ? {
+          map_center_latitude: gd.map_center_latitude,
+          map_center_longitude: gd.map_center_longitude,
+          map_radius: gd.map_radius,
+          start_zone_latitude: gd.start_zone_latitude,
+          start_zone_longitude: gd.start_zone_longitude,
+          start_zone_rogue_latitude: gd.start_zone_rogue_latitude,
+          start_zone_rogue_longitude: gd.start_zone_rogue_longitude,
+          duration: gd.duration,
+          victory_condition_nb_objectivs: gd.victory_condition_nb_objectivs,
+          objectiv_zone_radius: gd.objectiv_zone_radius,
+          rogue_range: gd.rogue_range,
+          agent_range: gd.agent_range
+        } : null
+      });
+      return;
+    }
+
     if (type === 'state:sync') {
       const targetId = payload?.targetId;
       const targetSocket = socketsById.get(targetId);
@@ -2172,6 +2248,13 @@ io.on('connection', (socket) => {
       }
 
       if (game.hostId === playerId) {
+        const lastState = game.lastHostState;
+        const winnerType = lastState?.gameDetails?.winner_type || null;
+        persistToBdd('/api/game-sessions', 'POST', {
+          game_code: code,
+          ended_at: new Date().toISOString(),
+          winner_type: winnerType
+        });
         game.players.forEach((player) => {
           if (player.id !== playerId) {
             const playerSocket = socketsById.get(player.id);
@@ -2350,6 +2433,13 @@ io.on('connection', (socket) => {
           if (games.has(gameCode) && games.get(gameCode).hostId === clientInfo.clientId) {
             const currentGame = games.get(gameCode);
             if (currentGame) {
+              const lastState = currentGame.lastHostState;
+              const winnerType = lastState?.gameDetails?.winner_type || null;
+              persistToBdd('/api/game-sessions', 'POST', {
+                game_code: gameCode,
+                ended_at: new Date().toISOString(),
+                winner_type: winnerType
+              });
               currentGame.players.forEach((player) => {
                 const playerSocket = socketsById.get(player.id);
                 send(playerSocket, { type: 'game:closed', payload: { code: gameCode } });

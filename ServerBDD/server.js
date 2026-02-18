@@ -152,6 +152,138 @@ app.delete('/api/test/:id', async (req, res) => {
   }
 });
 
+// ========== Game Replay API ==========
+
+// POST /api/game-sessions - Créer ou mettre à jour une session de jeu
+app.post('/api/game-sessions', async (req, res) => {
+  const { game_code, config_json, started_at, ended_at, winner_type } = req.body;
+  if (!game_code || typeof game_code !== 'string') {
+    res.status(400).json({ error: 'game_code requis' });
+    return;
+  }
+  const code = String(game_code).trim().toUpperCase();
+  try {
+    const conn = await mysql.createConnection(getDbConfig());
+    const [existing] = await conn.query(
+      'SELECT id FROM game_sessions WHERE game_code = ?',
+      [code]
+    );
+    const configStr = config_json ? JSON.stringify(config_json) : null;
+    if (existing.length > 0) {
+      const updates = [];
+      const values = [];
+      if (started_at != null) { updates.push('started_at = ?'); values.push(started_at); }
+      if (ended_at != null) { updates.push('ended_at = ?'); values.push(ended_at); }
+      if (winner_type != null) { updates.push('winner_type = ?'); values.push(winner_type); }
+      if (config_json != null) { updates.push('config_json = ?'); values.push(configStr); }
+      if (updates.length > 0) {
+        values.push(existing[0].id);
+        await conn.query(
+          `UPDATE game_sessions SET ${updates.join(', ')} WHERE id = ?`,
+          values
+        );
+      }
+      await conn.end();
+      res.json({ success: true, id: existing[0].id, game_code: code });
+    } else {
+      const [result] = await conn.query(
+        'INSERT INTO game_sessions (game_code, config_json, started_at, ended_at, winner_type) VALUES (?, ?, ?, ?, ?)',
+        [code, configStr, started_at || null, ended_at || null, winner_type || null]
+      );
+      await conn.end();
+      res.status(201).json({ success: true, id: result.insertId, game_code: code });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/game-replay/snapshot - Insérer un snapshot pour le replay
+app.post('/api/game-replay/snapshot', async (req, res) => {
+  const { game_code, snapshot_timestamp, remaining_time_seconds, game_phase, players_json, props_json } = req.body;
+  if (!game_code || typeof game_code !== 'string') {
+    res.status(400).json({ error: 'game_code requis' });
+    return;
+  }
+  const code = String(game_code).trim().toUpperCase();
+  try {
+    const conn = await mysql.createConnection(getDbConfig());
+    let [sessions] = await conn.query(
+      'SELECT id FROM game_sessions WHERE game_code = ?',
+      [code]
+    );
+    if (sessions.length === 0) {
+      const [insertResult] = await conn.query(
+        'INSERT INTO game_sessions (game_code) VALUES (?)',
+        [code]
+      );
+      sessions = [{ id: insertResult.insertId }];
+    }
+    const gameSessionId = sessions[0].id;
+    const ts = snapshot_timestamp || new Date().toISOString();
+    const playersStr = players_json ? JSON.stringify(players_json) : null;
+    const propsStr = props_json ? JSON.stringify(props_json) : null;
+    const [result] = await conn.query(
+      'INSERT INTO game_replay_snapshots (game_session_id, snapshot_timestamp, remaining_time_seconds, game_phase, players_json, props_json) VALUES (?, ?, ?, ?, ?, ?)',
+      [gameSessionId, ts, remaining_time_seconds ?? null, game_phase || null, playersStr, propsStr]
+    );
+    await conn.end();
+    res.status(201).json({ success: true, id: result.insertId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/game-replay/:gameCode - Récupérer session + snapshots pour le replay
+app.get('/api/game-replay/:gameCode', async (req, res) => {
+  const code = String(req.params.gameCode || '').trim().toUpperCase();
+  if (!code) {
+    res.status(400).json({ error: 'gameCode requis' });
+    return;
+  }
+  try {
+    const conn = await mysql.createConnection(getDbConfig());
+    const [sessions] = await conn.query(
+      'SELECT id, game_code, created_at, started_at, ended_at, winner_type, config_json FROM game_sessions WHERE game_code = ?',
+      [code]
+    );
+    if (sessions.length === 0) {
+      await conn.end();
+      res.status(404).json({ error: 'Partie introuvable' });
+      return;
+    }
+    const session = sessions[0];
+    const [snapshots] = await conn.query(
+      'SELECT id, snapshot_timestamp, remaining_time_seconds, game_phase, players_json, props_json FROM game_replay_snapshots WHERE game_session_id = ? ORDER BY snapshot_timestamp ASC',
+      [session.id]
+    );
+    await conn.end();
+    const config = session.config_json ? (typeof session.config_json === 'string' ? JSON.parse(session.config_json) : session.config_json) : null;
+    const replaySnapshots = snapshots.map(s => ({
+      id: s.id,
+      snapshot_timestamp: s.snapshot_timestamp,
+      remaining_time_seconds: s.remaining_time_seconds,
+      game_phase: s.game_phase,
+      players: s.players_json ? (typeof s.players_json === 'string' ? JSON.parse(s.players_json) : s.players_json) : [],
+      props: s.props_json ? (typeof s.props_json === 'string' ? JSON.parse(s.props_json) : s.props_json) : []
+    }));
+    res.json({
+      session: {
+        id: session.id,
+        game_code: session.game_code,
+        created_at: session.created_at,
+        started_at: session.started_at,
+        ended_at: session.ended_at,
+        winner_type: session.winner_type,
+        config
+      },
+      snapshots: replaySnapshots
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`ServerBDD démarré sur le port ${PORT}`);
   console.log(`Test DB: http://localhost:${PORT}/api/db/test`);

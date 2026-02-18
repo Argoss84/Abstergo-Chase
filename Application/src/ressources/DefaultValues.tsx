@@ -86,6 +86,14 @@ export const getDefaultWebSocketUrl = () => {
     : 'https://ws.abstergochase.fr';
 };
 
+export const getDefaultApiUrl = () => {
+  const env = typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL;
+  if (env) return String(env);
+  return window.location.hostname === 'localhost'
+    ? 'http://localhost:5175'
+    : 'https://bdd.abstergochase.fr';
+};
+
 export const SOCKET_PATH = '/socket.io';
 
 // ===== FONCTIONS UTILITAIRES =====
