@@ -1,6 +1,6 @@
-import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonLabel, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonModal } from '@ionic/react';
+import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonLabel, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonModal, IonInput, IonFooter, IonBadge } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, Circle, Polyline, Polygon, Pane } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -12,7 +12,7 @@ import {
 } from '../utils/utils';
 import { updatePlayerPosition, updatePlayerInStartZone } from '../utils/PlayerUtils';
 import { updateGameWinnerType } from '../utils/AdminUtils';
-import { add, apertureOutline, camera, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, radioOutline, settings, skullOutline } from 'ionicons/icons';
+import { add, apertureOutline, camera, chatbubbleOutline, chevronBackOutline, colorFillOutline, colorFilterOutline, fitnessOutline, locateOutline, locationOutline, navigate, radioOutline, settings, skullOutline } from 'ionicons/icons';
 import './Rogue.css';
 import { GameProp, GameDetails, Player } from '../components/Interfaces';
 import PopUpMarker from '../components/PopUpMarker';
@@ -21,6 +21,7 @@ import QRCode from '../components/QRCode';
 import { useGameSession } from '../contexts/GameSessionContext';
 import { useWakeLock } from '../utils/useWakeLock';
 import { useVibration } from '../hooks/useVibration';
+import { useDeviceHeading } from '../hooks/useDeviceHeading';
 import { handleError, ERROR_CONTEXTS } from '../utils/ErrorUtils';
 import { MapController, ResizeMap, useFogRings } from '../utils/GameMapUtils';
 import {
@@ -65,7 +66,11 @@ const Rogue: React.FC = () => {
     updatePlayer,
     isHost,
     connectionStatus,
-    sessionScope
+    sessionScope,
+    forceReconnect,
+    getIsInRoom,
+    rogueChatMessages,
+    sendRogueChat,
   } = useGameSession();
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null);
   const [currentPosition, setCurrentPosition] = useState<[number, number] | null>(null);
@@ -96,6 +101,10 @@ const Rogue: React.FC = () => {
   
   // État pour les boutons FAB
   const [isFabOpen, setIsFabOpen] = useState(false);
+  const [isChatModalOpen, setIsChatModalOpen] = useState(false);
+  const [lastReadChatCount, setLastReadChatCount] = useState(0);
+  const [chatInput, setChatInput] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   
   // État pour détecter si un objectif est à portée
   const [isObjectiveInRange, setIsObjectiveInRange] = useState<boolean>(false);
@@ -114,6 +123,9 @@ const Rogue: React.FC = () => {
 
   // Hook pour la vibration
   const { vibrate, patterns } = useVibration();
+
+  // Cap de l'appareil (orientation boussole)
+  const deviceHeading = useDeviceHeading();
   
   // État pour la modal du QR code
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
@@ -128,6 +140,9 @@ const Rogue: React.FC = () => {
   // Splash screen pendant le chargement (Lobby → Rogue)
   const [isSplashVisible, setIsSplashVisible] = useState(true);
   const splashMountedAtRef = useRef(Date.now());
+
+  // Ref pour forcer le joinGame au premier montage (même si la session restaurée semble OK)
+  const hasInitialJoinRef = useRef(false);
 
   const isPlayerVisible = useCallback((player: Player) => {
     if (player.status === 'disconnected') return false;
@@ -299,6 +314,27 @@ const Rogue: React.FC = () => {
       toast.error('❌ Position non disponible');
     }
     vibrate(patterns.short);
+  };
+
+  // Chat entre rogues
+  const rogueMsgs = rogueChatMessages ?? [];
+  const chatUnreadCount = isChatModalOpen ? 0 : Math.max(0, rogueMsgs.length - lastReadChatCount);
+  useEffect(() => {
+    if (isChatModalOpen) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [isChatModalOpen, rogueMsgs.length]);
+  const handleOpenRogueChat = () => {
+    setIsChatModalOpen(true);
+    setLastReadChatCount(rogueMsgs.length);
+  };
+  const handleCloseRogueChat = () => {
+    setIsChatModalOpen(false);
+    setLastReadChatCount(rogueMsgs.length);
+  };
+  const handleSendRogueChat = () => {
+    const t = chatInput.trim();
+    if (!t) return;
+    sendRogueChat(t);
+    setChatInput('');
   };
 
   const handleCaptureObjectiv = async () => {
@@ -478,6 +514,7 @@ const Rogue: React.FC = () => {
         }
 
         const needsReconnect =
+          !hasInitialJoinRef.current ||
           sessionScope !== 'game' ||
           (connectionStatus !== 'connected' && connectionStatus !== 'connecting') ||
           !sessionGameDetails ||
@@ -485,6 +522,7 @@ const Rogue: React.FC = () => {
 
         if (needsReconnect) {
           await joinGame(code);
+          hasInitialJoinRef.current = true;
         }
 
         setQrCodeText(`${playerId};${code}`);
@@ -510,6 +548,42 @@ const Rogue: React.FC = () => {
       }
     }
   }, [sessionGameDetails, isHost]);
+
+  // Moniteur de reconnexion : vérifie périodiquement que la connexion est saine
+  useEffect(() => {
+    if (!gameCode || !playerId) return;
+
+    const checkConnection = async () => {
+      if (connectionStatus === 'connected' && !getIsInRoom()) {
+        console.warn('Rogue: socket connecté mais pas dans le room, tentative de rejoin...');
+        try {
+          await joinGame(gameCode);
+        } catch (err) {
+          console.warn('Rogue: rejoin échoué, force reconnexion...', err);
+          try {
+            await forceReconnect();
+          } catch {
+            // Sera réessayé au prochain interval
+          }
+        }
+      } else if (connectionStatus === 'error' || connectionStatus === 'idle') {
+        console.warn('Rogue: état de connexion anormal, force reconnexion...');
+        try {
+          await forceReconnect();
+        } catch {
+          // Sera réessayé au prochain interval
+        }
+      }
+    };
+
+    const initialCheck = setTimeout(checkConnection, 8000);
+    const interval = setInterval(checkConnection, 15000);
+
+    return () => {
+      clearTimeout(initialCheck);
+      clearInterval(interval);
+    };
+  }, [gameCode, playerId, connectionStatus, joinGame, forceReconnect, getIsInRoom]);
 
   // Masquer le splash quand la partie est prête (gameDetails chargé ou erreur) après un délai minimum
   useEffect(() => {
@@ -831,6 +905,34 @@ const Rogue: React.FC = () => {
 
   const visibleObjectives = objectiveProps.filter(prop => prop.visible === true);
 
+  // Indicateur de connexion discret
+  const connectionIndicator = useMemo(() => {
+    const inRoom = getIsInRoom();
+    let cssModifier: string;
+    let label: string;
+
+    if (connectionStatus === 'connected' && inRoom) {
+      cssModifier = 'connected';
+      label = 'Connecté';
+    } else if (connectionStatus === 'connecting' || (connectionStatus === 'connected' && !inRoom)) {
+      cssModifier = 'connecting';
+      label = 'Reconnexion…';
+    } else {
+      cssModifier = 'error';
+      label = 'Déconnecté';
+    }
+
+    return (
+      <span
+        key={`conn-${cssModifier}-${connectionStatus}`}
+        className={`connection-indicator connection-indicator--${cssModifier}`}
+      >
+        <span className="connection-dot" />
+        {cssModifier !== 'connected' && <span>{label}</span>}
+      </span>
+    );
+  }, [connectionStatus, getIsInRoom]);
+
   return (
     <IonPage>
       {/* Splash en premier : couvre toute la page (header + content), min 5 s avant erreur ou jeu */}
@@ -879,7 +981,7 @@ const Rogue: React.FC = () => {
       )}
       <IonHeader>
         <IonToolbar>
-          <IonTitle>Rogue</IonTitle>
+          <IonTitle>Rogue {connectionIndicator}</IonTitle>
           {((isHost && countdown !== null && isCountdownActive) || (!isHost && gameDetails?.remaining_time !== null && gameDetails?.remaining_time !== undefined)) ? (
             <IonLabel slot="primary" className="duration-display countdown-active">
               ⏰ {Math.floor(((isHost ? countdown : gameDetails?.remaining_time) || 0) / 60)}:{(((isHost ? countdown : gameDetails?.remaining_time) || 0) % 60).toString().padStart(2, '0')}
@@ -897,6 +999,57 @@ const Rogue: React.FC = () => {
         </IonToolbar>
       </IonHeader>
       <IonContent>
+        {/* Panneau phase de convergence : joueurs en zone de départ */}
+        {gameDetails?.is_converging_phase && Array.isArray(gameDetails?.players) && gameDetails.players.length > 0 && (
+          <div
+            style={{
+              position: 'fixed',
+              top: '56px',
+              left: '8px',
+              right: '8px',
+              maxWidth: '320px',
+              zIndex: 1000,
+              background: 'rgba(10, 15, 25, 0.92)',
+              border: '1px solid rgba(0, 255, 122, 0.4)',
+              borderRadius: '12px',
+              padding: '10px 12px',
+              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5)',
+              fontSize: '13px',
+            }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: '8px', color: '#00ff7a' }}>
+              🎯 Zone de départ
+            </div>
+            {(gameDetails.players || []).map((p) => {
+              const inZone = p.isInStartZone === true;
+              const name = p.displayName || p.id_player?.slice(0, 8) || 'Joueur';
+              const isYou = p.id_player === playerId;
+              const roleLabel = (p.role || '').toUpperCase() === 'AGENT' ? 'Agent' : 'Rogue';
+              return (
+                <div
+                  key={p.id_player}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '4px 0',
+                    borderBottom: '1px solid rgba(255,255,255,0.08)',
+                  }}
+                >
+                  <span style={{ color: '#fff' }}>
+                    {name}
+                    {isYou && <span style={{ color: '#00ff7a', marginLeft: '4px' }}>(Vous)</span>}
+                    <span style={{ color: 'rgba(255,255,255,0.6)', marginLeft: '6px', fontSize: '11px' }}>{roleLabel}</span>
+                  </span>
+                  <span style={{ color: inZone ? '#2dd36f' : '#ff4961', fontWeight: 600 }}>
+                    {inZone ? '✅ En zone' : '❌ Pas en zone'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {error ? (
           <p>{error}</p>
         ) : gameDetails ? (
@@ -1039,6 +1192,7 @@ const Rogue: React.FC = () => {
                     id="player-position"
                     label={playerName || 'Vous'}
                     isSelf={true}
+                    heading={deviceHeading}
                   />
                 )}
               {(gameDetails?.players || [])
@@ -1184,6 +1338,38 @@ const Rogue: React.FC = () => {
           </div>
         </div>
 
+        {/* Chat entre rogues */}
+        {gameDetails && (
+          <IonFab slot="fixed" vertical="bottom" horizontal="end" style={{ marginBottom: '16px', marginEnd: '16px', overflow: 'visible' }}>
+            <div style={{ position: 'relative', display: 'inline-flex' }}>
+              <IonFabButton onClick={handleOpenRogueChat} color="primary">
+                <IonIcon icon={chatbubbleOutline} />
+              </IonFabButton>
+              {chatUnreadCount > 0 && (
+                <IonBadge
+                  color="danger"
+                  style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    minWidth: '22px',
+                    height: '22px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '11px',
+                    padding: '0 6px',
+                    borderRadius: '11px',
+                    zIndex: 10,
+                  }}
+                >
+                  {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
+                </IonBadge>
+              )}
+            </div>
+          </IonFab>
+        )}
+
         {/* Modal de démarrage de partie */}
         <IonModal 
           isOpen={isGameStartModalOpen} 
@@ -1299,6 +1485,77 @@ const Rogue: React.FC = () => {
             </div>
           </IonContent>
         </IonModal>
+
+        {/* Modal chat rogues */}
+        <IonModal isOpen={isChatModalOpen} onDidDismiss={handleCloseRogueChat}>
+          <IonHeader>
+            <IonToolbar>
+              <IonButtons slot="start">
+                <IonButton fill="clear" onClick={handleCloseRogueChat}>
+                  <IonIcon icon={chevronBackOutline} />
+                </IonButton>
+              </IonButtons>
+              <IonTitle>Chat Rogues</IonTitle>
+              <IonButtons slot="end">
+                <IonButton onClick={handleCloseRogueChat}>Fermer</IonButton>
+              </IonButtons>
+            </IonToolbar>
+          </IonHeader>
+          <IonContent className="ion-padding">
+            <div style={{ display: 'flex', flexDirection: 'column', minHeight: '240px' }}>
+              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {rogueMsgs.length === 0 && (
+                  <IonText color="medium" style={{ textAlign: 'center', padding: '24px', fontSize: '14px' }}>
+                    Aucun message. Envoyez le premier !
+                  </IonText>
+                )}
+                {rogueMsgs.map((m) => {
+                  const isMe = m.playerId === playerId;
+                  return (
+                    <div
+                      key={`${m.timestamp}-${m.playerId}`}
+                      style={{
+                        alignSelf: isMe ? 'flex-end' : 'flex-start',
+                        maxWidth: '85%',
+                        padding: '8px 12px',
+                        borderRadius: '12px',
+                        backgroundColor: isMe ? 'var(--ion-color-primary)' : 'var(--ion-color-light)',
+                        color: isMe ? 'var(--ion-color-primary-contrast)' : 'var(--ion-color-dark)',
+                      }}
+                    >
+                      <div style={{ fontSize: '11px', opacity: 0.9, marginBottom: '2px' }}>
+                        {isMe ? 'Vous' : m.playerName}
+                      </div>
+                      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.text}</div>
+                      <div style={{ fontSize: '10px', opacity: 0.8, marginTop: '2px' }}>
+                        {new Date(m.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={messagesEndRef} />
+              </div>
+            </div>
+          </IonContent>
+          <IonFooter>
+            <IonToolbar>
+              <div style={{ display: 'flex', gap: '8px', padding: '8px', alignItems: 'center' }}>
+                <IonInput
+                  value={chatInput}
+                  onIonInput={(e) => setChatInput(String(e.detail.value ?? ''))}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSendRogueChat(); } }}
+                  placeholder="Votre message..."
+                  style={{ flex: 1, '--padding-start': '12px' } as React.CSSProperties}
+                  clearOnEdit={false}
+                />
+                <IonButton onClick={handleSendRogueChat} disabled={!chatInput.trim()} color="primary">
+                  Envoyer
+                </IonButton>
+              </div>
+            </IonToolbar>
+          </IonFooter>
+        </IonModal>
+
       </IonContent>
     </IonPage>
   );

@@ -36,6 +36,8 @@ interface SessionState {
   connectionStatus: ConnectionStatus;
   sessionScope: SessionScope;
   lobbyChatMessages: LobbyChatMessage[];
+  agentChatMessages: LobbyChatMessage[];
+  rogueChatMessages: LobbyChatMessage[];
 }
 
 interface PersistedSessionData {
@@ -78,7 +80,9 @@ const createInitialState = (): SessionState => ({
   props: [],
   connectionStatus: 'idle',
   sessionScope: 'lobby',
-  lobbyChatMessages: []
+  lobbyChatMessages: [],
+  agentChatMessages: [],
+  rogueChatMessages: []
 });
 
 interface PendingAction {
@@ -102,6 +106,7 @@ class GameSessionService {
   private gameRejoinInFlight = false;
   private gameJoinInProgress = false;
   private gameHostReconnectInProgress = false;
+  private inRoom = false;
   private lastStatusUpdate = 0;
   private persistSnapshotIntervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -122,16 +127,33 @@ class GameSessionService {
           // Quand l'utilisateur revient sur la page (déverrouillage)
           if ((this.state.lobbyCode || this.state.gameCode) && this.state.playerId) {
             let resumeAttempts = 0;
-            const MAX_RESUME_ATTEMPTS = 20; // ~10 secondes max
+            const MAX_RESUME_ATTEMPTS = 30; // ~15 secondes max
             const tryResume = () => {
               if (!this.socket?.connected) {
                 if (resumeAttempts++ < MAX_RESUME_ATTEMPTS) {
+                  // Après quelques tentatives, forcer la reconnexion du socket
+                  if (resumeAttempts === 5) {
+                    console.log('visibilitychange: socket non connecté après 2.5s, appel ensureSocket()');
+                    this.ensureSocket().catch(() => {});
+                  }
                   setTimeout(tryResume, 500);
+                } else {
+                  // Toutes les tentatives d'attente épuisées, forcer une reconnexion complète
+                  console.warn('visibilitychange: forcer reconnexion complète');
+                  this.forceReconnect();
                 }
                 return;
               }
               // Socket connecté
               this.updatePlayerStatus('active');
+              
+              // Vérifier si on est dans le room serveur, sinon forcer le rejoin
+              if (!this.inRoom) {
+                console.log('visibilitychange: socket connecté mais pas dans le room, tentative de rejoin...');
+                this.handleSocketReconnect();
+                return;
+              }
+              
               if (this.state.isHost) {
                 // Host : vérifier si des canaux WebRTC sont ouverts
                 // (les canaux peuvent être fermés quand le téléphone est verrouillé)
@@ -215,6 +237,7 @@ class GameSessionService {
   // Nouvelle méthode pour forcer la sortie d'un lobby sans nettoyer le nom du joueur
   leaveLobby() {
     console.log('Sortie du lobby actuel');
+    this.inRoom = false;
     
     // Informer le serveur qu'on quitte définitivement le lobby (si connecté)
     if (this.state.lobbyCode && this.socket?.connected) {
@@ -243,7 +266,9 @@ class GameSessionService {
       props: [],
       connectionStatus: this.socket?.connected ? 'connected' : 'idle',
       sessionScope: 'lobby',
-      lobbyChatMessages: []
+      lobbyChatMessages: [],
+      agentChatMessages: [],
+      rogueChatMessages: []
     });
     this.state.playerName = playerName;
   }
@@ -255,8 +280,23 @@ class GameSessionService {
     this.sendSocket('lobby:chat', { text: t });
   }
 
+  sendAgentChat(text: string) {
+    if (!this.state.gameCode || this.state.sessionScope !== 'game') return;
+    const t = String(text ?? '').trim().substring(0, 500);
+    if (!t) return;
+    this.sendSocket('game:chat:agent', { text: t });
+  }
+
+  sendRogueChat(text: string) {
+    if (!this.state.gameCode || this.state.sessionScope !== 'game') return;
+    const t = String(text ?? '').trim().substring(0, 500);
+    if (!t) return;
+    this.sendSocket('game:chat:rogue', { text: t });
+  }
+
   leaveGame() {
     console.log('Sortie de la partie en cours');
+    this.inRoom = false;
 
     if (this.state.gameCode && this.socket?.connected) {
       this.sendSocket('game:leave', {
@@ -280,7 +320,9 @@ class GameSessionService {
       props: [],
       connectionStatus: this.socket?.connected ? 'connected' : 'idle',
       sessionScope: 'lobby',
-      lobbyChatMessages: []
+      lobbyChatMessages: [],
+      agentChatMessages: [],
+      rogueChatMessages: []
     });
     this.state.playerName = playerName;
   }
@@ -360,6 +402,7 @@ class GameSessionService {
       players: [hostPlayer]
     };
 
+    this.inRoom = true;
     this.updateState({
       lobbyCode,
       gameCode: null,
@@ -387,8 +430,8 @@ class GameSessionService {
       return;
     }
 
-    // Si on est déjà connecté au bon lobby, ne rien faire
-    if (this.state.lobbyCode === code && this.state.connectionStatus === 'connected') {
+    // Si on est déjà connecté au bon lobby ET dans le room serveur, ne rien faire
+    if (this.state.lobbyCode === code && this.state.connectionStatus === 'connected' && this.inRoom) {
       return;
     }
 
@@ -422,6 +465,7 @@ class GameSessionService {
 
       const response = await this.waitFor('lobby:joined');
       
+      this.inRoom = true;
       this.updateState({
         lobbyCode: response.code,
         gameCode: null,
@@ -462,6 +506,7 @@ class GameSessionService {
     const response = await this.waitFor('game:created', 15000);
 
     this.cleanupConnections();
+    this.inRoom = true;
     this.updateState({
       lobbyCode: null,
       gameCode: response.code,
@@ -470,7 +515,9 @@ class GameSessionService {
       connectionStatus: 'connected',
       sessionScope: 'game',
       gameDetails: updatedGameDetails,
-      lobbyChatMessages: []
+      lobbyChatMessages: [],
+      agentChatMessages: [],
+      rogueChatMessages: []
     });
 
     await this.reestablishAllPeerConnections();
@@ -481,7 +528,8 @@ class GameSessionService {
       return;
     }
 
-    if (this.state.gameCode === code && this.state.sessionScope === 'game' && this.state.connectionStatus === 'connected') {
+    // Ne pas re-rejoindre si on est déjà dans le room serveur pour cette partie
+    if (this.state.gameCode === code && this.state.sessionScope === 'game' && this.state.connectionStatus === 'connected' && this.inRoom) {
       return;
     }
 
@@ -500,6 +548,7 @@ class GameSessionService {
 
       const response = await this.waitFor('game:joined');
 
+      this.inRoom = true;
       this.updateState({
         lobbyCode: null,
         gameCode: response.code,
@@ -507,7 +556,9 @@ class GameSessionService {
         isHost: response.playerId === response.hostId,
         connectionStatus: 'connected',
         sessionScope: 'game',
-        lobbyChatMessages: []
+        lobbyChatMessages: [],
+        agentChatMessages: [],
+        rogueChatMessages: []
       });
 
       this.sendSocket('player:status-update', { status: 'active' });
@@ -626,6 +677,38 @@ class GameSessionService {
       this.requestResync('manual-state-request');
       this.sendAction('action:request-state', {});
     }
+  }
+
+  /**
+   * Force la reconnexion au socket et au room serveur.
+   * Utile quand l'application détecte un état incohérent (ex: refresh de page).
+   */
+  async forceReconnect() {
+    console.log('Force reconnexion demandée');
+    this.inRoom = false;
+    
+    // Détruire le socket existant pour repartir proprement
+    if (this.socket) {
+      this.socket.removeAllListeners();
+      this.socket.disconnect();
+      this.socket = null;
+      this.socketReady = null;
+    }
+    
+    try {
+      await this.ensureSocket();
+      // handleSocketReconnect() est appelé automatiquement par le handler 'connect'
+    } catch (error) {
+      console.error('Erreur lors de la reconnexion forcée:', error);
+      this.updateState({ connectionStatus: 'error' });
+    }
+  }
+
+  /**
+   * Indique si le service est actuellement dans un room serveur (lobby ou game).
+   */
+  getIsInRoom(): boolean {
+    return this.inRoom;
   }
 
   private persistSession() {
@@ -750,6 +833,7 @@ class GameSessionService {
             ? { ...this.state.gameDetails, players: updatedPlayers }
             : null;
           
+          this.inRoom = true;
           this.updateState({
             playerId: newPlayerId,
             players: updatedPlayers,
@@ -817,6 +901,7 @@ class GameSessionService {
             ? { ...this.state.gameDetails, players: updatedPlayers }
             : null;
 
+          this.inRoom = true;
           this.updateState({
             playerId: newPlayerId,
             players: updatedPlayers,
@@ -897,10 +982,38 @@ class GameSessionService {
 
 
   private async ensureSocket() {
+    // Fast path : socket déjà connecté
     if (this.socket?.connected) {
       return;
     }
 
+    // Le socket existe mais est déconnecté (ex: après perte réseau temporaire)
+    if (this.socket && !this.socket.connected) {
+      // Vérifier si Socket.IO est encore en train de se reconnecter automatiquement
+      const isActive = typeof (this.socket as any).active === 'boolean'
+        ? (this.socket as any).active
+        : false;
+      
+      if (isActive) {
+        // Attendre la reconnexion automatique de Socket.IO
+        try {
+          await this.waitForSocketReconnect();
+          return;
+        } catch {
+          // Timeout ou échec de la reconnexion auto, on va recréer le socket
+          console.warn('Reconnexion auto Socket.IO échouée, recréation du socket...');
+        }
+      }
+      
+      // Le socket est mort ou la reconnexion auto a échoué - détruire et recréer
+      console.log('Destruction du socket stale et recréation...');
+      this.socket.removeAllListeners();
+      this.socket.disconnect();
+      this.socket = null;
+      this.socketReady = null;
+    }
+
+    // Éviter les créations concurrentes de socket
     if (this.socketReady) {
       return this.socketReady;
     }
@@ -926,9 +1039,8 @@ class GameSessionService {
         resolve();
         this.handleSocketReconnect();
         
-        // Si on est sur la page et qu'on a un lobby, mettre à jour le statut à "active"
+        // Si on est sur la page et qu'on a un lobby/game, mettre à jour le statut
         if (!document.hidden && (this.state.lobbyCode || this.state.gameCode) && this.state.playerId) {
-          // Attendre un peu que la connexion soit stable
           setTimeout(() => {
             this.updatePlayerStatus('active');
           }, 500);
@@ -936,16 +1048,17 @@ class GameSessionService {
       });
 
       this.socket.on('connect_error', (error: Error) => {
-        console.warn('Erreur de connexion socket.io (réessai automatique):', error);
-        // Ne pas passer en 'error' immédiatement, laisser socket.io réessayer
-        // On ne met en 'error' que si vraiment toutes les tentatives échouent
+        console.warn('Erreur de connexion socket.io (réessai automatique):', error.message);
       });
 
       this.socket.on('message', (message: { type: string; payload: any }) => this.handleSocketMessage(message));
       this.socket.on('disconnect', (reason) => {
         console.log('Socket déconnecté, raison:', reason);
-        // Ne pas mettre en 'error' si c'est juste une déconnexion normale ou transport
-        // Socket.io va gérer la reconnexion automatique
+        // Marquer qu'on n'est plus dans le room serveur
+        this.inRoom = false;
+        // Réinitialiser socketReady pour que ensureSocket() puisse recréer/attendre
+        this.socketReady = null;
+        
         if (reason === 'io server disconnect' || reason === 'io client disconnect') {
           this.updateState({ connectionStatus: 'idle' });
         } else {
@@ -957,6 +1070,29 @@ class GameSessionService {
     });
 
     return this.socketReady;
+  }
+
+  /**
+   * Attend que le socket se reconnecte automatiquement via Socket.IO.
+   * Rejette après SOCKET_TIMEOUT ms.
+   */
+  private waitForSocketReconnect(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket) return reject(new Error('No socket'));
+      if (this.socket.connected) return resolve();
+      
+      const timeout = setTimeout(() => {
+        this.socket?.off('connect', onConnect);
+        reject(new Error('Socket reconnection timeout'));
+      }, SOCKET_TIMEOUT);
+      
+      const onConnect = () => {
+        clearTimeout(timeout);
+        resolve();
+      };
+      
+      this.socket.once('connect', onConnect);
+    });
   }
 
   private waitFor(type: string, timeoutMs: number = 10000): Promise<any> {
@@ -1119,6 +1255,18 @@ class GameSessionService {
       return;
     }
 
+    if (type === 'game:chat-agent-message' && payload?.playerId != null && typeof payload?.text === 'string') {
+      const arr = [...this.state.agentChatMessages, { playerId: payload.playerId, playerName: payload.playerName || 'Joueur', text: payload.text, timestamp: payload.timestamp || Date.now() }];
+      this.updateState({ agentChatMessages: arr.length > 100 ? arr.slice(-100) : arr });
+      return;
+    }
+
+    if (type === 'game:chat-rogue-message' && payload?.playerId != null && typeof payload?.text === 'string') {
+      const arr = [...this.state.rogueChatMessages, { playerId: payload.playerId, playerName: payload.playerName || 'Joueur', text: payload.text, timestamp: payload.timestamp || Date.now() }];
+      this.updateState({ rogueChatMessages: arr.length > 100 ? arr.slice(-100) : arr });
+      return;
+    }
+
     if (type === 'admin:notification' && payload != null && typeof payload.message === 'string') {
       const msg = payload.title ? `${payload.title} — ${payload.message}` : payload.message;
       toast.info(msg);
@@ -1135,6 +1283,7 @@ class GameSessionService {
   }
 
   private resetSession() {
+    this.inRoom = false;
     this.cleanupConnections();
     localStorage.removeItem(SESSION_STORAGE_KEY);
     this.clearObjectiveCirclesSession();
@@ -1148,7 +1297,9 @@ class GameSessionService {
       props: [],
       connectionStatus: 'idle',
       sessionScope: 'lobby',
-      lobbyChatMessages: []
+      lobbyChatMessages: [],
+      agentChatMessages: [],
+      rogueChatMessages: []
     });
   }
 
@@ -1475,7 +1626,9 @@ class GameSessionService {
   }
 
   private handleSocketReconnect() {
+    // Appelé à chaque (re)connexion socket - toujours tenter de rejoindre le room serveur
     if (this.state.sessionScope === 'game' && this.state.gameCode) {
+      console.log(`Socket (re)connecté → rejoin game ${this.state.gameCode} (host: ${this.state.isHost}, inRoom: ${this.inRoom})`);
       if (this.state.isHost) {
         this.reconnectToGame();
       } else {
@@ -1484,6 +1637,7 @@ class GameSessionService {
       return;
     }
     if (this.state.lobbyCode) {
+      console.log(`Socket (re)connecté → rejoin lobby ${this.state.lobbyCode} (host: ${this.state.isHost}, inRoom: ${this.inRoom})`);
       if (this.state.isHost) {
         this.reconnectToLobby();
       } else {
@@ -1498,32 +1652,51 @@ class GameSessionService {
       return;
     }
 
-    // Si on est déjà connecté, ne pas rejoindre
-    if (this.state.connectionStatus === 'connected') {
+    // Ne pas re-rejoindre si on est déjà dans le room serveur
+    if (this.inRoom) {
       return;
     }
 
     this.rejoinInFlight = true;
-    try {
-      this.sendSocket('lobby:join', {
-        code: this.state.lobbyCode,
-        playerName: this.state.playerName,
-        // Envoyer l'ancien playerId pour la reconnexion
-        oldPlayerId: this.state.playerId
-      });
-      const response = await this.waitFor('lobby:joined', 10000);
-      this.updateState({
-        lobbyCode: response.code,
-        playerId: response.playerId,
-        isHost: response.playerId === response.hostId,
-        connectionStatus: 'connected'
-      });
-      this.requestResync('socket-reconnect');
-    } catch (error) {
-      // Erreur silencieuse
-    } finally {
-      this.rejoinInFlight = false;
+    const MAX_RETRIES = 4;
+    const BASE_DELAY = 2000;
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        // S'assurer que le socket est connecté avant d'envoyer
+        if (!this.socket?.connected) {
+          await this.ensureSocket();
+        }
+
+        this.sendSocket('lobby:join', {
+          code: this.state.lobbyCode,
+          playerName: this.state.playerName,
+          oldPlayerId: this.state.playerId
+        });
+        const response = await this.waitFor('lobby:joined', 10000);
+        this.inRoom = true;
+        this.updateState({
+          lobbyCode: response.code,
+          playerId: response.playerId,
+          isHost: response.playerId === response.hostId,
+          connectionStatus: 'connected'
+        });
+        this.sendSocket('player:status-update', { status: 'active' });
+        this.requestResync('socket-reconnect');
+        console.log(`Rejoin lobby réussi (tentative ${attempt + 1}/${MAX_RETRIES})`);
+        this.rejoinInFlight = false;
+        return;
+      } catch (error) {
+        console.warn(`Tentative rejoin lobby ${attempt + 1}/${MAX_RETRIES} échouée:`, error);
+        if (attempt < MAX_RETRIES - 1) {
+          const delay = BASE_DELAY * Math.pow(1.5, attempt);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
     }
+
+    console.error('Impossible de rejoindre le lobby après toutes les tentatives');
+    this.rejoinInFlight = false;
   }
 
   private async attemptGameRejoin() {
@@ -1531,33 +1704,56 @@ class GameSessionService {
       return;
     }
 
-    if (this.state.connectionStatus === 'connected') {
+    // Ne pas re-rejoindre si on est déjà dans le room serveur
+    if (this.inRoom) {
       return;
     }
 
     this.gameRejoinInFlight = true;
-    try {
-      this.sendSocket('game:join', {
-        code: this.state.gameCode,
-        playerName: this.state.playerName,
-        oldPlayerId: this.state.playerId
-      });
-      const response = await this.waitFor('game:joined', 10000);
-      this.updateState({
-        lobbyCode: null,
-        gameCode: response.code,
-        playerId: response.playerId,
-        isHost: response.playerId === response.hostId,
-        connectionStatus: 'connected',
-        sessionScope: 'game',
-        lobbyChatMessages: []
-      });
-      this.requestResync('socket-reconnect');
-    } catch (error) {
-      // Erreur silencieuse
-    } finally {
-      this.gameRejoinInFlight = false;
+    const MAX_RETRIES = 4;
+    const BASE_DELAY = 2000;
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        // S'assurer que le socket est connecté avant d'envoyer
+        if (!this.socket?.connected) {
+          await this.ensureSocket();
+        }
+
+        this.sendSocket('game:join', {
+          code: this.state.gameCode,
+          playerName: this.state.playerName,
+          oldPlayerId: this.state.playerId
+        });
+        const response = await this.waitFor('game:joined', 10000);
+        this.inRoom = true;
+        this.updateState({
+          lobbyCode: null,
+          gameCode: response.code,
+          playerId: response.playerId,
+          isHost: response.playerId === response.hostId,
+          connectionStatus: 'connected',
+          sessionScope: 'game',
+          lobbyChatMessages: [],
+          agentChatMessages: [],
+          rogueChatMessages: []
+        });
+        this.sendSocket('player:status-update', { status: 'active' });
+        this.requestResync('socket-reconnect');
+        console.log(`Rejoin game réussi (tentative ${attempt + 1}/${MAX_RETRIES})`);
+        this.gameRejoinInFlight = false;
+        return;
+      } catch (error) {
+        console.warn(`Tentative rejoin game ${attempt + 1}/${MAX_RETRIES} échouée:`, error);
+        if (attempt < MAX_RETRIES - 1) {
+          const delay = BASE_DELAY * Math.pow(1.5, attempt);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
     }
+
+    console.error('Impossible de rejoindre la partie après toutes les tentatives');
+    this.gameRejoinInFlight = false;
   }
 
   private requestResync(reason: string) {

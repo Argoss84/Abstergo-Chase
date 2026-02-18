@@ -24,7 +24,8 @@ import { chevronBackOutline } from 'ionicons/icons';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { useGameSession } from '../contexts/GameSessionContext';
-import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Circle, Polyline, Polygon } from 'react-leaflet';
+
+import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Circle, CircleMarker, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { generateRandomPoints, generateStartZone, generateStartZoneRogue, getOuterStreetContour } from '../utils/utils';
@@ -498,6 +499,30 @@ const CreateLobby: React.FC = () => {
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                   />
                   <MapEvents />
+                  {/* Marqueur de position GPS de l'utilisateur */}
+                  {userPosition && (
+                    <>
+                      <CircleMarker
+                        center={userPosition}
+                        radius={6}
+                        pathOptions={{
+                          color: '#fff',
+                          weight: 2,
+                          fillColor: '#4285F4',
+                          fillOpacity: 1,
+                        }}
+                      />
+                      <CircleMarker
+                        center={userPosition}
+                        radius={18}
+                        pathOptions={{
+                          color: 'transparent',
+                          fillColor: '#4285F4',
+                          fillOpacity: 0.15,
+                        }}
+                      />
+                    </>
+                  )}
                   {selectedPosition && (
                     <>
                       <Marker position={selectedPosition} />

@@ -2387,6 +2387,54 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'game:chat:agent') {
+      const { gameCode } = clients.get(socket.id) || {};
+      const text = typeof payload?.text === 'string' ? payload.text.trim().substring(0, 500) : '';
+      if (!gameCode || !games.has(gameCode) || !text) return;
+
+      const game = games.get(gameCode);
+      const player = game.players.get(clientId);
+      if (!player || (player.role || '').toUpperCase() !== 'AGENT') return;
+
+      const msg = {
+        playerId: clientId,
+        playerName: player.name || 'Joueur',
+        text,
+        timestamp: Date.now()
+      };
+
+      game.players.forEach((p) => {
+        if ((p.role || '').toUpperCase() !== 'AGENT') return;
+        const s = socketsById.get(p.id);
+        if (s) send(s, { type: 'game:chat-agent-message', payload: msg });
+      });
+      return;
+    }
+
+    if (type === 'game:chat:rogue') {
+      const { gameCode } = clients.get(socket.id) || {};
+      const text = typeof payload?.text === 'string' ? payload.text.trim().substring(0, 500) : '';
+      if (!gameCode || !games.has(gameCode) || !text) return;
+
+      const game = games.get(gameCode);
+      const player = game.players.get(clientId);
+      if (!player || (player.role || '').toUpperCase() !== 'ROGUE') return;
+
+      const msg = {
+        playerId: clientId,
+        playerName: player.name || 'Joueur',
+        text,
+        timestamp: Date.now()
+      };
+
+      game.players.forEach((p) => {
+        if ((p.role || '').toUpperCase() !== 'ROGUE') return;
+        const s = socketsById.get(p.id);
+        if (s) send(s, { type: 'game:chat-rogue-message', payload: msg });
+      });
+      return;
+    }
+
     if (type === 'player:role-update') {
       const { lobbyCode, gameCode } = clients.get(socket.id) || {};
       const targetId = payload?.playerId || clientId;
