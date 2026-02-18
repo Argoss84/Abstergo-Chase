@@ -17,7 +17,7 @@ import {
 } from '@ionic/react';
 import { useHistory } from 'react-router-dom';
 import { useGameSession } from '../contexts/GameSessionContext';
-import { trophyOutline, personOutline, skullOutline, timeOutline, flagOutline } from 'ionicons/icons';
+import { trophyOutline, personOutline, skullOutline, timeOutline, flagOutline, videocamOutline } from 'ionicons/icons';
 import './EndGame.css';
 
 const EndGame: React.FC = () => {
@@ -185,6 +185,19 @@ const EndGame: React.FC = () => {
               </IonList>
             </IonCardContent>
           </IonCard>
+        )}
+
+        {/* Bouton pour voir le replay */}
+        {gameDetails?.code && (
+          <IonButton
+            expand="block"
+            fill="outline"
+            onClick={() => history.push(`/replay?code=${gameDetails.code}`)}
+            style={{ marginTop: '20px' }}
+          >
+            <IonIcon icon={videocamOutline} slot="start" />
+            Voir le replay
+          </IonButton>
         )}
 
         {/* Bouton pour retourner à l'accueil */}
