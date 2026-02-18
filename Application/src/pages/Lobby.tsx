@@ -28,7 +28,7 @@ import {
 import { chatbubbleOutline, chevronBackOutline } from 'ionicons/icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useHistory } from 'react-router-dom';
-import { MapContainer, TileLayer, Circle, Marker, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Circle, Marker, Polyline, Polygon, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { GameDetails, GameProp, Player } from '../components/Interfaces';
@@ -702,14 +702,34 @@ const Lobby: React.FC = () => {
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 />
-                <Circle
-                  center={[
-                    parseFloat(gameDetails.map_center_latitude || '0'),
-                    parseFloat(gameDetails.map_center_longitude || '0')
-                  ]}
-                  radius={gameDetails.map_radius || 1000}
-                  pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
-                />
+                {gameDetails.map_streets && gameDetails.map_streets.length > 0 ? (
+                  gameDetails.map_streets.length === 1 && gameDetails.map_streets[0].length >= 3 ? (
+                    <Polygon
+                      positions={gameDetails.map_streets[0]}
+                      pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.12, weight: 2.5 }}
+                    />
+                  ) : (
+                    gameDetails.map_streets.map((street, index) => {
+                      if (!Array.isArray(street) || street.length < 2) return null;
+                      return (
+                        <Polyline
+                          key={`zone-street-${index}`}
+                          positions={street}
+                          pathOptions={{ color: 'blue', weight: 2.5, opacity: 0.9 }}
+                        />
+                      );
+                    })
+                  )
+                ) : (
+                  <Circle
+                    center={[
+                      parseFloat(gameDetails.map_center_latitude || '0'),
+                      parseFloat(gameDetails.map_center_longitude || '0')
+                    ]}
+                    radius={gameDetails.map_radius || 1000}
+                    pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.08, weight: 2.5 }}
+                  />
+                )}
                 {gameDetails.start_zone_latitude && gameDetails.start_zone_longitude && (
                   <>
                     <Marker
