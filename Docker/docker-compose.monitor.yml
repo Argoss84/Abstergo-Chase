@@ -1,0 +1,22 @@
+# Monitoring HTTP → se connecte au signaling via Socket.IO (admin:*)
+# Le signaling doit déjà tourner (Docker ou local).
+#
+#   docker compose -f docker-compose.monitor.yml up --build
+#
+# Windows / Mac : host.docker.internal vers la machine hôte
+# Linux : utiliser l’IP du host ou mettre signaling sur le même réseau compose
+
+services:
+  monitor:
+    build:
+      context: ..
+      dockerfile: Docker/monitor/Dockerfile
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    restart: unless-stopped
+    ports:
+      - '${MONITOR_PUBLISH_PORT:-8090}:8090'
+    environment:
+      PORT: 8090
+      SIGNALING_URL: ${SIGNALING_URL:-http://host.docker.internal:5174}
+      SOCKET_IO_PATH: /socket.io

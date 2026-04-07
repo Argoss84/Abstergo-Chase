@@ -1,0 +1,11 @@
+{
+  "name": "abstergo-docker-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:signaling": "node test-signaling.mjs"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.1"
+  }
+}

@@ -42,6 +42,8 @@ export interface GameDetails {
   started: boolean | null;
   countdown_started: boolean | null;
   game_starting?: boolean | null;
+  /** Segments de rue ou anneau unique (≥3 points) affichés comme polygone sur la carte */
+  map_streets?: [number, number][][] | null;
   props?: GameProp[];
   players?: Player[];
   objective_circles?: ObjectiveCircle[];

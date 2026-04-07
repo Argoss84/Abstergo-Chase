@@ -87,7 +87,7 @@ const GameReplay: React.FC = () => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [progress, setProgress] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [speed, setSpeed] = useState<number>(1);
+  const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
   const lastFrameRef = useRef<number>(0);
   const animationRef = useRef<number | null>(null);
 

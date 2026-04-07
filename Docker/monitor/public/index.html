@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monitoring signaling (proxy)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 20px;
+      min-height: 100vh;
+      color: #111;
+    }
+    h1 {
+      color: #fff;
+      text-align: center;
+      margin-bottom: 20px;
+      text-shadow: 1px 1px 3px rgba(0,0,0,.25);
+    }
+    .banner {
+      background: rgba(255,255,255,.95);
+      border-radius: 8px;
+      padding: 10px 16px;
+      margin-bottom: 16px;
+      text-align: center;
+      font-size: 14px;
+    }
+    .banner.err { background: #ffebee; color: #b71c1c; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .stat-box {
+      background: #fff;
+      border-radius: 10px;
+      padding: 16px;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,.1);
+    }
+    .stat-box .number { font-size: 1.8em; font-weight: 700; color: #667eea; }
+    .stat-box .label { font-size: 13px; color: #666; margin-top: 4px; }
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.1);
+    }
+    .card h2 {
+      color: #667eea;
+      font-size: 1.1em;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #eee;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #f5f5f5; color: #555; }
+    .status { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .status.connected { background: #c8e6c9; color: #1b5e20; }
+    .status.disconnected { background: #ffcdd2; color: #b71c1c; }
+    .no-data { color: #999; font-style: italic; padding: 12px; text-align: center; }
+    .logs {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+      border-radius: 8px;
+      padding: 12px;
+      max-height: 320px;
+      overflow-y: auto;
+    }
+    .log-entry { padding: 4px 0; border-bottom: 1px solid #333; }
+    button, .btn {
+      background: #667eea;
+      color: #fff;
+      border: none;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button:hover, .btn:hover { background: #764ba2; }
+    select, textarea, input[type="text"] {
+      width: 100%;
+      max-width: 400px;
+      padding: 8px;
+      margin: 6px 0;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+    }
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.45);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-box {
+      background: #fff;
+      border-radius: 12px;
+      max-width: 720px;
+      width: 100%;
+      max-height: 90vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .modal-header {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: #fff;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-body { padding: 16px; overflow-y: auto; font-size: 14px; }
+    .modal-close {
+      background: rgba(255,255,255,.25);
+      border: none;
+      color: #fff;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+    }
+    pre.json { background: #f5f5f5; padding: 12px; border-radius: 8px; overflow: auto; font-size: 12px; max-height: 200px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Monitoring signalisation <small style="font-weight:400;opacity:.9">(via proxy Socket.IO)</small></h1>
+    <div id="banner" class="banner" style="display:none"></div>
+
+    <div class="stat-grid">
+      <div class="stat-box"><div class="number" id="sClients">–</div><div class="label">Clients</div></div>
+      <div class="stat-box"><div class="number" id="sLobbies">–</div><div class="label">Lobbies</div></div>
+      <div class="stat-box"><div class="number" id="sGames">–</div><div class="label">Parties</div></div>
+      <div class="stat-box"><div class="number" id="sMsgs">–</div><div class="label">Msgs socket</div></div>
+      <div class="stat-box"><div class="number" id="sUp">–</div><div class="label">Uptime (min)</div></div>
+      <div class="stat-box"><div class="number" id="sMem">–</div><div class="label">Heap signaling (MB)</div></div>
+    </div>
+
+    <div class="card" id="clientsCard"><h2>Clients</h2><div class="no-data">Chargement…</div></div>
+    <div class="card" id="lobbiesCard"><h2>Lobbies</h2><div class="no-data">Chargement…</div></div>
+    <div class="card" id="gamesCard"><h2>Parties</h2><div class="no-data">Chargement…</div></div>
+
+    <div class="card">
+      <h2>Notifications</h2>
+      <p style="font-size:13px;color:#666;margin-bottom:8px">Joueur</p>
+      <select id="notifyPlayerSelect"></select>
+      <textarea id="notifyPlayerMsg" rows="2" placeholder="Message…"></textarea>
+      <input type="text" id="notifyPlayerTitle" placeholder="Titre (optionnel)" />
+      <button type="button" id="notifyPlayerBtn">Envoyer au joueur</button>
+
+      <p style="font-size:13px;color:#666;margin:16px 0 8px">Partie</p>
+      <select id="notifyGameSelect"></select>
+      <textarea id="notifyGameMsg" rows="2" placeholder="Message…"></textarea>
+      <input type="text" id="notifyGameTitle" placeholder="Titre (optionnel)" />
+      <button type="button" id="notifyGameBtn">Envoyer à la partie</button>
+    </div>
+
+    <div class="card">
+      <h2>Logs signaling (aperçu)</h2>
+      <div id="logsBox" class="logs"></div>
+    </div>
+  </div>
+
+  <div id="gameModal" class="modal-overlay" aria-hidden="true">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="gameModalTitle">Partie</h3>
+        <button type="button" class="modal-close" id="gameModalClose" aria-label="Fermer">×</button>
+      </div>
+      <div class="modal-body" id="gameModalBody"></div>
+    </div>
+  </div>
+
+  <script>
+    const banner = document.getElementById('banner');
+
+    function showBanner(text, isErr) {
+      banner.style.display = 'block';
+      banner.textContent = text;
+      banner.className = 'banner' + (isErr ? ' err' : '');
+    }
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s == null ? '' : String(s);
+      return d.innerHTML;
+    }
+
+    async function updateStats() {
+      try {
+        const r = await fetch('/api/stats');
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          showBanner('Signaling indisponible : ' + (j.error || r.statusText), true);
+          return;
+        }
+        banner.style.display = 'none';
+        const stats = await r.json();
+
+        document.getElementById('sClients').textContent = stats.connectedClients;
+        document.getElementById('sLobbies').textContent = stats.activeLobbies;
+        document.getElementById('sGames').textContent = stats.activeGames;
+        document.getElementById('sMsgs').textContent = stats.totalSocketMessages;
+        const up = stats.serverInfo && stats.serverInfo.uptime != null
+          ? Math.floor(stats.serverInfo.uptime / 60) + 'm' : 'n/a';
+        document.getElementById('sUp').textContent = up;
+        const heap = stats.serverInfo && stats.serverInfo.memoryUsage
+          ? Math.round(stats.serverInfo.memoryUsage.heapUsed / 1024 / 1024) : 'n/a';
+        document.getElementById('sMem').textContent = heap;
+
+        const clientsCard = document.getElementById('clientsCard');
+        if (stats.clients && stats.clients.length) {
+          clientsCard.innerHTML = '<h2>Clients</h2><table><thead><tr><th>ClientId</th><th>Lobby</th><th>Game</th><th>Statut</th></tr></thead><tbody>' +
+            stats.clients.map(c => '<tr><td><code>' + esc(c.clientId).slice(0, 10) + '…</code></td><td>' + esc(c.lobbyCode) + '</td><td>' + esc(c.gameCode) + '</td><td><span class="status ' + (c.connected ? 'connected' : 'disconnected') + '">' + (c.connected ? 'Connecté' : 'Déco') + '</span></td></tr>').join('') +
+            '</tbody></table>';
+        } else {
+          clientsCard.innerHTML = '<h2>Clients</h2><div class="no-data">Aucun client</div>';
+        }
+
+        const notifySel = document.getElementById('notifyPlayerSelect');
+        const prevP = notifySel.value;
+        notifySel.innerHTML = (stats.clients || []).map(c =>
+          '<option value="' + esc(c.clientId) + '">' + esc(c.clientId).slice(0, 12) + '… — ' + esc(c.lobbyCode) + '</option>'
+        ).join('');
+        if (prevP && [...notifySel.options].some(o => o.value === prevP)) notifySel.value = prevP;
+
+        const lobbiesCard = document.getElementById('lobbiesCard');
+        if (stats.lobbies && stats.lobbies.length) {
+          lobbiesCard.innerHTML = '<h2>Lobbies</h2><table><thead><tr><th>Code</th><th>Joueurs</th><th>Host déco</th><th>Away</th></tr></thead><tbody>' +
+            stats.lobbies.map(l => '<tr><td><strong>' + esc(l.code) + '</strong></td><td>' + l.playerCount + '</td><td>' + (l.hostDisconnected ? 'oui' : 'non') + '</td><td>' + (l.hostAway ? 'oui' : 'non') + '</td></tr>').join('') +
+            '</tbody></table>';
+        } else {
+          lobbiesCard.innerHTML = '<h2>Lobbies</h2><div class="no-data">Aucun lobby</div>';
+        }
+
+        const gamesCard = document.getElementById('gamesCard');
+        const notifyGameSel = document.getElementById('notifyGameSelect');
+        const prevG = notifyGameSel.value;
+        if (stats.games && stats.games.length) {
+          gamesCard.innerHTML = '<h2>Parties</h2><table><thead><tr><th>Code</th><th>Joueurs</th><th>Temps</th><th></th></tr></thead><tbody>' +
+            stats.games.map(g => '<tr><td><strong>' + esc(g.code) + '</strong></td><td>' + g.playerCount + '</td><td>' + esc(g.remainingTimeSeconds) + ' s</td><td><button type="button" class="btn btn-game" data-code="' + esc(g.code) + '">Détails</button></td></tr>').join('') +
+            '</tbody></table>';
+          notifyGameSel.innerHTML = stats.games.map(g => '<option value="' + esc(g.code) + '">' + esc(g.code) + '</option>').join('');
+          if (prevG && [...notifyGameSel.options].some(o => o.value === prevG)) notifyGameSel.value = prevG;
+        } else {
+          gamesCard.innerHTML = '<h2>Parties</h2><div class="no-data">Aucune partie</div>';
+          notifyGameSel.innerHTML = '';
+        }
+
+        const logsBox = document.getElementById('logsBox');
+        if (stats.logs && stats.logs.length) {
+          logsBox.innerHTML = stats.logs.map(l => '<div class="log-entry">' + esc(l.message) + '</div>').join('');
+        } else {
+          logsBox.innerHTML = '<div class="log-entry">Aucun log</div>';
+        }
+      } catch (e) {
+        showBanner('Réseau : ' + e.message, true);
+      }
+    }
+
+    document.getElementById('gamesCard').addEventListener('click', function (e) {
+      const btn = e.target.closest('.btn-game');
+      if (!btn) return;
+      const code = btn.getAttribute('data-code');
+      openGameModal(code);
+    });
+
+    const gameModal = document.getElementById('gameModal');
+    function closeGameModal() {
+      gameModal.classList.remove('open');
+    }
+    document.getElementById('gameModalClose').addEventListener('click', closeGameModal);
+    gameModal.addEventListener('click', function (e) {
+      if (e.target === gameModal) closeGameModal();
+    });
+
+    async function openGameModal(code) {
+      document.getElementById('gameModalTitle').textContent = 'Partie ' + code;
+      const body = document.getElementById('gameModalBody');
+      body.innerHTML = '<p>Chargement…</p>';
+      gameModal.classList.add('open');
+      try {
+        const r = await fetch('/api/stats/game/' + encodeURIComponent(code));
+        const data = await r.json();
+        if (!r.ok) {
+          body.innerHTML = '<p style="color:#c62828">' + esc(data.error || 'Erreur') + '</p>';
+          return;
+        }
+        let html = '<p><strong>Joueurs :</strong> ' + data.playerCount + '</p>';
+        html += '<pre class="json">' + esc(JSON.stringify(data, null, 2)) + '</pre>';
+        html += '<h4 style="margin:12px 0 8px">Notifier cette partie</h4>';
+        html += '<textarea id="gModalMsg" rows="2" placeholder="Message…"></textarea>';
+        html += '<input type="text" id="gModalTitle" placeholder="Titre (optionnel)" style="display:block;width:100%;max-width:400px;margin:8px 0;padding:8px" />';
+        html += '<button type="button" id="gModalBtn">Envoyer</button>';
+        body.innerHTML = html;
+        document.getElementById('gModalBtn').addEventListener('click', async function () {
+          const msg = (document.getElementById('gModalMsg').value || '').trim();
+          const title = (document.getElementById('gModalTitle').value || '').trim();
+          if (!msg) { alert('Message vide'); return; }
+          const nr = await fetch('/api/notify/game', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gameCode: code, message: msg, title: title || undefined })
+          });
+          const nd = await nr.json();
+          if (nd.success) alert('Envoyé à ' + nd.count + ' joueur(s)');
+          else alert('Erreur : ' + (nd.error || '?'));
+        });
+      } catch (e) {
+        body.innerHTML = '<p style="color:#c62828">' + esc(e.message) + '</p>';
+      }
+    }
+
+    document.getElementById('notifyPlayerBtn').addEventListener('click', async function () {
+      const cid = document.getElementById('notifyPlayerSelect').value;
+      const msg = (document.getElementById('notifyPlayerMsg').value || '').trim();
+      const title = (document.getElementById('notifyPlayerTitle').value || '').trim();
+      if (!cid) { alert('Choisir un joueur'); return; }
+      if (!msg) { alert('Message requis'); return; }
+      const r = await fetch('/api/notify/player', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: cid, message: msg, title: title || undefined })
+      });
+      const d = await r.json();
+      if (d.success) alert('OK');
+      else alert(d.error || 'Erreur');
+    });
+
+    document.getElementById('notifyGameBtn').addEventListener('click', async function () {
+      const gcode = document.getElementById('notifyGameSelect').value;
+      const msg = (document.getElementById('notifyGameMsg').value || '').trim();
+      const title = (document.getElementById('notifyGameTitle').value || '').trim();
+      if (!gcode) { alert('Choisir une partie'); return; }
+      if (!msg) { alert('Message requis'); return; }
+      const r = await fetch('/api/notify/game', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gameCode: gcode, message: msg, title: title || undefined })
+      });
+      const d = await r.json();
+      if (d.success) alert('Envoyé à ' + d.count + ' joueur(s)');
+      else alert(d.error || 'Erreur');
+    });
+
+    setInterval(updateStats, 2000);
+    updateStats();
+  </script>
+</body>
+</html>

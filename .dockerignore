@@ -1,0 +1,15 @@
+# Contexte Docker : racine du dépôt (docker compose dans Docker/)
+.git
+.github
+**/.env
+**/.env.local
+**/node_modules
+**/dist
+**/build
+**/.vite
+**/.cache
+Lab
+Docker/*.md
+*.log
+.DS_Store
+Thumbs.db

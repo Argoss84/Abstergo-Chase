@@ -25,7 +25,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useHistory } from 'react-router-dom';
 import { useGameSession } from '../contexts/GameSessionContext';
 
-import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Circle, CircleMarker, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Circle, CircleMarker, Polyline, Polygon } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { generateRandomPoints, generateStartZone, generateStartZoneRogue, getOuterStreetContour } from '../utils/utils';

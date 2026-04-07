@@ -709,7 +709,7 @@ const Lobby: React.FC = () => {
                       pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.12, weight: 2.5 }}
                     />
                   ) : (
-                    gameDetails.map_streets.map((street, index) => {
+                    gameDetails.map_streets.map((street: [number, number][], index: number) => {
                       if (!Array.isArray(street) || street.length < 2) return null;
                       return (
                         <Polyline

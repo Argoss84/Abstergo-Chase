@@ -1,0 +1,11 @@
+# Serveur de signalisation (Socket.IO)
+FROM node:20-alpine
+WORKDIR /app
+
+COPY Server/package.json Server/package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY Server/ ./
+
+EXPOSE 5174
+CMD ["node", "server.js"]

@@ -8,7 +8,9 @@ dotenv.config();
 
 const PORT = process.env.SIGNALING_PORT || 5174;
 const SOCKET_IO_PATH = process.env.SOCKET_IO_PATH || '/socket.io';
-const BDD_URL = process.env.BDD_URL || 'http://localhost:5175';
+const bddDisabled =
+  process.env.DISABLE_BDD === '1' || /^true$/i.test(process.env.DISABLE_BDD || '');
+const BDD_URL = bddDisabled ? null : (process.env.BDD_URL || 'http://localhost:5175');
 
 // Helper : persister vers ServerBDD (replay)
 const persistToBdd = async (path, method, body) => {
@@ -117,1113 +119,24 @@ const getServerStats = () => ({
   logs: logs.slice(-50).reverse() // 50 derniers logs, plus récent en premier
 });
 
-// Créer le serveur HTTP avec un gestionnaire de requêtes
+// HTTP minimal : handshake Engine.IO / Socket.IO uniquement sur SOCKET_IO_PATH
 const server = createServer((req, res) => {
-  // Gérer les requêtes OPTIONS pour CORS
-  if (req.method === 'OPTIONS') {
-    res.writeHead(200, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
-    });
-    res.end();
+  const url = req.url || '';
+  if (
+    url === SOCKET_IO_PATH ||
+    url.startsWith(`${SOCKET_IO_PATH}/`) ||
+    url.startsWith(`${SOCKET_IO_PATH}?`)
+  ) {
     return;
   }
-
-  // API endpoint pour les statistiques
-  if (req.method === 'GET' && req.url === '/api/stats') {
-    const stats = getServerStats();
-    res.writeHead(200, { 
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*'
-    });
-    res.end(JSON.stringify(stats));
-    return;
-  }
-
-  // API endpoint pour les données d'une game (pour la modal live)
-  const gameMatch = req.url && req.url.match(/^\/api\/stats\/game\/([A-Za-z0-9]+)/);
-  if (req.method === 'GET' && gameMatch) {
-    const code = gameMatch[1].toUpperCase();
-    const game = games.get(code);
-    if (!game) {
-      res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-      res.end(JSON.stringify({ error: 'Game not found', code }));
-      return;
-    }
-    const gameData = {
-      code,
-      hostId: game.hostId,
-      playerCount: game.players.size,
-      socketMessageCount: gameSocketMessageCounts.get(code) || 0,
-      remainingTimeSeconds: getRemainingTimeSeconds(game),
-      remainingTimeUpdatedAt: game.remainingTimeUpdatedAt || null,
-      lastHostState: game.lastHostState || null,
-      lastHostStateAt: game.lastHostStateAt || null,
-      lastHostStateHostId: game.lastHostStateHostId || null,
-      reconnectedPlayerIds: game.reconnectedPlayerIds || {},
-      players: Array.from(game.players.values()).map(player => {
-        const socket = socketsById.get(player.id);
-        return {
-          ...player,
-          socketConnected: Boolean(socket?.connected),
-          status: player.status || 'active'
-        };
-      })
-    };
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-    res.end(JSON.stringify(gameData));
-    return;
-  }
-
-  // API: envoyer une notification à un joueur (clientId)
-  if (req.method === 'POST' && req.url === '/api/notify/player') {
-    let body = '';
-    req.on('data', (chunk) => { body += chunk; });
-    req.on('end', () => {
-      try {
-        const data = JSON.parse(body || '{}');
-        const clientId = data.clientId;
-        const message = data.message != null ? String(data.message) : '';
-        const title = data.title != null ? String(data.title) : undefined;
-        if (!clientId) {
-          res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-          res.end(JSON.stringify({ success: false, error: 'clientId requis' }));
-          return;
-        }
-        const socket = socketsById.get(clientId);
-        if (!socket || !socket.connected) {
-          res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-          res.end(JSON.stringify({ success: false, error: 'Joueur introuvable ou déconnecté' }));
-          return;
-        }
-        send(socket, { type: 'admin:notification', payload: { message, title, timestamp: Date.now() } });
-        log(`[NOTIFICATION] Envoyée au joueur ${clientId.substring(0, 8)}...`);
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({ success: true }));
-      } catch (e) {
-        res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({ success: false, error: e.message }));
-      }
-    });
-    return;
-  }
-
-  // API: envoyer une notification à tous les joueurs d'une partie
-  if (req.method === 'POST' && req.url === '/api/notify/game') {
-    let body = '';
-    req.on('data', (chunk) => { body += chunk; });
-    req.on('end', () => {
-      try {
-        const data = JSON.parse(body || '{}');
-        const gameCode = data.gameCode != null ? String(data.gameCode).toUpperCase() : '';
-        const message = data.message != null ? String(data.message) : '';
-        const title = data.title != null ? String(data.title) : undefined;
-        if (!gameCode) {
-          res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-          res.end(JSON.stringify({ success: false, error: 'gameCode requis' }));
-          return;
-        }
-        const game = games.get(gameCode);
-        if (!game) {
-          res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-          res.end(JSON.stringify({ success: false, error: 'Partie introuvable' }));
-          return;
-        }
-        let count = 0;
-        game.players.forEach((p) => {
-          const s = socketsById.get(p.id);
-          if (s && s.connected) {
-            send(s, { type: 'admin:notification', payload: { message, title, timestamp: Date.now() } });
-            count++;
-          }
-        });
-        log(`[NOTIFICATION] Envoyée à ${count} joueur(s) de la partie ${gameCode}`);
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({ success: true, count }));
-      } catch (e) {
-        res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({ success: false, error: e.message }));
-      }
-    });
-    return;
-  }
-
-  // Page de monitoring accessible via HTTP
-  if (req.method === 'GET') {
-    const stats = getServerStats();
-
-    const protoHeader = req.headers['x-forwarded-proto'];
-    const protocol = Array.isArray(protoHeader) ? protoHeader[0] : protoHeader || 'http';
-
-    const html = `
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Serveur WebRTC - Monitoring</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      padding: 20px;
-      min-height: 100vh;
-    }
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-    h1 {
-      color: white;
-      text-align: center;
-      margin-bottom: 30px;
-      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-    }
-    .card {
-      background: white;
-      border-radius: 10px;
-      padding: 20px;
-      margin-bottom: 20px;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .card h2 {
-      color: #667eea;
-      margin-bottom: 15px;
-      border-bottom: 2px solid #667eea;
-      padding-bottom: 10px;
-    }
-    .stat-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 15px;
-      margin-bottom: 20px;
-    }
-    .stat-box {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 20px;
-      border-radius: 8px;
-      text-align: center;
-    }
-    .stat-box .number {
-      font-size: 2.5em;
-      font-weight: bold;
-      margin-bottom: 5px;
-    }
-    .stat-box .label {
-      font-size: 0.9em;
-      opacity: 0.9;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 10px;
-    }
-    th, td {
-      padding: 12px;
-      text-align: left;
-      border-bottom: 1px solid #e0e0e0;
-      color: #000;
-    }
-    th {
-      background-color: #f5f5f5;
-      font-weight: 600;
-      color: #667eea;
-    }
-    tr:hover {
-      background-color: #f9f9f9;
-    }
-    .status {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 0.85em;
-      font-weight: 600;
-      animation: fadeIn 0.3s ease-in;
-    }
-    .status.connected {
-      background-color: #4caf50;
-      color: white;
-      box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
-    }
-    .status.disconnected {
-      background-color: #f44336;
-      color: white;
-    }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: scale(0.8); }
-      to { opacity: 1; transform: scale(1); }
-    }
-    .info-item {
-      display: flex;
-      justify-content: space-between;
-      padding: 8px 0;
-      border-bottom: 1px solid #e0e0e0;
-    }
-    .info-item:last-child {
-      border-bottom: none;
-    }
-    .info-label {
-      font-weight: 600;
-      color: #555;
-    }
-    .info-value {
-      color: #000;
-    }
-    .refresh-btn {
-      position: fixed;
-      bottom: 30px;
-      right: 30px;
-      background: #667eea;
-      color: white;
-      border: none;
-      padding: 15px 30px;
-      border-radius: 50px;
-      font-size: 1em;
-      font-weight: 600;
-      cursor: pointer;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-      transition: all 0.3s;
-    }
-    .refresh-btn:hover {
-      background: #764ba2;
-      transform: translateY(-2px);
-      box-shadow: 0 6px 8px rgba(0,0,0,0.3);
-    }
-    .no-data {
-      text-align: center;
-      color: #999;
-      padding: 20px;
-      font-style: italic;
-    }
-    .player-list {
-      margin-left: 20px;
-      font-size: 0.9em;
-      color: #000;
-    }
-    .reconnection-badge {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 0.85em;
-      font-weight: 600;
-      background-color: #ff9800;
-      color: white;
-      margin-left: 8px;
-    }
-    .logs-container {
-      background: #1e1e1e;
-      border-radius: 8px;
-      padding: 15px;
-      max-height: 500px;
-      overflow-y: auto;
-      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-      font-size: 0.85em;
-    }
-    .log-entry {
-      color: #d4d4d4;
-      padding: 4px 0;
-      border-bottom: 1px solid #333;
-      line-height: 1.6;
-    }
-    .log-entry:last-child {
-      border-bottom: none;
-    }
-    .log-entry:hover {
-      background-color: #2d2d2d;
-    }
-    .log-connexion { color: #4ec9b0; }
-    .log-message { color: #9cdcfe; }
-    .log-lobby { color: #4caf50; }
-    .log-erreur { color: #f44336; }
-    .log-webrtc { color: #ce9178; }
-    .log-notification { color: #9c27b0; }
-    .log-deconnexion { color: #ff9800; }
-    .log-avertissement { color: #ffc107; }
-    .logs-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 10px;
-    }
-    .logs-count {
-      background: #667eea;
-      color: white;
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 0.9em;
-    }
-    .live-badge {
-      display: inline-block;
-      background: #f44336;
-      color: white;
-      padding: 6px 12px;
-      border-radius: 20px;
-      font-size: 0.9em;
-      font-weight: 600;
-      margin-left: 15px;
-      animation: pulse 2s infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.7; }
-    }
-    .modal-overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.5);
-      z-index: 1000;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
-    .modal-overlay.open { display: flex; }
-    .modal-box {
-      background: white;
-      border-radius: 12px;
-      max-width: 720px;
-      width: 100%;
-      max-height: 90vh;
-      overflow: hidden;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-    }
-    .modal-header {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 14px 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .modal-header h3 { margin: 0; font-size: 1.05em; }
-    .modal-close {
-      background: rgba(255,255,255,0.25);
-      border: none;
-      color: white;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      cursor: pointer;
-      font-size: 1.2em;
-      line-height: 1;
-    }
-    .modal-close:hover { background: rgba(255,255,255,0.4); }
-    .modal-body {
-      padding: 16px 20px;
-      overflow-y: auto;
-      max-height: calc(90vh - 54px);
-      font-size: 0.9em;
-    }
-    .modal-body .loading { color: #667eea; }
-    .modal-body .error { color: #f44336; }
-    .dash-kpis {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 10px;
-      margin-bottom: 16px;
-    }
-    @media (max-width: 500px) {
-      .dash-kpis { grid-template-columns: repeat(2, 1fr); }
-      .modal-box { max-width: 100%; }
-    }
-    .dash-kpi {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 10px 12px;
-      border-radius: 8px;
-      text-align: center;
-    }
-    .dash-kpi .dash-kpi-val { font-size: 1.1em; font-weight: 700; }
-    .dash-kpi .dash-kpi-lbl { font-size: 0.75em; opacity: 0.9; }
-    .dash-section {
-      margin-bottom: 14px;
-    }
-    .dash-section h4 {
-      color: #667eea;
-      margin: 0 0 8px 0;
-      padding-bottom: 4px;
-      border-bottom: 1px solid #e0e0e0;
-      font-size: 0.95em;
-    }
-    .dash-section table { width: 100%; font-size: 0.88em; }
-    .dash-section th, .dash-section td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #eee; }
-    .dash-section th { background: #f5f5f5; color: #555; }
-    .dash-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; }
-    .dash-badge.phase-lobby { background: #e3f2fd; color: #1565c0; }
-    .dash-badge.phase-start { background: #fff3e0; color: #e65100; }
-    .dash-badge.phase-running { background: #e8f5e9; color: #2e7d32; }
-    .dash-badge.phase-done { background: #fce4ec; color: #c2185b; }
-    .dash-badge.role-agent { background: #e3f2fd; color: #0d47a1; }
-    .dash-badge.role-rogue { background: #ffebee; color: #b71c1c; }
-    .dash-badge.ok { background: #e8f5e9; color: #2e7d32; }
-    .dash-badge.no { background: #ffebee; color: #c62828; }
-    .dash-badge.socket-ok { background: #e8f5e9; color: #1b5e20; }
-    .dash-badge.socket-ko { background: #ffebee; color: #b71c1c; }
-    .dash-muted { color: #999; font-size: 0.9em; }
-    .btn-game-data {
-      background: #667eea;
-      color: white;
-      border: none;
-      padding: 6px 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 0.85em;
-    }
-    .btn-game-data:hover { background: #764ba2; }
-    .dash-section textarea, .dash-section input[type="text"] { width: 100%; max-width: 100%; box-sizing: border-box; padding: 8px; margin: 4px 0; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 0.9em; }
-    .dash-section #gameModalNotifyBtn, .notify-form button { margin-top: 6px; }
-    .notify-form { margin-top: 12px; }
-    .notify-form select { width: 100%; padding: 8px; margin: 4px 0; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 0.9em; box-sizing: border-box; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>🚀 Serveur de Signalisation WebRTC - Monitoring <span class="live-badge">🔴 LIVE</span></h1>
-    
-    <div class="stat-grid">
-      <div class="stat-box">
-        <div class="number">${stats.connectedClients}</div>
-        <div class="label">Clients Connectés</div>
-      </div>
-      <div class="stat-box">
-        <div class="number">${stats.activeLobbies}</div>
-        <div class="label">Lobbies Actifs</div>
-      </div>
-      <div class="stat-box">
-        <div class="number">${stats.activeGames}</div>
-        <div class="label">Games en cours</div>
-      </div>
-      <div class="stat-box">
-        <div class="number">${stats.totalSocketMessages}</div>
-        <div class="label">Messages Socket Totaux</div>
-      </div>
-      <div class="stat-box">
-        <div class="number">${Math.floor(stats.serverInfo.uptime / 60)}m</div>
-        <div class="label">Temps d'Activité</div>
-      </div>
-      <div class="stat-box">
-        <div class="number">${Math.round(stats.serverInfo.memoryUsage.heapUsed / 1024 / 1024)}MB</div>
-        <div class="label">Mémoire Utilisée</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>📡 Informations Serveur</h2>
-      <div class="info-item">
-        <span class="info-label">Port:</span>
-        <span class="info-value">${stats.serverInfo.port}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">URL Socket.io:</span>
-        <span class="info-value">${protocol}://${req.headers.host}${SOCKET_IO_PATH}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">URL HTTP:</span>
-        <span class="info-value">${protocol}://${req.headers.host}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">Version Node.js:</span>
-        <span class="info-value">${stats.serverInfo.nodeVersion}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">Plateforme:</span>
-        <span class="info-value">${stats.serverInfo.platform}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">Hôte de la Requête:</span>
-        <span class="info-value">${req.headers.host}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">User Agent:</span>
-        <span class="info-value">${req.headers['user-agent'] || 'N/A'}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">IP Client:</span>
-        <span class="info-value">${req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'N/A'}</span>
-      </div>
-    </div>
-
-    <div class="card" id="clientsCard">
-      <h2>👥 Clients Socket.io Connectés</h2>
-      ${stats.clients.length > 0 ? `
-        <table>
-          <thead>
-            <tr>
-              <th>Client ID</th>
-              <th>Lobby</th>
-              <th>Game</th>
-              <th>Statut</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${stats.clients.map(client => `
-              <tr>
-                <td><code>${client.clientId.substring(0, 8)}...</code></td>
-                <td>${client.lobbyCode}</td>
-                <td>${client.gameCode}</td>
-                <td>
-                  <span class="status ${client.connected ? 'connected' : 'disconnected'}">
-                    ${client.connected ? '🟢 Connecté' : '🔴 Déconnecté'}
-                  </span>
-                </td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      ` : '<div class="no-data">Aucun client connecté actuellement</div>'}
-    </div>
-
-    <div class="card" id="lobbiesCard">
-      <h2>🎮 Lobbies Actifs</h2>
-      ${stats.lobbies.length > 0 ? `
-        <table>
-          <thead>
-            <tr>
-              <th>Code Lobby</th>
-              <th>Host ID</th>
-              <th>Joueurs</th>
-              <th>Messages</th>
-              <th>Détails</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${stats.lobbies.map(lobby => `
-              <tr>
-                <td>
-                  <strong>${lobby.code}</strong>
-                  ${lobby.hostDisconnected ? `<span class="reconnection-badge">⏱️ ${lobby.reconnectionTimeout}s</span>` : ''}
-                  ${lobby.hostAway ? `<span class="reconnection-badge" style="background-color: #dc3545;">🔴 ${lobby.awayTimeout}s</span>` : ''}
-                </td>
-                <td><code>${lobby.hostId.substring(0, 8)}...</code></td>
-                <td>${lobby.playerCount}</td>
-                <td>${lobby.socketMessageCount}</td>
-                <td>
-                  <div class="player-list">
-                    ${lobby.players.map(p => {
-                      const isDisconnected = p.status === 'disconnected' || !p.socketConnected;
-                      const isAway = p.status === 'away';
-                      const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
-                      const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
-                      const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
-                      const roleLabel = p.role ? ` [${p.role}]` : ' [n/a]';
-                      return `
-                        <div style="margin: 2px 0; opacity: ${opacity};">
-                          ${icon} ${p.name}${roleLabel} ${p.isHost ? '👑' : ''} ${badge}
-                        </div>
-                      `;
-                    }).join('')}
-                  </div>
-                </td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      ` : '<div class="no-data">Aucun lobby actif actuellement</div>'}
-    </div>
-
-    <div class="card" id="gamesCard">
-      <h2>🎯 Games en cours</h2>
-      ${stats.games.length > 0 ? `
-        <table>
-          <thead>
-            <tr>
-              <th>Code Game</th>
-              <th>Host ID</th>
-              <th>Joueurs</th>
-              <th>Messages</th>
-              <th>Temps restant</th>
-              <th>Détails</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${stats.games.map(game => `
-              <tr>
-                <td><strong>${game.code}</strong></td>
-                <td><code>${game.hostId.substring(0, 8)}...</code></td>
-                <td>${game.playerCount}</td>
-                <td>${game.socketMessageCount}</td>
-                <td><strong>${formatRemainingTime(game.remainingTimeSeconds)}</strong></td>
-                <td>
-                  <div class="player-list">
-                    ${game.players.map(p => {
-                      const isDisconnected = p.status === 'disconnected' || !p.socketConnected;
-                      const isAway = p.status === 'away';
-                      const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
-                      const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
-                      const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
-                      const roleLabel = p.role ? ` [${p.role}]` : ' [n/a]';
-                      return `
-                        <div style="margin: 2px 0; opacity: ${opacity};">
-                          ${icon} ${p.name}${roleLabel} ${p.isHost ? '👑' : ''} ${badge}
-                        </div>
-                      `;
-                    }).join('')}
-                  </div>
-                </td>
-                <td><button type="button" class="btn-game-data" data-game-code="${game.code}">📊 Tableau de bord</button></td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      ` : '<div class="no-data">Aucune game en cours</div>'}
-    </div>
-
-    <div class="card" id="notifyCard">
-      <h2>📤 Envoi de notifications</h2>
-      <p style="margin-bottom:12px;color:#555;font-size:0.9em;">Envoyer une notification aux clients via le canal de signalisation (Socket.io). Les clients reçoivent un message de type <code>admin:notification</code> avec <code>payload: { message, title?, timestamp }</code>.</p>
-      <div class="notify-form">
-        <h4 style="color:#667eea;margin:0 0 8px 0;font-size:0.95em;">À un joueur</h4>
-        <select id="notifyPlayerSelect"><option value="">— Choisir un joueur —</option></select>
-        <textarea id="notifyPlayerMsg" rows="2" placeholder="Message…"></textarea>
-        <input type="text" id="notifyPlayerTitle" placeholder="Titre (optionnel)" />
-        <button type="button" id="notifyPlayerBtn" class="btn-game-data">Envoyer au joueur</button>
-      </div>
-      <div class="notify-form">
-        <h4 style="color:#667eea;margin:0 0 8px 0;font-size:0.95em;">À tous les joueurs d'une partie</h4>
-        <select id="notifyGameSelect"><option value="">— Choisir une partie —</option></select>
-        <textarea id="notifyGameMsg" rows="2" placeholder="Message…"></textarea>
-        <input type="text" id="notifyGameTitle" placeholder="Titre (optionnel)" />
-        <button type="button" id="notifyGameBtn" class="btn-game-data">Envoyer à la partie</button>
-      </div>
-    </div>
-
-    <div class="modal-overlay" id="gameModal">
-      <div class="modal-box">
-        <div class="modal-header">
-          <h3 id="gameModalTitle">Tableau de bord — </h3>
-          <button type="button" class="modal-close" id="gameModalClose" aria-label="Fermer">×</button>
-        </div>
-        <div class="modal-body" id="gameModalBody">
-          <div id="gameModalDashboard"><span class="loading">Chargement…</span></div>
-          <div class="dash-section" id="gameModalNotify">
-            <h4>📤 Envoyer une notification à tous les joueurs</h4>
-            <textarea id="gameModalNotifyMsg" rows="2" placeholder="Message…"></textarea>
-            <input type="text" id="gameModalNotifyTitle" placeholder="Titre (optionnel)" />
-            <button type="button" id="gameModalNotifyBtn">Envoyer</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card" id="logsCard">
-      <div class="logs-header">
-        <h2>📋 Logs Serveur</h2>
-        <span class="logs-count">${stats.logs.length} logs</span>
-      </div>
-      <div class="logs-container">
-        ${stats.logs.length > 0 ? 
-          stats.logs.map(log => {
-            const message = log.message;
-            let className = 'log-entry';
-            
-            if (message.includes('[CONNEXION]')) className += ' log-connexion';
-            else if (message.includes('[MESSAGE')) className += ' log-message';
-            else if (message.includes('[LOBBY CRÉÉ]') || message.includes('[LOBBY REJOINT]')) className += ' log-lobby';
-            else if (message.includes('[ERREUR]')) className += ' log-erreur';
-            else if (message.includes('[WEBRTC]')) className += ' log-webrtc';
-            else if (message.includes('[NOTIFICATION]')) className += ' log-notification';
-            else if (message.includes('[DÉCONNEXION]') || message.includes('[LOBBY FERMÉ]') || message.includes('[JOUEUR PARTI]')) className += ' log-deconnexion';
-            else if (message.includes('[AVERTISSEMENT]')) className += ' log-avertissement';
-            
-            return `<div class="${className}">${message}</div>`;
-          }).join('')
-        : '<div class="no-data">Aucun log disponible</div>'}
-      </div>
-    </div>
-
-  </div>
-
-  <script>
-    let lastLogCount = 0;
-    let gameModalPollId = null;
-
-    const formatRemainingTime = (seconds) => {
-      if (seconds === null || seconds === undefined || Number.isNaN(seconds)) {
-        return 'n/a';
-      }
-      const safeSeconds = Math.max(0, Math.floor(seconds));
-      const minutes = Math.floor(safeSeconds / 60);
-      const remainingSeconds = safeSeconds % 60;
-      return minutes + ':' + String(remainingSeconds).padStart(2, '0');
-    };
-    
-    // Fonction pour mettre à jour les statistiques
-    async function updateStats() {
-      try {
-        const response = await fetch('/api/stats');
-        const stats = await response.json();
-        
-        // Mettre à jour les statistiques principales
-        document.querySelectorAll('.stat-box')[0].querySelector('.number').textContent = stats.connectedClients;
-        document.querySelectorAll('.stat-box')[1].querySelector('.number').textContent = stats.activeLobbies;
-        document.querySelectorAll('.stat-box')[2].querySelector('.number').textContent = stats.activeGames;
-        document.querySelectorAll('.stat-box')[3].querySelector('.number').textContent = stats.totalSocketMessages;
-        document.querySelectorAll('.stat-box')[4].querySelector('.number').textContent = Math.floor(stats.serverInfo.uptime / 60) + 'm';
-        document.querySelectorAll('.stat-box')[5].querySelector('.number').textContent = Math.round(stats.serverInfo.memoryUsage.heapUsed / 1024 / 1024) + 'MB';
-        
-        // Mettre à jour les clients
-        const clientsCard = document.getElementById('clientsCard');
-        if (stats.clients.length > 0) {
-          const clientsHTML = \`
-            <table>
-              <thead>
-                <tr>
-                  <th>Client ID</th>
-                  <th>Lobby</th>
-                  <th>Game</th>
-                  <th>Statut</th>
-                </tr>
-              </thead>
-              <tbody>
-                \${stats.clients.map(client => \`
-                  <tr>
-                    <td><code>\${client.clientId.substring(0, 8)}...</code></td>
-                    <td>\${client.lobbyCode}</td>
-                    <td>\${client.gameCode}</td>
-                    <td>
-                      <span class="status \${client.connected ? 'connected' : 'disconnected'}">
-                        \${client.connected ? '🟢 Connecté' : '🔴 Déconnecté'}
-                      </span>
-                    </td>
-                  </tr>
-                \`).join('')}
-              </tbody>
-            </table>
-          \`;
-          clientsCard.innerHTML = '<h2>👥 Clients Socket.io Connectés</h2>' + clientsHTML;
-        } else {
-          clientsCard.innerHTML = '<h2>👥 Clients Socket.io Connectés</h2><div class="no-data">Aucun client connecté actuellement</div>';
-        }
-        
-        // Mettre à jour les lobbies
-        const lobbiesCard = document.getElementById('lobbiesCard');
-        if (stats.lobbies.length > 0) {
-          const lobbiesHTML = \`
-            <table>
-              <thead>
-                <tr>
-                  <th>Code Lobby</th>
-                  <th>Host ID</th>
-                  <th>Joueurs</th>
-                  <th>Messages</th>
-                  <th>Détails</th>
-                </tr>
-              </thead>
-              <tbody>
-                \${stats.lobbies.map(lobby => \`
-                  <tr>
-                    <td>
-                      <strong>\${lobby.code}</strong>
-                      \${lobby.hostDisconnected ? \`<span class="reconnection-badge">⏱️ \${lobby.reconnectionTimeout}s</span>\` : ''}
-                      \${lobby.hostAway ? \`<span class="reconnection-badge" style="background-color: #dc3545;">🔴 \${lobby.awayTimeout}s</span>\` : ''}
-                    </td>
-                    <td><code>\${lobby.hostId.substring(0, 8)}...</code></td>
-                    <td>\${lobby.playerCount}</td>
-                    <td>\${lobby.socketMessageCount}</td>
-                    <td>
-                      <div class="player-list">
-                        \${lobby.players.map(p => {
-                          const isDisconnected = p.status === 'disconnected' || !p.socketConnected;
-                          const isAway = p.status === 'away';
-                          const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
-                          const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
-                          const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
-                          const roleLabel = p.role ? \` [\${p.role}]\` : ' [n/a]';
-                          return \`
-                            <div style="margin: 2px 0; opacity: \${opacity};">
-                              \${icon} \${p.name}\${roleLabel} \${p.isHost ? '👑' : ''} \${badge}
-                            </div>
-                          \`;
-                        }).join('')}
-                      </div>
-                    </td>
-                  </tr>
-                \`).join('')}
-              </tbody>
-            </table>
-          \`;
-          lobbiesCard.innerHTML = '<h2>🎮 Lobbies Actifs</h2>' + lobbiesHTML;
-        } else {
-          lobbiesCard.innerHTML = '<h2>🎮 Lobbies Actifs</h2><div class="no-data">Aucun lobby actif actuellement</div>';
-        }
-
-        // Mettre à jour les games
-        const gamesCard = document.getElementById('gamesCard');
-        if (stats.games.length > 0) {
-          const gamesHTML = \`
-            <table>
-              <thead>
-                <tr>
-                  <th>Code Game</th>
-                  <th>Host ID</th>
-                  <th>Joueurs</th>
-                  <th>Messages</th>
-                  <th>Temps restant</th>
-                  <th>Détails</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                \${stats.games.map(game => \`
-                  <tr>
-                    <td><strong>\${game.code}</strong></td>
-                    <td><code>\${game.hostId.substring(0, 8)}...</code></td>
-                    <td>\${game.playerCount}</td>
-                    <td>\${game.socketMessageCount}</td>
-                    <td><strong>\${formatRemainingTime(game.remainingTimeSeconds)}</strong></td>
-                    <td>
-                      <div class="player-list">
-                        \${game.players.map(p => {
-                          const isDisconnected = p.status === 'disconnected' || !p.socketConnected;
-                          const isAway = p.status === 'away';
-                          const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
-                          const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
-                          const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
-                          const roleLabel = p.role ? \` [\${p.role}]\` : ' [n/a]';
-                          return \`
-                            <div style="margin: 2px 0; opacity: \${opacity};">
-                              \${icon} \${p.name}\${roleLabel} \${p.isHost ? '👑' : ''} \${badge}
-                            </div>
-                          \`;
-                        }).join('')}
-                      </div>
-                    </td>
-                    <td><button type="button" class="btn-game-data" data-game-code="\${game.code}">📊 Tableau de bord</button></td>
-                  </tr>
-                \`).join('')}
-              </tbody>
-            </table>
-          \`;
-          gamesCard.innerHTML = '<h2>🎯 Games en cours</h2>' + gamesHTML;
-        } else {
-          gamesCard.innerHTML = '<h2>🎯 Games en cours</h2><div class="no-data">Aucune game en cours</div>';
-        }
-
-        // Mettre à jour les listes du formulaire de notifications
-        var selPlayer = document.getElementById('notifyPlayerSelect');
-        if (selPlayer) {
-          var curPlayer = selPlayer.value;
-          selPlayer.innerHTML = '<option value="">— Choisir un joueur —</option>' + (stats.clients || []).map(function(c) { return '<option value="' + c.clientId + '">' + c.clientId.substring(0, 8) + '... ' + (c.lobbyCode || '—') + ' / ' + (c.gameCode || '—') + '</option>'; }).join('');
-          if (curPlayer && (stats.clients || []).some(function(c) { return c.clientId === curPlayer; })) selPlayer.value = curPlayer;
-        }
-        var selGame = document.getElementById('notifyGameSelect');
-        if (selGame) {
-          var curGame = selGame.value;
-          selGame.innerHTML = '<option value="">— Choisir une partie —</option>' + (stats.games || []).map(function(g) { return '<option value="' + g.code + '">' + g.code + ' (' + g.playerCount + ' joueurs)</option>'; }).join('');
-          if (curGame && (stats.games || []).some(function(g) { return g.code === curGame; })) selGame.value = curGame;
-        }
-        
-        // Mettre à jour les logs seulement si nécessaire
-        if (stats.logs.length !== lastLogCount) {
-          lastLogCount = stats.logs.length;
-          const logsCard = document.getElementById('logsCard');
-          const logsContainer = logsCard.querySelector('.logs-container');
-          const logsCount = logsCard.querySelector('.logs-count');
-          logsCount.textContent = stats.logs.length + ' logs';
-          
-          if (stats.logs.length > 0) {
-            const logsHTML = stats.logs.map(log => {
-              const message = log.message;
-              let className = 'log-entry';
-              
-              if (message.includes('[CONNEXION]')) className += ' log-connexion';
-              else if (message.includes('[MESSAGE')) className += ' log-message';
-              else if (message.includes('[LOBBY CRÉÉ]') || message.includes('[LOBBY REJOINT]')) className += ' log-lobby';
-              else if (message.includes('[ERREUR]')) className += ' log-erreur';
-              else if (message.includes('[WEBRTC]')) className += ' log-webrtc';
-              else if (message.includes('[NOTIFICATION]')) className += ' log-notification';
-              else if (message.includes('[DÉCONNEXION]') || message.includes('[LOBBY FERMÉ]') || message.includes('[JOUEUR PARTI]')) className += ' log-deconnexion';
-              else if (message.includes('[AVERTISSEMENT]')) className += ' log-avertissement';
-              
-              return \`<div class="\${className}">\${message}</div>\`;
-            }).join('');
-            
-            logsContainer.innerHTML = logsHTML;
-          } else {
-            logsContainer.innerHTML = '<div class="no-data">Aucun log disponible</div>';
-          }
-          
-          // Auto-scroll vers le haut (plus récent en premier)
-          logsContainer.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-      } catch (error) {
-        console.error('Erreur lors de la mise à jour des stats:', error);
-      }
-    }
-
-    function renderDashboard(data) {
-      if (data.error) return '<p class="error">' + (data.error || 'Partie introuvable') + '</p>';
-      var gd = (data.lastHostState && data.lastHostState.gameDetails) ? data.lastHostState.gameDetails : null;
-      var hostPlayers = (data.lastHostState && data.lastHostState.players) ? data.lastHostState.players : [];
-      var props = (data.lastHostState && data.lastHostState.props) ? data.lastHostState.props : [];
-      var hostStateAt = data.lastHostStateAt;
-      var phase = 'Convergence', phaseClass = 'dash-badge phase-lobby', phaseExtra = '';
-      if (gd && gd.winner_type) { phase = 'Terminée'; phaseClass = 'dash-badge phase-done'; phaseExtra = ' · ' + (gd.winner_type || '').toUpperCase(); }
-      else if (gd && gd.started && gd.countdown_started) { phase = 'En cours'; phaseClass = 'dash-badge phase-running'; }
-      else if (gd && gd.game_starting && !gd.started) { phase = 'Démarrage'; phaseClass = 'dash-badge phase-start'; }
-      var t = data.remainingTimeSeconds;
-      if (t == null && gd) t = gd.remaining_time;
-      var timeStr = (t != null && !isNaN(t)) ? (Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0')) : 'n/a';
-      var cap = 0, total = (props && props.length) || 0;
-      if (props) for (var i = 0; i < props.length; i++) if ((props[i].state || '').toUpperCase() === 'CAPTURED') cap++;
-      var objStr = total ? cap + ' / ' + total : '—';
-      var html = '<div class="dash-kpis">';
-      html += '<div class="dash-kpi"><div class="dash-kpi-val"><span class="' + phaseClass + '">' + phase + '</span>' + phaseExtra + '</div><div class="dash-kpi-lbl">Phase</div></div>';
-      html += '<div class="dash-kpi"><div class="dash-kpi-val">' + timeStr + '</div><div class="dash-kpi-lbl">Temps restant</div></div>';
-      html += '<div class="dash-kpi"><div class="dash-kpi-val">' + (data.playerCount || 0) + '</div><div class="dash-kpi-lbl">Joueurs</div></div>';
-      html += '<div class="dash-kpi"><div class="dash-kpi-val">' + objStr + '</div><div class="dash-kpi-lbl">Objectifs</div></div>';
-      html += '</div>';
-      html += '<div class="dash-section"><h4>👥 Joueurs</h4><table><thead><tr><th>Joueur</th><th>Rôle</th><th>Zone départ</th><th>Prêt</th><th>Socket</th><th>Statut</th></tr></thead><tbody>';
-      var pl = data.players || [];
-      for (var i = 0; i < pl.length; i++) {
-        var p = pl[i];
-        var hp = null;
-        for (var j = 0; j < hostPlayers.length; j++) if (hostPlayers[j].id_player === p.id) { hp = hostPlayers[j]; break; }
-        if (!hp && p.isHost && data.lastHostStateHostId) {
-          for (var j = 0; j < hostPlayers.length; j++) if (String(hostPlayers[j].id_player) === String(data.lastHostStateHostId)) { hp = hostPlayers[j]; break; }
-        }
-        if (!hp && data.reconnectedPlayerIds) {
-          for (var oldId in data.reconnectedPlayerIds) if (data.reconnectedPlayerIds[oldId] === p.id) {
-            for (var j = 0; j < hostPlayers.length; j++) if (String(hostPlayers[j].id_player) === String(oldId)) { hp = hostPlayers[j]; break; }
-            if (hp) break;
-          }
-        }
-        var role = (hp && hp.role) ? hp.role : (p.role || '—');
-        var roleCl = (role + '').toUpperCase() === 'AGENT' ? 'dash-badge role-agent' : ((role + '').toUpperCase() === 'ROGUE' ? 'dash-badge role-rogue' : '');
-        var zone = (hp && hp.isInStartZone === true) ? '<span class="dash-badge ok">Oui</span>' : ((hp && hp.isInStartZone === false) ? '<span class="dash-badge no">Non</span>' : '—');
-        var ready = (hp && hp.hasAcknowledgedStart === true) ? '<span class="dash-badge ok">Oui</span>' : '—';
-        var sock = p.socketConnected ? '<span class="dash-badge socket-ok">Connecté</span>' : '<span class="dash-badge socket-ko">Déco</span>';
-        var name = (p.name || p.id || '—').substring(0, 20) + (p.isHost ? ' 👑' : '');
-        html += '<tr><td>' + name + '</td><td>' + (roleCl ? '<span class="' + roleCl + '">' + role + '</span>' : role) + '</td><td>' + zone + '</td><td>' + ready + '</td><td>' + sock + '</td><td>' + (p.status || 'actif') + '</td></tr>';
-      }
-      html += '</tbody></table></div>';
-      if (props && props.length > 0) {
-        html += '<div class="dash-section"><h4>🎯 Objectifs (vue host)</h4><table><thead><tr><th>#</th><th>Nom</th><th>État</th></tr></thead><tbody>';
-        for (var i = 0; i < props.length; i++) {
-          var pr = props[i];
-          var st = (pr.state || '—').toUpperCase();
-          var stLabel = st === 'CAPTURED' ? 'Capturé' : (st === 'VISIBLE' ? 'Visible' : st);
-          html += '<tr><td>' + (pr.id_prop || i + 1) + '</td><td>' + (pr.name || '—') + '</td><td>' + stLabel + '</td></tr>';
-        }
-        html += '</tbody></table></div>';
-      }
-      if (gd) {
-        html += '<div class="dash-section"><h4>⚙️ Règles (vue host)</h4><table><thead><tr><th>Paramètre</th><th>Valeur</th></tr></thead><tbody>';
-        html += '<tr><td>Durée</td><td>' + (gd.duration != null ? gd.duration + ' s' : '—') + '</td></tr>';
-        html += '<tr><td>Objectifs pour victoire</td><td>' + (gd.victory_condition_nb_objectivs != null ? gd.victory_condition_nb_objectivs : '—') + '</td></tr>';
-        html += '<tr><td>Rayon carte</td><td>' + (gd.map_radius != null ? gd.map_radius + ' m' : '—') + '</td></tr>';
-        html += '<tr><td>Hack (ms)</td><td>' + (gd.hack_duration_ms != null ? gd.hack_duration_ms : '—') + '</td></tr>';
-        html += '<tr><td>Rayon zone objectif</td><td>' + (gd.objectiv_zone_radius != null ? gd.objectiv_zone_radius + ' m' : '—') + '</td></tr>';
-        html += '<tr><td>Portée Rogue / Agent</td><td>' + (gd.rogue_range != null ? gd.rogue_range : '—') + ' / ' + (gd.agent_range != null ? gd.agent_range : '—') + '</td></tr>';
-        html += '</tbody></table></div>';
-      }
-      if (hostStateAt) html += '<p class="dash-muted">Dernière synchro host : ' + new Date(hostStateAt).toLocaleTimeString('fr-FR') + '</p>';
-      else if (!gd) html += '<p class="dash-muted">Vue host : en attente de la première synchro du host.</p>';
-      return html;
-    }
-
-    function openGameModal(code) {
-      const overlay = document.getElementById('gameModal');
-      const title = document.getElementById('gameModalTitle');
-      const dash = document.getElementById('gameModalDashboard');
-      const notifyBtn = document.getElementById('gameModalNotifyBtn');
-      title.textContent = 'Tableau de bord — ' + code + ' · en direct';
-      if (dash) dash.innerHTML = '<span class="loading">Chargement…</span>';
-      if (notifyBtn) notifyBtn.setAttribute('data-game-code', code);
-      overlay.classList.add('open');
-      if (gameModalPollId) clearInterval(gameModalPollId);
-      function poll() {
-        fetch('/api/stats/game/' + code)
-          .then(r => r.json())
-          .then(data => {
-            if (!dash) return;
-            if (data.error) { dash.innerHTML = '<p class="error">' + (data.error || 'Partie introuvable') + '</p>'; return; }
-            dash.innerHTML = renderDashboard(data);
-          })
-          .catch(function() { if (dash) dash.innerHTML = '<p class="error">Erreur de chargement</p>'; });
-      }
-      poll();
-      gameModalPollId = setInterval(poll, 1500);
-    }
-
-    function closeGameModal() {
-      document.getElementById('gameModal').classList.remove('open');
-      if (gameModalPollId) { clearInterval(gameModalPollId); gameModalPollId = null; }
-    }
-
-    document.addEventListener('click', (e) => {
-      if (e.target.closest('.btn-game-data')) {
-        const code = e.target.closest('.btn-game-data').getAttribute('data-game-code');
-        if (code) openGameModal(code);
-      }
-      if (e.target.id === 'gameModalClose' || e.target.id === 'gameModal') closeGameModal();
-      if (e.target.id === 'gameModalNotifyBtn') {
-        const code = e.target.getAttribute('data-game-code');
-        const msgEl = document.getElementById('gameModalNotifyMsg');
-        const titleEl = document.getElementById('gameModalNotifyTitle');
-        const msg = msgEl ? msgEl.value.trim() : '';
-        const title = titleEl ? titleEl.value.trim() : '';
-        if (!code) { alert('Partie inconnue'); return; }
-        if (!msg) { alert('Veuillez saisir un message'); return; }
-        fetch('/api/notify/game', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameCode: code, message: msg, title: title || undefined }) })
-          .then(r => r.json())
-          .then(d => { if (d.success) { alert('Envoyé à ' + d.count + ' joueur(s)'); if (msgEl) msgEl.value = ''; if (titleEl) titleEl.value = ''; } else alert('Erreur: ' + (d.error || 'Inconnue')); })
-          .catch(() => alert('Erreur réseau'));
-      }
-      if (e.target.id === 'notifyPlayerBtn') {
-        var cid = document.getElementById('notifyPlayerSelect') && document.getElementById('notifyPlayerSelect').value;
-        var msgEl = document.getElementById('notifyPlayerMsg');
-        var titleEl = document.getElementById('notifyPlayerTitle');
-        var msg = msgEl ? msgEl.value.trim() : '';
-        var title = titleEl ? titleEl.value.trim() : '';
-        if (!cid) { alert('Choisir un joueur'); return; }
-        if (!msg) { alert('Veuillez saisir un message'); return; }
-        fetch('/api/notify/player', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: cid, message: msg, title: title || undefined }) })
-          .then(r => r.json())
-          .then(d => { if (d.success) alert('Notification envoyée'); else alert('Erreur: ' + (d.error || 'Inconnue')); })
-          .catch(function() { alert('Erreur réseau'); });
-      }
-      if (e.target.id === 'notifyGameBtn') {
-        var gcode = document.getElementById('notifyGameSelect') && document.getElementById('notifyGameSelect').value;
-        var msgEl = document.getElementById('notifyGameMsg');
-        var titleEl = document.getElementById('notifyGameTitle');
-        var msg = msgEl ? msgEl.value.trim() : '';
-        var title = titleEl ? titleEl.value.trim() : '';
-        if (!gcode) { alert('Choisir une partie'); return; }
-        if (!msg) { alert('Veuillez saisir un message'); return; }
-        fetch('/api/notify/game', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameCode: gcode, message: msg, title: title || undefined }) })
-          .then(r => r.json())
-          .then(d => { if (d.success) alert('Envoyé à ' + d.count + ' joueur(s)'); else alert('Erreur: ' + (d.error || 'Inconnue')); })
-          .catch(function() { alert('Erreur réseau'); });
-      }
-    });
-
-    document.getElementById('gameModalClose').addEventListener('click', closeGameModal);
-    
-    // Mettre à jour toutes les 2 secondes
-    setInterval(updateStats, 2000);
-    
-    // Première mise à jour immédiate
-    updateStats();
-  </script>
-</body>
-</html>
-    `;
-
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(html);
-  } else {
-    res.writeHead(405, { 'Content-Type': 'text/plain' });
-    res.end('Method Not Allowed');
-  }
+  res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('Not Found');
 });
+
 
 const io = new SocketIOServer(server, {
   path: SOCKET_IO_PATH,
+  transports: ['websocket'],
   perMessageDeflate: false,
   cors: {
     origin: '*',
@@ -1357,6 +270,100 @@ io.on('connection', (socket) => {
   socketsById.set(clientId, socket);
   
   log(`[CONNEXION] Nouveau client connecté: ${clientId}`);
+
+  socket.on('admin:getStats', (ack) => {
+    if (typeof ack === 'function') ack(getServerStats());
+  });
+
+  socket.on('admin:getGame', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    const code = String(payload?.code ?? '').toUpperCase();
+    if (!code) {
+      ack({ ok: false, error: 'code requis' });
+      return;
+    }
+    const game = games.get(code);
+    if (!game) {
+      ack({ ok: false, error: 'Game not found', code });
+      return;
+    }
+    ack({
+      ok: true,
+      game: {
+        code,
+        hostId: game.hostId,
+        playerCount: game.players.size,
+        socketMessageCount: gameSocketMessageCounts.get(code) || 0,
+        remainingTimeSeconds: getRemainingTimeSeconds(game),
+        remainingTimeUpdatedAt: game.remainingTimeUpdatedAt || null,
+        lastHostState: game.lastHostState || null,
+        lastHostStateAt: game.lastHostStateAt || null,
+        lastHostStateHostId: game.lastHostStateHostId || null,
+        reconnectedPlayerIds: game.reconnectedPlayerIds || {},
+        players: Array.from(game.players.values()).map((player) => {
+          const s = socketsById.get(player.id);
+          return {
+            ...player,
+            socketConnected: Boolean(s?.connected),
+            status: player.status || 'active'
+          };
+        })
+      }
+    });
+  });
+
+  socket.on('admin:notifyPlayer', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    try {
+      const targetId = payload?.clientId;
+      const message = payload?.message != null ? String(payload.message) : '';
+      const title = payload?.title != null ? String(payload.title) : undefined;
+      if (!targetId) {
+        ack({ success: false, error: 'clientId requis' });
+        return;
+      }
+      const targetSocket = socketsById.get(targetId);
+      if (!targetSocket || !targetSocket.connected) {
+        ack({ success: false, error: 'Joueur introuvable ou déconnecté' });
+        return;
+      }
+      send(targetSocket, { type: 'admin:notification', payload: { message, title, timestamp: Date.now() } });
+      log(`[NOTIFICATION] Envoyée au joueur ${targetId.substring(0, 8)}...`);
+      ack({ success: true });
+    } catch (e) {
+      ack({ success: false, error: e.message });
+    }
+  });
+
+  socket.on('admin:notifyGame', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    try {
+      const gameCode = payload?.gameCode != null ? String(payload.gameCode).toUpperCase() : '';
+      const message = payload?.message != null ? String(payload.message) : '';
+      const title = payload?.title != null ? String(payload.title) : undefined;
+      if (!gameCode) {
+        ack({ success: false, error: 'gameCode requis' });
+        return;
+      }
+      const game = games.get(gameCode);
+      if (!game) {
+        ack({ success: false, error: 'Partie introuvable' });
+        return;
+      }
+      let count = 0;
+      game.players.forEach((p) => {
+        const s = socketsById.get(p.id);
+        if (s && s.connected) {
+          send(s, { type: 'admin:notification', payload: { message, title, timestamp: Date.now() } });
+          count++;
+        }
+      });
+      log(`[NOTIFICATION] Envoyée à ${count} joueur(s) de la partie ${gameCode}`);
+      ack({ success: true, count });
+    } catch (e) {
+      ack({ success: false, error: e.message });
+    }
+  });
 
   socket.on('message', (raw) => {
     incrementTotalSocketMessages();

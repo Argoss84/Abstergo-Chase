@@ -1,4 +1,4 @@
-import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonButtons, IonLabel, IonModal, IonInput, IonFooter, IonBadge } from '@ionic/react';
+import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonCard, IonCardHeader, IonCardTitle, IonFab, IonFabButton, IonFabList, IonIcon, IonButtons, IonLabel, IonModal, IonInput, IonFooter, IonBadge, IonText } from '@ionic/react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, Circle, Polyline, Polygon, Pane } from 'react-leaflet';
@@ -1105,7 +1105,7 @@ const Agent: React.FC = () => {
                     pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.12, weight: 2.5 }}
                   />
                 ) : (
-                  gameDetails.map_streets.map((street, index) => {
+                  gameDetails.map_streets.map((street: [number, number][], index: number) => {
                     if (!Array.isArray(street) || street.length < 2) return null;
                     return (
                       <Polyline
