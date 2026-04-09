@@ -2,6 +2,10 @@
 
 Ce dossier décrit la stack **MariaDB**, **ServerBDD** (API), **signaling** (Socket.IO) et le **frontend** (build statique + nginx).
 
+Pour un déploiement **ECR / ECS** (signaling + monitor + application) :  
+- Guide **console** : [AWS-ECS-Console.md](AWS-ECS-Console.md)  
+- **Liste ordonnée de commandes CLI** + questionnaire : [AWS-setup-commandes.md](AWS-setup-commandes.md)
+
 ## Prérequis
 
 - Docker avec Compose v2
