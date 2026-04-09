@@ -1,3 +1,4 @@
+import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -8,11 +9,21 @@ class CreateLobbyMap extends StatelessWidget {
     super.key,
     required this.currentPosition,
     required this.selectedPosition,
+    required this.mapRadiusMeters,
+    required this.objectiveZoneRadiusMeters,
+    required this.objectives,
+    required this.agentStartZone,
+    required this.rogueStartZone,
     required this.onTap,
   });
 
   final GeoPoint currentPosition;
   final GeoPoint selectedPosition;
+  final int mapRadiusMeters;
+  final int objectiveZoneRadiusMeters;
+  final List<GeoPoint> objectives;
+  final GeoPoint? agentStartZone;
+  final GeoPoint? rogueStartZone;
   final ValueChanged<GeoPoint> onTap;
 
   @override
@@ -58,6 +69,79 @@ class CreateLobbyMap extends StatelessWidget {
                     size: 36,
                   ),
                 ),
+                ...objectives.map(
+                  (point) => Marker(
+                    point: LatLng(point.latitude, point.longitude),
+                    builder: (_) => const Icon(
+                      Icons.adjust,
+                      color: Colors.red,
+                      size: 20,
+                    ),
+                  ),
+                ),
+                if (agentStartZone != null)
+                  Marker(
+                    point: LatLng(
+                        agentStartZone!.latitude, agentStartZone!.longitude),
+                    builder: (_) => const Icon(
+                      Icons.trip_origin,
+                      color: Colors.blue,
+                      size: 22,
+                    ),
+                  ),
+                if (rogueStartZone != null)
+                  Marker(
+                    point: LatLng(
+                        rogueStartZone!.latitude, rogueStartZone!.longitude),
+                    builder: (_) => const Icon(
+                      Icons.trip_origin,
+                      color: Colors.green,
+                      size: 22,
+                    ),
+                  ),
+              ],
+            ),
+            CircleLayer(
+              circles: [
+                CircleMarker(
+                  point: LatLng(
+                      selectedPosition.latitude, selectedPosition.longitude),
+                  radius: mapRadiusMeters.toDouble(),
+                  color: Colors.blue.withOpacity(0.12),
+                  borderStrokeWidth: 2,
+                  borderColor: Colors.blue,
+                  useRadiusInMeter: true,
+                ),
+                ...objectives.map(
+                  (point) => CircleMarker(
+                    point: LatLng(point.latitude, point.longitude),
+                    radius: objectiveZoneRadiusMeters.toDouble(),
+                    color: Colors.red.withOpacity(0.08),
+                    borderStrokeWidth: 1,
+                    borderColor: Colors.red,
+                    useRadiusInMeter: true,
+                  ),
+                ),
+                if (agentStartZone != null)
+                  CircleMarker(
+                    point: LatLng(
+                        agentStartZone!.latitude, agentStartZone!.longitude),
+                    radius: CreateLobbyDefaults.startZoneRadius.toDouble(),
+                    color: Colors.blue.withOpacity(0.1),
+                    borderStrokeWidth: 1.5,
+                    borderColor: Colors.blue,
+                    useRadiusInMeter: true,
+                  ),
+                if (rogueStartZone != null)
+                  CircleMarker(
+                    point: LatLng(
+                        rogueStartZone!.latitude, rogueStartZone!.longitude),
+                    radius: CreateLobbyDefaults.startZoneRadius.toDouble(),
+                    color: Colors.green.withOpacity(0.1),
+                    borderStrokeWidth: 1.5,
+                    borderColor: Colors.green,
+                    useRadiusInMeter: true,
+                  ),
               ],
             ),
           ],

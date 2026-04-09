@@ -1,5 +1,6 @@
 import 'package:abstergo_chase/features/create_lobby/data/create_lobby_service.dart';
 import 'package:abstergo_chase/features/create_lobby/data/location_service.dart';
+import 'package:abstergo_chase/features/create_lobby/data/objective_generation_service.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_form_data.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
 import 'package:flutter/foundation.dart';
@@ -8,11 +9,15 @@ class CreateLobbyController extends ChangeNotifier {
   CreateLobbyController({
     CreateLobbyService? service,
     LocationService? locationService,
+    ObjectiveGenerationService? objectiveGenerationService,
   })  : _service = service ?? CreateLobbyService.instance,
-        _locationService = locationService ?? const LocationService();
+        _locationService = locationService ?? const LocationService(),
+        _objectiveGenerationService =
+            objectiveGenerationService ?? ObjectiveGenerationService();
 
   final CreateLobbyService _service;
   final LocationService _locationService;
+  final ObjectiveGenerationService _objectiveGenerationService;
 
   CreateLobbyFormData form = CreateLobbyFormData.initial();
   String displayName = '';
@@ -23,6 +28,9 @@ class CreateLobbyController extends ChangeNotifier {
   bool isLoadingGps = false;
   GeoPoint? currentPosition;
   GeoPoint? selectedPosition;
+  List<GeoPoint> objectives = <GeoPoint>[];
+  GeoPoint? agentStartZone;
+  GeoPoint? rogueStartZone;
   String? lastError;
   String? createdLobbyCode;
 
@@ -77,10 +85,27 @@ class CreateLobbyController extends ChangeNotifier {
       mapCenterLongitude: point.longitude.toString(),
     );
     objectivesGenerated = false;
+    objectives = <GeoPoint>[];
+    agentStartZone = null;
+    rogueStartZone = null;
     notifyListeners();
   }
 
   void generateObjectives() {
+    final center = selectedPosition;
+    if (center == null) {
+      lastError = 'Sélectionnez un centre de carte.';
+      notifyListeners();
+      return;
+    }
+    final result = _objectiveGenerationService.generate(
+      center: center,
+      mapRadiusMeters: form.mapRadius,
+      objectiveCount: form.objectiveNumber,
+    );
+    objectives = result.objectives;
+    agentStartZone = result.agentStartZone;
+    rogueStartZone = result.rogueStartZone;
     objectivesGenerated = true;
     lastError = null;
     notifyListeners();

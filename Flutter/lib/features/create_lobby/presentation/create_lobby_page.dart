@@ -123,6 +123,12 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                         CreateLobbyMap(
                           currentPosition: _controller.currentPosition!,
                           selectedPosition: _controller.selectedPosition!,
+                          mapRadiusMeters: _controller.form.mapRadius,
+                          objectiveZoneRadiusMeters:
+                              _controller.form.objectiveZoneRadius,
+                          objectives: _controller.objectives,
+                          agentStartZone: _controller.agentStartZone,
+                          rogueStartZone: _controller.rogueStartZone,
                           onTap: _controller.setSelectedPosition,
                         )
                       else
@@ -140,6 +146,14 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                         onPressed: _controller.generateObjectives,
                         child: const Text('Générer les objectifs'),
                       ),
+                      const SizedBox(height: 8),
+                      if (_controller.objectives.isNotEmpty)
+                        Text(
+                          'Objectifs: ${_controller.objectives.length} | '
+                          'Agent: ${_controller.agentStartZone != null ? 'OK' : 'N/A'} | '
+                          'Rogue: ${_controller.rogueStartZone != null ? 'OK' : 'N/A'}',
+                          style: const TextStyle(fontSize: 13),
+                        ),
                       const SizedBox(height: 8),
                       FilledButton(
                         onPressed: _controller.canCreateLobby
