@@ -11,7 +11,7 @@ import 'package:abstergo_chase/app/app.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 void main() {
-  testWidgets('Bootstrap screen is displayed', (WidgetTester tester) async {
+  testWidgets('Home actions are displayed', (WidgetTester tester) async {
     await tester.pumpWidget(
       const ProviderScope(
         child: AbstergoChaseApp(),
@@ -20,6 +20,7 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('Bootstrap screen'), findsOneWidget);
+    expect(find.text('Créer une partie'), findsOneWidget);
+    expect(find.text('Rejoindre une partie'), findsOneWidget);
   });
 }
