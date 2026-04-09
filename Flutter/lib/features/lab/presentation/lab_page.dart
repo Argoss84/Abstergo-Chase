@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
@@ -18,7 +20,12 @@ class _LabPageState extends State<LabPage> {
   final TextEditingController _pathController = TextEditingController(
     text: '/socket.io',
   );
-  final TextEditingController _messageController = TextEditingController();
+  final TextEditingController _typeController = TextEditingController(
+    text: 'lobby:create',
+  );
+  final TextEditingController _payloadController = TextEditingController(
+    text: '{\n  "playerName": "Testeur"\n}',
+  );
   final List<String> _events = <String>[];
 
   io.Socket? _socket;
@@ -29,7 +36,8 @@ class _LabPageState extends State<LabPage> {
     _disconnect(silent: true);
     _urlController.dispose();
     _pathController.dispose();
-    _messageController.dispose();
+    _typeController.dispose();
+    _payloadController.dispose();
     super.dispose();
   }
 
@@ -86,14 +94,18 @@ class _LabPageState extends State<LabPage> {
     });
 
     socket.on('message', (data) {
-      _appendEvent('RECV(message): $data');
+      final preview = _stringify(data);
+      _appendEvent('RECV(message): $preview');
+      _showIncomingNotification('message', preview);
     });
 
     socket.onAny((event, data) {
       if (event == 'message') {
         return;
       }
-      _appendEvent('RECV($event): $data');
+      final preview = _stringify(data);
+      _appendEvent('RECV($event): $preview');
+      _showIncomingNotification(event.toString(), preview);
     });
 
     _socket = socket;
@@ -116,19 +128,52 @@ class _LabPageState extends State<LabPage> {
   }
 
   void _sendMessage() {
-    final message = _messageController.text.trim();
+    final messageType = _typeController.text.trim();
+    final rawPayload = _payloadController.text.trim();
     final socket = _socket;
     if (!_isConnected || socket == null) {
       _appendEvent('Connexion requise avant envoi.');
       return;
     }
-    if (message.isEmpty) {
-      _appendEvent('Message vide ignore.');
+    if (messageType.isEmpty) {
+      _appendEvent('Type requis.');
       return;
     }
-    socket.emit('message', message);
-    _appendEvent('SEND: $message');
-    _messageController.clear();
+
+    dynamic payload;
+    if (rawPayload.isNotEmpty) {
+      try {
+        payload = jsonDecode(rawPayload);
+      } catch (_) {
+        _appendEvent('Payload invalide: JSON attendu.');
+        return;
+      }
+    }
+
+    final envelope = <String, dynamic>{
+      'type': messageType,
+      'payload': payload,
+    };
+
+    socket.emit('message', envelope);
+    _appendEvent('SEND(message): ${_stringify(envelope)}');
+  }
+
+  void _useSampleCreateLobby() {
+    _typeController.text = 'lobby:create';
+    _payloadController.text = '{\n  "playerName": "Testeur"\n}';
+  }
+
+  void _useSampleJoinLobby() {
+    _typeController.text = 'lobby:join';
+    _payloadController.text =
+        '{\n  "code": "ABCDEF",\n  "playerName": "Joueur"\n}';
+  }
+
+  void _useSamplePingStateSync() {
+    _typeController.text = 'state:sync';
+    _payloadController.text =
+        '{\n  "targetId": "TARGET_CLIENT_ID",\n  "payload": {\n    "example": true\n  }\n}';
   }
 
   void _appendEvent(String event) {
@@ -138,6 +183,40 @@ class _LabPageState extends State<LabPage> {
     setState(() {
       _events.insert(0, '${DateTime.now().toIso8601String()} | $event');
     });
+  }
+
+  void _showIncomingNotification(String event, String body) {
+    if (!mounted) {
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 2),
+        content: Text('Nouveau message [$event]'),
+        action: SnackBarAction(
+          label: 'Voir',
+          onPressed: () {
+            _appendEvent('Notification ouverte pour [$event] $body');
+          },
+        ),
+      ),
+    );
+  }
+
+  String _stringify(dynamic data) {
+    if (data == null) {
+      return 'null';
+    }
+    if (data is String) {
+      return data;
+    }
+    try {
+      return const JsonEncoder.withIndent('  ').convert(data);
+    } catch (_) {
+      return data.toString();
+    }
   }
 
   void _markDisconnected() {
@@ -157,7 +236,7 @@ class _LabPageState extends State<LabPage> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
+        child: ListView(
           children: [
             const Text(
               'Lab Page',
@@ -201,13 +280,48 @@ class _LabPageState extends State<LabPage> {
               ],
             ),
             const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _useSampleCreateLobby,
+                    child: const Text('Ex: create'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _useSampleJoinLobby,
+                    child: const Text('Ex: join'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _useSamplePingStateSync,
+                    child: const Text('Ex: sync'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
             TextField(
-              controller: _messageController,
+              controller: _typeController,
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
-                labelText: 'Message',
+                labelText: 'Type (message.type)',
+                hintText: 'lobby:create',
               ),
-              onSubmitted: (_) => _sendMessage(),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _payloadController,
+              minLines: 4,
+              maxLines: 8,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                labelText: 'Payload JSON (message.payload)',
+              ),
             ),
             const SizedBox(height: 8),
             Align(
@@ -218,7 +332,8 @@ class _LabPageState extends State<LabPage> {
               ),
             ),
             const SizedBox(height: 12),
-            Expanded(
+            SizedBox(
+              height: 260,
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(8),
