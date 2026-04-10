@@ -169,8 +169,12 @@ class LobbySocketService {
   }) {
     _emitMessage(
       <String, dynamic>{
-      'type': 'player:role-update',
-      'payload': <String, dynamic>{'playerId': playerId, 'role': role},
+      'type': 'lobby:role-update-request',
+      'payload': <String, dynamic>{
+        'playerId': playerId,
+        'role': role,
+        'requestId': _newRequestId(),
+      },
       },
     );
   }
@@ -187,10 +191,17 @@ class LobbySocketService {
   void startGame(String code) {
     _emitMessage(
       <String, dynamic>{
-      'type': 'game:create',
-      'payload': <String, dynamic>{'code': code.toUpperCase()},
+      'type': 'lobby:start-game-request',
+      'payload': <String, dynamic>{
+        'code': code.toUpperCase(),
+        'requestId': _newRequestId(),
+      },
       },
     );
+  }
+
+  String _newRequestId() {
+    return '${DateTime.now().microsecondsSinceEpoch}-${(DateTime.now().millisecondsSinceEpoch % 997)}';
   }
 
   void leaveLobby({

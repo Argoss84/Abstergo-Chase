@@ -1,6 +1,9 @@
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { randomUUID } from 'crypto';
+import { promises as fs } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
 // Charger les variables d'environnement depuis le fichier .env
@@ -9,6 +12,11 @@ dotenv.config();
 const PORT = process.env.SIGNALING_PORT || 5174;
 const SOCKET_IO_PATH = process.env.SOCKET_IO_PATH || '/socket.io';
 const SIGNALING_VERSION = process.env.SIGNALING_VERSION || '2026.04.10';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const RUNTIME_DATA_DIR = path.join(__dirname, 'data');
+const SNAPSHOT_FILE = path.join(RUNTIME_DATA_DIR, 'runtime-state.json');
+const EVENT_LOG_FILE = path.join(RUNTIME_DATA_DIR, 'runtime-events.log');
 const bddDisabled =
   process.env.DISABLE_BDD === '1' || /^true$/i.test(process.env.DISABLE_BDD || '');
 const BDD_URL = bddDisabled ? null : (process.env.BDD_URL || 'http://localhost:5175');
@@ -189,6 +197,195 @@ const log = (...args) => {
   }
 };
 
+let persistTimer = null;
+let persistInFlight = false;
+let persistQueued = false;
+
+const serializeLobby = (lobby) => ({
+  code: lobby.code,
+  hostId: lobby.hostId,
+  stateVersion: lobby.stateVersion || 1,
+  config: lobby.config || null,
+  players: Array.from(lobby.players.values()).map((p) => ({
+    id: p.id,
+    name: p.name,
+    isHost: !!p.isHost,
+    role: p.role ?? null,
+    status: p.status ?? 'active'
+  }))
+});
+
+const serializeGame = (game) => ({
+  code: game.code,
+  hostId: game.hostId,
+  stateVersion: game.stateVersion || 1,
+  players: Array.from(game.players.values()).map((p) => ({
+    id: p.id,
+    name: p.name,
+    isHost: !!p.isHost,
+    role: p.role ?? null,
+    status: p.status ?? 'active'
+  })),
+  remainingTimeSeconds:
+    typeof game.remainingTimeSeconds === 'number' ? game.remainingTimeSeconds : null,
+  remainingTimeUpdatedAt:
+    typeof game.remainingTimeUpdatedAt === 'number' ? game.remainingTimeUpdatedAt : null,
+  remainingTimeCountdownActive: !!game.remainingTimeCountdownActive,
+  lastHostState: game.lastHostState || null,
+  lastHostStateAt:
+    typeof game.lastHostStateAt === 'number' ? game.lastHostStateAt : null,
+  lastHostStateHostId: game.lastHostStateHostId || null,
+  reconnectedPlayerIds: game.reconnectedPlayerIds || {}
+});
+
+const persistRuntimeStateNow = async (reason = 'unspecified') => {
+  if (persistInFlight) {
+    persistQueued = true;
+    return;
+  }
+  persistInFlight = true;
+  try {
+    await fs.mkdir(RUNTIME_DATA_DIR, { recursive: true });
+    const snapshot = {
+      version: 1,
+      signalingVersion: SIGNALING_VERSION,
+      savedAt: new Date().toISOString(),
+      reason,
+      lobbies: Array.from(lobbies.values()).map(serializeLobby),
+      games: Array.from(games.values()).map(serializeGame),
+      counters: {
+        totalSocketMessages
+      }
+    };
+    const tempPath = `${SNAPSHOT_FILE}.tmp`;
+    await fs.writeFile(tempPath, JSON.stringify(snapshot, null, 2), 'utf8');
+    await fs.rename(tempPath, SNAPSHOT_FILE);
+  } catch (error) {
+    log('[PERSIST] Erreur snapshot runtime:', error?.message || error);
+  } finally {
+    persistInFlight = false;
+    if (persistQueued) {
+      persistQueued = false;
+      void persistRuntimeStateNow('queued-followup');
+    }
+  }
+};
+
+const schedulePersist = (reason = 'state-change') => {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+  }
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    void persistRuntimeStateNow(reason);
+  }, 350);
+};
+
+const appendRuntimeEvent = async (type, payload = {}) => {
+  try {
+    await fs.mkdir(RUNTIME_DATA_DIR, { recursive: true });
+    const line = JSON.stringify({
+      ts: Date.now(),
+      type,
+      payload
+    });
+    await fs.appendFile(EVENT_LOG_FILE, `${line}\n`, 'utf8');
+  } catch (error) {
+    log('[PERSIST] Erreur event log:', error?.message || error);
+  }
+};
+
+const markStateChanged = (type, payload = {}) => {
+  void appendRuntimeEvent(type, payload);
+  schedulePersist(type);
+};
+
+const hydrateRuntimeState = async () => {
+  try {
+    await fs.mkdir(RUNTIME_DATA_DIR, { recursive: true });
+    const raw = await fs.readFile(SNAPSHOT_FILE, 'utf8');
+    const snapshot = JSON.parse(raw);
+    if (!snapshot || typeof snapshot !== 'object') {
+      return;
+    }
+    lobbies.clear();
+    games.clear();
+    lobbySocketMessageCounts.clear();
+    gameSocketMessageCounts.clear();
+
+    for (const lobby of snapshot.lobbies || []) {
+      if (!lobby?.code || !lobby?.hostId) continue;
+      const playersMap = new Map();
+      for (const p of lobby.players || []) {
+        if (!p?.id) continue;
+        playersMap.set(p.id, {
+          id: p.id,
+          name: p.name || 'Joueur',
+          isHost: !!p.isHost,
+          role: p.role ?? null,
+          status: p.status || 'active'
+        });
+      }
+      lobbies.set(lobby.code, {
+        code: lobby.code,
+        hostId: lobby.hostId,
+        stateVersion:
+          typeof lobby.stateVersion === 'number' && lobby.stateVersion > 0
+            ? Math.floor(lobby.stateVersion)
+            : 1,
+        config: lobby.config || null,
+        players: playersMap
+      });
+      lobbySocketMessageCounts.set(lobby.code, 0);
+    }
+
+    for (const game of snapshot.games || []) {
+      if (!game?.code || !game?.hostId) continue;
+      const playersMap = new Map();
+      for (const p of game.players || []) {
+        if (!p?.id) continue;
+        playersMap.set(p.id, {
+          id: p.id,
+          name: p.name || 'Joueur',
+          isHost: !!p.isHost,
+          role: p.role ?? null,
+          status: p.status || 'active'
+        });
+      }
+      games.set(game.code, {
+        code: game.code,
+        hostId: game.hostId,
+        stateVersion:
+          typeof game.stateVersion === 'number' && game.stateVersion > 0
+            ? Math.floor(game.stateVersion)
+            : 1,
+        players: playersMap,
+        remainingTimeSeconds:
+          typeof game.remainingTimeSeconds === 'number' ? game.remainingTimeSeconds : undefined,
+        remainingTimeUpdatedAt:
+          typeof game.remainingTimeUpdatedAt === 'number' ? game.remainingTimeUpdatedAt : undefined,
+        remainingTimeCountdownActive: !!game.remainingTimeCountdownActive,
+        lastHostState: game.lastHostState || null,
+        lastHostStateAt:
+          typeof game.lastHostStateAt === 'number' ? game.lastHostStateAt : null,
+        lastHostStateHostId: game.lastHostStateHostId || null,
+        reconnectedPlayerIds: game.reconnectedPlayerIds || {}
+      });
+      gameSocketMessageCounts.set(game.code, 0);
+    }
+    if (snapshot.counters && typeof snapshot.counters.totalSocketMessages === 'number') {
+      totalSocketMessages = snapshot.counters.totalSocketMessages;
+    }
+    log(
+      `[PERSIST] Etat runtime restaure: ${lobbies.size} lobby(s), ${games.size} game(s)`
+    );
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      log('[PERSIST] Erreur restauration runtime:', error?.message || error);
+    }
+  }
+};
+
 const generateCode = () =>
   Array.from({ length: 6 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('');
 
@@ -274,6 +471,7 @@ const send = (socket, message) => {
 const getLobbySnapshot = (lobby) => ({
   code: lobby.code,
   hostId: lobby.hostId,
+  stateVersion: lobby.stateVersion || 1,
   config: lobby.config || null,
   players: Array.from(lobby.players.values()).map(({ id, name, isHost, role, status }) => ({
     id,
@@ -283,6 +481,280 @@ const getLobbySnapshot = (lobby) => ({
     status: status ?? 'active'
   }))
 });
+
+const countRolesInLobby = (lobby) => {
+  let agents = 0;
+  let rogues = 0;
+  lobby.players.forEach((p) => {
+    const role = (p.role || '').toUpperCase();
+    if (role === 'AGENT') agents += 1;
+    if (role === 'ROGUE') rogues += 1;
+  });
+  return { agents, rogues };
+};
+
+const applyLobbyRoleUpdate = ({
+  lobby,
+  targetId,
+  role,
+  requestId
+}) => {
+  const player = lobby.players.get(targetId);
+  if (!player) {
+    return false;
+  }
+  player.role = role;
+  lobby.stateVersion = (lobby.stateVersion || 1) + 1;
+  lobby.players.forEach((p) => {
+    const s = socketsById.get(p.id);
+    if (s) {
+      send(s, {
+        type: 'lobby:role-updated',
+        payload: {
+          playerId: targetId,
+          role,
+          stateVersion: lobby.stateVersion,
+          requestId: requestId || null
+        }
+      });
+      // Compat backward with existing listeners.
+      send(s, {
+        type: 'lobby:player-updated',
+        payload: {
+          playerId: targetId,
+          changes: { role: role },
+          stateVersion: lobby.stateVersion
+        }
+      });
+    }
+  });
+  return true;
+};
+
+const bumpGameStateVersion = (game) => {
+  game.stateVersion = (game.stateVersion || 1) + 1;
+  return game.stateVersion;
+};
+
+const sendGameActionRejected = (socket, action, requestId, reason) => {
+  send(socket, {
+    type: 'game:action-rejected',
+    payload: {
+      action,
+      requestId: requestId || null,
+      reason
+    }
+  });
+};
+
+const applyGameRemainingTimeUpdate = ({
+  game,
+  remaining,
+  countdownStarted,
+  hasCountdownStarted,
+  requestId = null
+}) => {
+  game.remainingTimeSeconds = Math.max(0, Math.floor(remaining));
+  game.remainingTimeUpdatedAt = Date.now();
+  if (hasCountdownStarted) {
+    game.remainingTimeCountdownActive = !!countdownStarted;
+  }
+  const stateVersion = bumpGameStateVersion(game);
+  game.players.forEach((p) => {
+    const s = socketsById.get(p.id);
+    if (s) {
+      send(s, {
+        type: 'game:remaining-time-updated',
+        payload: {
+          remaining_time: game.remainingTimeSeconds,
+          countdown_started: !!game.remainingTimeCountdownActive,
+          stateVersion,
+          requestId
+        }
+      });
+    }
+  });
+  return stateVersion;
+};
+
+const applyGameStateSync = ({
+  game,
+  hostId,
+  statePayload,
+  targetId = null,
+  requestId = null
+}) => {
+  const remainingTime = statePayload?.gameDetails?.remaining_time;
+  if (typeof remainingTime === 'number') {
+    game.remainingTimeSeconds = Math.max(0, Math.floor(remainingTime));
+    game.remainingTimeUpdatedAt = Date.now();
+  }
+  game.remainingTimeCountdownActive = !!(
+    statePayload?.gameDetails?.started && statePayload?.gameDetails?.countdown_started
+  );
+  game.lastHostState = statePayload || null;
+  game.lastHostStateAt = Date.now();
+  game.lastHostStateHostId = hostId;
+  const stateVersion = bumpGameStateVersion(game);
+
+  if (targetId) {
+    const targetSocket = socketsById.get(targetId);
+    if (targetSocket) {
+      send(targetSocket, {
+        type: 'state:sync',
+        payload: statePayload
+      });
+    }
+  } else {
+    game.players.forEach((p) => {
+      if (p.id === hostId) return;
+      const s = socketsById.get(p.id);
+      if (s) {
+        send(s, {
+          type: 'state:sync',
+          payload: statePayload
+        });
+      }
+    });
+  }
+
+  game.players.forEach((p) => {
+    const s = socketsById.get(p.id);
+    if (s) {
+      send(s, {
+        type: 'game:state-version',
+        payload: {
+          stateVersion,
+          requestId
+        }
+      });
+    }
+  });
+
+  return stateVersion;
+};
+
+const tryStartGameFromLobby = ({
+  socket,
+  clientId,
+  code,
+  requestId = null,
+  requireRoleCheck = false
+}) => {
+  const lobby = lobbies.get(code);
+  if (!code || !lobby) {
+    const errorMessage = 'Lobby introuvable pour démarrer la partie.';
+    if (requestId) {
+      send(socket, {
+        type: 'lobby:action-rejected',
+        payload: { action: 'start-game', requestId, reason: errorMessage }
+      });
+    } else {
+      send(socket, { type: 'game:error', payload: { message: errorMessage } });
+    }
+    return true;
+  }
+
+  if (lobby.hostId !== clientId) {
+    const errorMessage = 'Seul le host peut démarrer la partie.';
+    if (requestId) {
+      send(socket, {
+        type: 'lobby:action-rejected',
+        payload: { action: 'start-game', requestId, reason: errorMessage }
+      });
+    } else {
+      send(socket, { type: 'game:error', payload: { message: errorMessage } });
+    }
+    return true;
+  }
+
+  if (requireRoleCheck) {
+    const { agents, rogues } = countRolesInLobby(lobby);
+    if (agents < 1 || rogues < 1) {
+      send(socket, {
+        type: 'lobby:action-rejected',
+        payload: {
+          action: 'start-game',
+          requestId,
+          reason: 'Prerequis roles non satisfaits (>=1 AGENT et >=1 ROGUE).'
+        }
+      });
+      return true;
+    }
+  }
+
+  if (games.has(code)) {
+    send(socket, {
+      type: 'game:created',
+      payload: {
+        code,
+        playerId: clientId,
+        hostId: lobby.hostId,
+        game: getLobbySnapshot(games.get(code))
+      }
+    });
+    return true;
+  }
+
+  const game = {
+    code,
+    hostId: lobby.hostId,
+    players: new Map(),
+    stateVersion: 1
+  };
+
+  lobby.players.forEach((player) => {
+    game.players.set(player.id, { ...player });
+  });
+
+  games.set(code, game);
+  gameSocketMessageCounts.set(code, gameSocketMessageCounts.get(code) || 0);
+  markStateChanged('game:create', { code, hostId: clientId });
+  persistToBdd('/api/game-sessions', 'POST', { game_code: code });
+
+  lobby.players.forEach((player) => {
+    const playerSocket = socketsById.get(player.id);
+    if (playerSocket) {
+      const playerClient = clients.get(playerSocket.id);
+      if (playerClient) {
+        playerClient.lobbyCode = null;
+      }
+    }
+  });
+
+  lobbies.delete(code);
+  lobbySocketMessageCounts.delete(code);
+
+  lobby.players.forEach((player) => {
+    const playerSocket = socketsById.get(player.id);
+    if (playerSocket) {
+      send(playerSocket, {
+        type: 'game:started',
+        payload: { code }
+      });
+    }
+  });
+
+  clients.get(socket.id).gameCode = code;
+  clients.get(socket.id).lobbyCode = null;
+
+  if (requestId) {
+    send(socket, {
+      type: 'lobby:action-ack',
+      payload: { action: 'start-game', requestId, code }
+    });
+  }
+  send(socket, {
+    type: 'game:created',
+    payload: {
+      code,
+      playerId: clientId,
+      hostId: lobby.hostId,
+      game: getLobbySnapshot(game)
+    }
+  });
+  return true;
+};
 
 io.on('connection', (socket) => {
   const clientId = randomUUID();
@@ -449,7 +921,8 @@ io.on('connection', (socket) => {
         code,
         hostId: clientId,
         players: new Map(),
-        config: payload?.gameConfig || null
+        config: payload?.gameConfig || null,
+        stateVersion: 1
       };
 
       lobby.players.set(clientId, { id: clientId, name: payload?.playerName || 'Host', isHost: true });
@@ -459,6 +932,7 @@ io.on('connection', (socket) => {
 
       log(`[LOBBY CRÉÉ] Code: ${code}, Host: ${clientId}, Nom: ${payload?.playerName || 'Host'}`);
       incrementLobbySocketMessages(code);
+      markStateChanged('lobby:create', { code, hostId: clientId });
 
       send(socket, {
         type: 'lobby:created',
@@ -582,6 +1056,7 @@ io.on('connection', (socket) => {
       clients.get(socket.id).lobbyCode = code;
 
       log(`[LOBBY REJOINT] Code: ${code}, Joueur: ${clientId}, Nom: ${payload?.playerName || 'Joueur'}`);
+      markStateChanged('lobby:join', { code, playerId: clientId });
 
       send(socket, {
         type: 'lobby:joined',
@@ -685,81 +1160,80 @@ io.on('connection', (socket) => {
       }
     }
 
-    if (type === 'game:create') {
-      const code = payload?.code?.toUpperCase();
-      const lobby = lobbies.get(code);
-      if (!code || !lobby) {
-        send(socket, { type: 'game:error', payload: { message: 'Lobby introuvable pour démarrer la partie.' } });
-        return;
-      }
-
-      if (lobby.hostId !== clientId) {
-        send(socket, { type: 'game:error', payload: { message: 'Seul le host peut démarrer la partie.' } });
-        return;
-      }
-
-      if (games.has(code)) {
+    if (type === 'lobby:role-update-request') {
+      const { lobbyCode } = clients.get(socket.id) || {};
+      const requestId = payload?.requestId || null;
+      const targetId = payload?.playerId || clientId;
+      const role = payload?.role ?? null;
+      if (!lobbyCode || !lobbies.has(lobbyCode)) {
         send(socket, {
-          type: 'game:created',
+          type: 'lobby:action-rejected',
           payload: {
-            code,
-            playerId: clientId,
-            hostId: lobby.hostId,
-            game: getLobbySnapshot(games.get(code))
+            action: 'role-update',
+            requestId,
+            reason: 'Lobby introuvable.'
           }
         });
         return;
       }
-
-      const game = {
-        code,
-        hostId: lobby.hostId,
-        players: new Map()
-      };
-
-      lobby.players.forEach((player) => {
-        game.players.set(player.id, { ...player });
-      });
-
-      games.set(code, game);
-      gameSocketMessageCounts.set(code, gameSocketMessageCounts.get(code) || 0);
-
-      persistToBdd('/api/game-sessions', 'POST', { game_code: code });
-
-      lobby.players.forEach((player) => {
-        const playerSocket = socketsById.get(player.id);
-        if (playerSocket) {
-          const playerClient = clients.get(playerSocket.id);
-          if (playerClient) {
-            playerClient.lobbyCode = null;
+      const lobby = lobbies.get(lobbyCode);
+      if (lobby.hostId !== clientId) {
+        send(socket, {
+          type: 'lobby:action-rejected',
+          payload: {
+            action: 'role-update',
+            requestId,
+            reason: 'Seul le host peut modifier les roles.'
           }
-        }
+        });
+        return;
+      }
+      const applied = applyLobbyRoleUpdate({
+        lobby,
+        targetId,
+        role,
+        requestId
       });
-
-      lobbies.delete(code);
-      lobbySocketMessageCounts.delete(code);
-
-      lobby.players.forEach((player) => {
-        const playerSocket = socketsById.get(player.id);
-        if (playerSocket) {
-          send(playerSocket, {
-            type: 'game:started',
-            payload: { code }
-          });
-        }
+      if (!applied) {
+        send(socket, {
+          type: 'lobby:action-rejected',
+          payload: {
+            action: 'role-update',
+            requestId,
+            reason: 'Joueur cible introuvable.'
+          }
+        });
+        return;
+      }
+      markStateChanged('lobby:role-update-request', {
+        code: lobbyCode,
+        targetId,
+        role,
+        requestId
       });
+      return;
+    }
 
-      clients.get(socket.id).gameCode = code;
-      clients.get(socket.id).lobbyCode = null;
+    if (type === 'lobby:start-game-request') {
+      const { lobbyCode } = clients.get(socket.id) || {};
+      const requestId = payload?.requestId || null;
+      tryStartGameFromLobby({
+        socket,
+        clientId,
+        code: lobbyCode?.toUpperCase(),
+        requestId,
+        requireRoleCheck: true
+      });
+      return;
+    }
 
-      send(socket, {
-        type: 'game:created',
-        payload: {
-          code,
-          playerId: clientId,
-          hostId: lobby.hostId,
-          game: getLobbySnapshot(game)
-        }
+    if (type === 'game:create') {
+      const code = payload?.code?.toUpperCase();
+      tryStartGameFromLobby({
+        socket,
+        clientId,
+        code,
+        requireRoleCheck: false
       });
       return;
     }
@@ -1088,17 +1562,65 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'game:update-remaining-time-request') {
+      const gameCode = clientInfo?.gameCode;
+      const requestId = payload?.requestId || null;
+      const remaining = payload?.remaining_time;
+      if (!gameCode || !games.has(gameCode)) {
+        sendGameActionRejected(socket, 'update-remaining-time', requestId, 'Partie introuvable.');
+        return;
+      }
+      if (typeof remaining !== 'number') {
+        sendGameActionRejected(socket, 'update-remaining-time', requestId, 'remaining_time invalide.');
+        return;
+      }
+      const game = games.get(gameCode);
+      if (clientInfo?.clientId !== game.hostId) {
+        sendGameActionRejected(socket, 'update-remaining-time', requestId, 'Seul le host peut modifier le temps.');
+        return;
+      }
+      const hasCountdownStarted = !!(payload && 'countdown_started' in payload);
+      const stateVersion = applyGameRemainingTimeUpdate({
+        game,
+        remaining,
+        countdownStarted: payload?.countdown_started,
+        hasCountdownStarted,
+        requestId
+      });
+      markStateChanged('game:update-remaining-time-request', {
+        code: gameCode,
+        remaining: game.remainingTimeSeconds,
+        stateVersion,
+        requestId
+      });
+      send(socket, {
+        type: 'game:action-ack',
+        payload: {
+          action: 'update-remaining-time',
+          requestId,
+          stateVersion
+        }
+      });
+      return;
+    }
+
     if (type === 'game:update-remaining-time') {
       const gameCode = clientInfo?.gameCode;
       const remaining = payload?.remaining_time;
       if (gameCode && games.has(gameCode) && typeof remaining === 'number') {
         const game = games.get(gameCode);
         if (game && clientInfo?.clientId === game.hostId) {
-          game.remainingTimeSeconds = Math.max(0, Math.floor(remaining));
-          game.remainingTimeUpdatedAt = Date.now();
-          if (payload && 'countdown_started' in payload) {
-            game.remainingTimeCountdownActive = !!payload.countdown_started;
-          }
+          const stateVersion = applyGameRemainingTimeUpdate({
+            game,
+            remaining,
+            countdownStarted: payload?.countdown_started,
+            hasCountdownStarted: !!(payload && 'countdown_started' in payload)
+          });
+          markStateChanged('game:update-remaining-time', {
+            code: gameCode,
+            remaining: game.remainingTimeSeconds,
+            stateVersion
+          });
         }
       }
       return;
@@ -1162,30 +1684,59 @@ io.on('connection', (socket) => {
 
     if (type === 'state:sync') {
       const targetId = payload?.targetId;
-      const targetSocket = socketsById.get(targetId);
-      if (!targetSocket) {
-        log(`[ERREUR RESYNC] État sync vers ${targetId} échoué: destinataire introuvable`);
-        return;
-      }
       const gameCode = clientInfo?.gameCode;
       const inner = payload?.payload;
-      const remainingTime = inner?.gameDetails?.remaining_time;
       if (gameCode && games.has(gameCode)) {
         const game = games.get(gameCode);
         if (game && clientInfo?.clientId === game.hostId) {
-          if (typeof remainingTime === 'number') {
-            game.remainingTimeSeconds = remainingTime;
-            game.remainingTimeUpdatedAt = Date.now();
-          }
-          game.remainingTimeCountdownActive = !!(inner?.gameDetails?.started && inner?.gameDetails?.countdown_started);
-          game.lastHostState = inner || null;
-          game.lastHostStateAt = Date.now();
-          game.lastHostStateHostId = clientInfo.clientId;
+          const stateVersion = applyGameStateSync({
+            game,
+            hostId: clientInfo.clientId,
+            statePayload: inner,
+            targetId: targetId || null
+          });
+          markStateChanged('game:state-sync', { code: gameCode, stateVersion });
         }
       }
-      send(targetSocket, {
-        type: 'state:sync',
-        payload: inner
+      if (targetId && !socketsById.get(targetId)) {
+        log(`[ERREUR RESYNC] État sync vers ${targetId} échoué: destinataire introuvable`);
+      }
+      return;
+    }
+
+    if (type === 'game:state-sync-request') {
+      const gameCode = clientInfo?.gameCode;
+      const requestId = payload?.requestId || null;
+      const targetId = payload?.targetId || null;
+      const inner = payload?.payload || null;
+      if (!gameCode || !games.has(gameCode)) {
+        sendGameActionRejected(socket, 'state-sync', requestId, 'Partie introuvable.');
+        return;
+      }
+      const game = games.get(gameCode);
+      if (!game || clientInfo?.clientId !== game.hostId) {
+        sendGameActionRejected(socket, 'state-sync', requestId, 'Seul le host peut synchroniser l etat.');
+        return;
+      }
+      const stateVersion = applyGameStateSync({
+        game,
+        hostId: clientInfo.clientId,
+        statePayload: inner,
+        targetId,
+        requestId
+      });
+      markStateChanged('game:state-sync-request', {
+        code: gameCode,
+        targetId,
+        stateVersion
+      });
+      send(socket, {
+        type: 'game:action-ack',
+        payload: {
+          action: 'state-sync',
+          requestId,
+          stateVersion
+        }
       });
       return;
     }
@@ -1292,6 +1843,7 @@ io.on('connection', (socket) => {
       if (clientInfo) {
         clientInfo.lobbyCode = null;
       }
+      markStateChanged('lobby:leave', { code, playerId });
       
       return;
     }
@@ -1343,6 +1895,7 @@ io.on('connection', (socket) => {
       if (clientInfo) {
         clientInfo.gameCode = null;
       }
+      markStateChanged('game:leave', { code, playerId });
       return;
     }
 
@@ -1353,6 +1906,11 @@ io.on('connection', (socket) => {
         const player = game.players.get(clientId);
         if (player) {
           player.status = payload?.status || 'active';
+          markStateChanged('game:player-status-update', {
+            code: gameCode,
+            playerId: clientId,
+            status: player.status
+          });
         }
         return;
       }
@@ -1366,6 +1924,11 @@ io.on('connection', (socket) => {
         const oldStatus = player.status;
         player.status = payload?.status || 'active';
         log(`[STATUT JOUEUR] ${clientId} dans lobby ${lobbyCode}: ${player.status}`);
+        markStateChanged('lobby:player-status-update', {
+          code: lobbyCode,
+          playerId: clientId,
+          status: player.status
+        });
         
         // Si c'est le host qui change de statut
         if (clientId === lobby.hostId) {
@@ -1426,6 +1989,68 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'game:player-status-update-request') {
+      const { gameCode } = clients.get(socket.id) || {};
+      const requestId = payload?.requestId || null;
+      const targetId = payload?.playerId || clientId;
+      const requestedStatus = payload?.status;
+      const status = typeof requestedStatus === 'string' && requestedStatus.trim()
+        ? requestedStatus.trim()
+        : 'active';
+      if (!gameCode || !games.has(gameCode)) {
+        sendGameActionRejected(socket, 'player-status-update', requestId, 'Partie introuvable.');
+        return;
+      }
+      const game = games.get(gameCode);
+      const isHost = game.hostId === clientId;
+      if (!isHost && targetId !== clientId) {
+        sendGameActionRejected(
+          socket,
+          'player-status-update',
+          requestId,
+          'Seul le host peut modifier un autre joueur.'
+        );
+        return;
+      }
+      const player = game.players.get(targetId);
+      if (!player) {
+        sendGameActionRejected(socket, 'player-status-update', requestId, 'Joueur introuvable.');
+        return;
+      }
+      player.status = status;
+      const stateVersion = bumpGameStateVersion(game);
+      game.players.forEach((p) => {
+        const s = socketsById.get(p.id);
+        if (s) {
+          send(s, {
+            type: 'game:player-updated',
+            payload: {
+              playerId: targetId,
+              changes: { status },
+              stateVersion,
+              requestId
+            }
+          });
+        }
+      });
+      markStateChanged('game:player-status-update-request', {
+        code: gameCode,
+        playerId: targetId,
+        status,
+        stateVersion,
+        requestId
+      });
+      send(socket, {
+        type: 'game:action-ack',
+        payload: {
+          action: 'player-status-update',
+          requestId,
+          stateVersion
+        }
+      });
+      return;
+    }
+
     if (type === 'lobby:chat') {
       const { lobbyCode } = clients.get(socket.id) || {};
       const text = typeof payload?.text === 'string' ? payload.text.trim().substring(0, 500) : '';
@@ -1446,6 +2071,7 @@ io.on('connection', (socket) => {
         const s = socketsById.get(p.id);
         if (s) send(s, { type: 'lobby:chat-message', payload: msg });
       });
+      markStateChanged('lobby:chat', { code: lobbyCode, playerId: clientId });
       return;
     }
 
@@ -1501,6 +2127,7 @@ io.on('connection', (socket) => {
       const { lobbyCode, gameCode } = clients.get(socket.id) || {};
       const targetId = payload?.playerId || clientId;
       const role = payload?.role ?? null;
+      const requestId = payload?.requestId || null;
 
       if (gameCode && games.has(gameCode)) {
         const game = games.get(gameCode);
@@ -1513,23 +2140,39 @@ io.on('connection', (socket) => {
 
       if (lobbyCode && lobbies.has(lobbyCode)) {
         const lobby = lobbies.get(lobbyCode);
-        const player = lobby.players.get(targetId);
-        if (player) {
-          player.role = role;
-          // Diffuser immédiatement la mise à jour de rôle à tous les clients du lobby.
-          lobby.players.forEach((p) => {
-            const s = socketsById.get(p.id);
-            if (s) {
-              send(s, {
-                type: 'lobby:player-updated',
-                payload: {
-                  playerId: targetId,
-                  changes: { role: role }
-                }
-              });
+        if (lobby.hostId !== clientId) {
+          send(socket, {
+            type: 'lobby:action-rejected',
+            payload: {
+              action: 'role-update',
+              requestId,
+              reason: 'Seul le host peut modifier les roles.'
             }
           });
+          return;
         }
+        const applied = applyLobbyRoleUpdate({
+          lobby,
+          targetId,
+          role,
+          requestId
+        });
+        if (!applied) {
+          send(socket, {
+            type: 'lobby:action-rejected',
+            payload: {
+              action: 'role-update',
+              requestId,
+              reason: 'Joueur cible introuvable.'
+            }
+          });
+          return;
+        }
+        markStateChanged('lobby:player-role-update', {
+          code: lobbyCode,
+          targetId,
+          role
+        });
       }
       return;
     }
@@ -1642,6 +2285,25 @@ io.on('connection', (socket) => {
     clients.delete(socket.id);
     socketsById.delete(clientInfo.clientId);
   });
+});
+
+await hydrateRuntimeState();
+
+setInterval(() => {
+  schedulePersist('periodic');
+}, 15000).unref();
+
+const gracefulPersistAndExit = async (signal) => {
+  log(`[PERSIST] Signal ${signal} reçu, sauvegarde de l'état runtime...`);
+  await persistRuntimeStateNow(`signal:${signal}`);
+  process.exit(0);
+};
+
+process.on('SIGINT', () => {
+  void gracefulPersistAndExit('SIGINT');
+});
+process.on('SIGTERM', () => {
+  void gracefulPersistAndExit('SIGTERM');
 });
 
 server.listen(PORT, () => {

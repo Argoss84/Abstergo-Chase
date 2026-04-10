@@ -2,6 +2,8 @@ import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_form_da
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
 
 class LobbyPlayer {
+  static const Object _noRoleChange = Object();
+
   const LobbyPlayer({
     required this.id,
     required this.name,
@@ -20,14 +22,14 @@ class LobbyPlayer {
     String? id,
     String? name,
     bool? isHost,
-    String? role,
+    Object? role = _noRoleChange,
     String? status,
   }) {
     return LobbyPlayer(
       id: id ?? this.id,
       name: name ?? this.name,
       isHost: isHost ?? this.isHost,
-      role: role ?? this.role,
+      role: identical(role, _noRoleChange) ? this.role : role as String?,
       status: status ?? this.status,
     );
   }

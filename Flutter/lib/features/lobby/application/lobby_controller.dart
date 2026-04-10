@@ -207,9 +207,39 @@ class LobbyController extends ChangeNotifier {
           }
         }
         return;
+      case 'lobby:role-updated':
+        if (payload is Map) {
+          final id = payload['playerId']?.toString();
+          if (id != null) {
+            final idx = players.indexWhere((p) => p.id == id);
+            if (idx != -1) {
+              players[idx] = players[idx].copyWith(
+                role: payload['role']?.toString(),
+              );
+              notifyListeners();
+            }
+          }
+        }
+        return;
       case 'game:started':
       case 'game:created':
         gameStarted = true;
+        notifyListeners();
+        return;
+      case 'lobby:action-rejected':
+        if (payload is Map) {
+          error = payload['reason']?.toString() ?? 'Action refusee par le serveur.';
+        } else {
+          error = 'Action refusee par le serveur.';
+        }
+        notifyListeners();
+        return;
+      case 'game:error':
+        if (payload is Map) {
+          error = payload['message']?.toString() ?? 'Erreur de creation de partie.';
+        } else {
+          error = 'Erreur de creation de partie.';
+        }
         notifyListeners();
         return;
       case 'lobby:closed':
@@ -237,11 +267,6 @@ class LobbyController extends ChangeNotifier {
       playerId: targetPlayerId,
       role: role,
     );
-    final idx = players.indexWhere((p) => p.id == targetPlayerId);
-    if (idx != -1) {
-      players[idx] = players[idx].copyWith(role: role);
-      notifyListeners();
-    }
   }
 
   bool get canStartGame {
