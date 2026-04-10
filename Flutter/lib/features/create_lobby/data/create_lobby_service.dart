@@ -81,6 +81,7 @@ class CreateLobbyService {
     required String playerName,
     required Uri serverUrl,
     required String socketPath,
+    Map<String, dynamic>? gameConfig,
     Duration timeout = const Duration(seconds: 12),
   }) async {
     await _ensureConnected(
@@ -136,7 +137,10 @@ class CreateLobbyService {
 
     socket.emit('message', <String, dynamic>{
       'type': 'lobby:create',
-      'payload': <String, dynamic>{'playerName': playerName},
+      'payload': <String, dynamic>{
+        'playerName': playerName,
+        if (gameConfig != null) 'gameConfig': gameConfig,
+      },
       'meta': <String, dynamic>{'clientVersion': _clientVersion},
     });
 

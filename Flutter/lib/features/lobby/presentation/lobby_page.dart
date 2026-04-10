@@ -25,6 +25,8 @@ class LobbyPage extends StatefulWidget {
 class _LobbyPageState extends State<LobbyPage> {
   late final LobbyController _controller;
   late final TextEditingController _chatController;
+  int _lastReadCount = 0;
+  bool _isChatOpen = false;
 
   @override
   void initState() {
@@ -62,6 +64,13 @@ class _LobbyPageState extends State<LobbyPage> {
       animation: _controller,
       builder: (context, _) {
         final bootstrap = _controller.bootstrapData;
+        final config = _controller.gameConfig;
+        final rawUnread = _controller.chatMessages.length - _lastReadCount;
+        final int unreadCount = _isChatOpen
+            ? 0
+            : rawUnread < 0
+                ? 0
+                : (rawUnread > 999 ? 999 : rawUnread);
         return Scaffold(
           appBar: AppBar(
             title: Row(
@@ -85,7 +94,35 @@ class _LobbyPageState extends State<LobbyPage> {
           ),
           floatingActionButton: FloatingActionButton(
             onPressed: _openChatSheet,
-            child: const Icon(Icons.chat_bubble_outline),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.chat_bubble_outline),
+                if (unreadCount > 0)
+                  Positioned(
+                    right: -6,
+                    top: -8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        unreadCount > 99 ? '99+' : '$unreadCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
           body: _controller.isLoading
               ? const Center(child: CircularProgressIndicator())
@@ -124,23 +161,32 @@ class _LobbyPageState extends State<LobbyPage> {
                         ),
                       ),
                     ),
-                    if (bootstrap?.form != null &&
-                        bootstrap!.form!.mapCenterLatitude.isNotEmpty &&
-                        bootstrap.form!.mapCenterLongitude.isNotEmpty)
+                    if (config != null ||
+                        (bootstrap?.form != null &&
+                            bootstrap!.form!.mapCenterLatitude.isNotEmpty &&
+                            bootstrap.form!.mapCenterLongitude.isNotEmpty))
                       Card(
                         child: Padding(
                           padding: const EdgeInsets.all(12),
                           child: LobbyMapPreview(
-                            center: bootstrap.form!.mapCenterLatitude.isEmpty
-                                ? bootstrap.objectives.first
-                                : _pointFromForm(bootstrap),
-                            mapRadiusMeters: bootstrap.form!.mapRadius,
-                            outerStreetContour: bootstrap.outerStreetContour,
-                            objectives: bootstrap.objectives,
-                            agentStartZone: bootstrap.agentStartZone,
-                            rogueStartZone: bootstrap.rogueStartZone,
-                            objectiveZoneRadiusMeters:
-                                bootstrap.form!.objectiveZoneRadius,
+                            center: config?.mapCenter ??
+                                (bootstrap!.form!.mapCenterLatitude.isEmpty
+                                    ? bootstrap.objectives.first
+                                    : _pointFromForm(bootstrap)),
+                            mapRadiusMeters:
+                                config?.mapRadius ?? bootstrap!.form!.mapRadius,
+                            outerStreetContour:
+                                config?.mapStreets ?? bootstrap!.outerStreetContour,
+                            objectives: _controller.isHost
+                                ? bootstrap?.objectives ?? const <GeoPoint>[]
+                                : const <GeoPoint>[],
+                            agentStartZone:
+                                config?.startZone ?? bootstrap?.agentStartZone,
+                            rogueStartZone:
+                                config?.rogueStartZone ?? bootstrap?.rogueStartZone,
+                            objectiveZoneRadiusMeters: config?.objectiveZoneRadius ??
+                                bootstrap!.form!.objectiveZoneRadius,
+                            showObjectives: _controller.isHost,
                           ),
                         ),
                       ),
@@ -335,6 +381,10 @@ class _LobbyPageState extends State<LobbyPage> {
   }
 
   Future<void> _openChatSheet() async {
+    setState(() {
+      _isChatOpen = true;
+      _lastReadCount = _controller.chatMessages.length;
+    });
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -381,7 +431,9 @@ class _LobbyPageState extends State<LobbyPage> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  isMe ? 'Vous' : m.playerName,
+                                  isMe
+                                      ? '${m.playerName} (Vous)'
+                                      : m.playerName,
                                   style: const TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
@@ -426,5 +478,12 @@ class _LobbyPageState extends State<LobbyPage> {
         ),
       ),
     );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isChatOpen = false;
+      _lastReadCount = _controller.chatMessages.length;
+    });
   }
 }

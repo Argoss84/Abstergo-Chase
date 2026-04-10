@@ -274,6 +274,7 @@ const send = (socket, message) => {
 const getLobbySnapshot = (lobby) => ({
   code: lobby.code,
   hostId: lobby.hostId,
+  config: lobby.config || null,
   players: Array.from(lobby.players.values()).map(({ id, name, isHost, role, status }) => ({
     id,
     name,
@@ -447,7 +448,8 @@ io.on('connection', (socket) => {
       const lobby = {
         code,
         hostId: clientId,
-        players: new Map()
+        players: new Map(),
+        config: payload?.gameConfig || null
       };
 
       lobby.players.set(clientId, { id: clientId, name: payload?.playerName || 'Host', isHost: true });

@@ -1,4 +1,5 @@
 import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
+import 'package:abstergo_chase/features/lobby/data/player_name_store.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
 import 'package:abstergo_chase/features/lobby/presentation/lobby_page.dart';
 import 'package:flutter/material.dart';
@@ -19,6 +20,7 @@ class JoinLobbyPage extends StatefulWidget {
 class _JoinLobbyPageState extends State<JoinLobbyPage> {
   late final TextEditingController _nameController;
   late final TextEditingController _codeController;
+  final PlayerNameStore _playerNameStore = PlayerNameStore();
 
   @override
   void initState() {
@@ -27,6 +29,7 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
     _codeController = TextEditingController(
       text: (widget.initialCode ?? '').trim().toUpperCase(),
     );
+    _restorePlayerName();
   }
 
   @override
@@ -34,6 +37,15 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
     _nameController.dispose();
     _codeController.dispose();
     super.dispose();
+  }
+
+  Future<void> _restorePlayerName() async {
+    final saved = await _playerNameStore.load();
+    if (!mounted || saved == null) {
+      return;
+    }
+    _nameController.text = saved;
+    setState(() {});
   }
 
   void _joinLobby() {
@@ -52,6 +64,7 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
       return;
     }
 
+    _playerNameStore.save(displayName);
     final bootstrap = LobbyBootstrapData(
       code: code,
       serverUrl: 'http://10.0.2.2:5174',

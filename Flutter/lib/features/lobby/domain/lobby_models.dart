@@ -74,3 +74,66 @@ class LobbyBootstrapData {
   final GeoPoint? rogueStartZone;
   final List<GeoPoint> outerStreetContour;
 }
+
+class LobbyGameConfig {
+  const LobbyGameConfig({
+    required this.mapCenter,
+    required this.mapRadius,
+    required this.objectiveZoneRadius,
+    required this.startZone,
+    required this.rogueStartZone,
+    required this.mapStreets,
+  });
+
+  final GeoPoint mapCenter;
+  final int mapRadius;
+  final int objectiveZoneRadius;
+  final GeoPoint? startZone;
+  final GeoPoint? rogueStartZone;
+  final List<GeoPoint> mapStreets;
+
+  factory LobbyGameConfig.fromMap(Map<dynamic, dynamic> raw) {
+    GeoPoint? parsePoint(dynamic lat, dynamic lng) {
+      final latitude = double.tryParse(lat?.toString() ?? '');
+      final longitude = double.tryParse(lng?.toString() ?? '');
+      if (latitude == null || longitude == null) return null;
+      return GeoPoint(latitude: latitude, longitude: longitude);
+    }
+
+    final center = parsePoint(
+          raw['map_center_latitude'],
+          raw['map_center_longitude'],
+        ) ??
+        const GeoPoint(latitude: 0, longitude: 0);
+
+    final contour = <GeoPoint>[];
+    final streets = raw['map_streets'];
+    if (streets is List && streets.isNotEmpty) {
+      final first = streets.first;
+      if (first is List) {
+        for (final pair in first) {
+          if (pair is List && pair.length >= 2) {
+            final lat = double.tryParse(pair[0].toString());
+            final lng = double.tryParse(pair[1].toString());
+            if (lat != null && lng != null) {
+              contour.add(GeoPoint(latitude: lat, longitude: lng));
+            }
+          }
+        }
+      }
+    }
+
+    return LobbyGameConfig(
+      mapCenter: center,
+      mapRadius: int.tryParse(raw['map_radius']?.toString() ?? '') ?? 1000,
+      objectiveZoneRadius:
+          int.tryParse(raw['objectiv_zone_radius']?.toString() ?? '') ?? 50,
+      startZone: parsePoint(raw['start_zone_latitude'], raw['start_zone_longitude']),
+      rogueStartZone: parsePoint(
+        raw['start_zone_rogue_latitude'],
+        raw['start_zone_rogue_longitude'],
+      ),
+      mapStreets: contour,
+    );
+  }
+}

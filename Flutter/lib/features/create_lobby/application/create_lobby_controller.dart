@@ -202,6 +202,29 @@ class CreateLobbyController extends ChangeNotifier {
         serverUrl: uri,
         socketPath:
             socketPath.trim().isEmpty ? '/socket.io' : socketPath.trim(),
+        gameConfig: <String, dynamic>{
+          'objectif_number': form.objectiveNumber,
+          'duration': form.duration,
+          'victory_condition_nb_objectivs': form.victoryConditionObjectives,
+          'hack_duration_ms': form.hackDurationMs,
+          'objectiv_zone_radius': form.objectiveZoneRadius,
+          'rogue_range': form.rogueRange,
+          'agent_range': form.agentRange,
+          'map_center_latitude': selectedPosition?.latitude.toString() ?? '',
+          'map_center_longitude': selectedPosition?.longitude.toString() ?? '',
+          'map_radius': form.mapRadius,
+          'start_zone_latitude': agentStartZone?.latitude.toString(),
+          'start_zone_longitude': agentStartZone?.longitude.toString(),
+          'start_zone_rogue_latitude': rogueStartZone?.latitude.toString(),
+          'start_zone_rogue_longitude': rogueStartZone?.longitude.toString(),
+          'map_streets': outerStreetContour.length >= 3
+              ? <dynamic>[
+                  outerStreetContour
+                      .map((p) => <double>[p.latitude, p.longitude])
+                      .toList(growable: false),
+                ]
+              : null,
+        },
       );
       createdLobbySession = session;
       createdLobbyCode = session.code;

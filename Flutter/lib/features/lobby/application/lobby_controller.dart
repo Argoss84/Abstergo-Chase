@@ -18,6 +18,7 @@ class LobbyController extends ChangeNotifier {
   String? playerId;
   bool isHost = false;
   bool gameStarted = false;
+  LobbyGameConfig? gameConfig;
   final List<LobbyPlayer> players = <LobbyPlayer>[];
   final List<LobbyChatMessage> chatMessages = <LobbyChatMessage>[];
   String connectionStatus = 'idle';
@@ -110,6 +111,10 @@ class LobbyController extends ChangeNotifier {
           final hostId = payload['hostId']?.toString();
           final lobby = payload['lobby'];
           if (lobby is Map) {
+            final config = lobby['config'];
+            if (config is Map) {
+              gameConfig = LobbyGameConfig.fromMap(config);
+            }
             final playersRaw = lobby['players'];
             if (playersRaw is List) {
               players
@@ -119,6 +124,8 @@ class LobbyController extends ChangeNotifier {
                     id: raw['id']?.toString() ?? '',
                     name: raw['name']?.toString() ?? 'Joueur',
                     isHost: raw['isHost'] == true,
+                    role: raw['role']?.toString(),
+                    status: raw['status']?.toString() ?? 'active',
                   );
                 }));
             }

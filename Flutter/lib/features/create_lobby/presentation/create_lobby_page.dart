@@ -2,6 +2,7 @@ import 'package:abstergo_chase/features/create_lobby/application/create_lobby_co
 import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:abstergo_chase/features/create_lobby/presentation/widgets/create_lobby_details_sheet.dart';
 import 'package:abstergo_chase/features/create_lobby/presentation/widgets/create_lobby_map.dart';
+import 'package:abstergo_chase/features/lobby/data/player_name_store.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
 import 'package:abstergo_chase/features/lobby/presentation/lobby_page.dart';
 import 'package:flutter/material.dart';
@@ -20,6 +21,7 @@ class CreateLobbyPage extends StatefulWidget {
 class _CreateLobbyPageState extends State<CreateLobbyPage> {
   late final CreateLobbyController _controller;
   late final TextEditingController _nameController;
+  final PlayerNameStore _playerNameStore = PlayerNameStore();
 
   @override
   void initState() {
@@ -27,6 +29,7 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
     _controller = CreateLobbyController();
     _nameController = TextEditingController();
     _controller.loadCurrentPosition();
+    _restorePlayerName();
   }
 
   @override
@@ -52,6 +55,15 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
       _controller.setServerUrl(data.serverUrl);
       _controller.setSocketPath(data.socketPath);
     }
+  }
+
+  Future<void> _restorePlayerName() async {
+    final saved = await _playerNameStore.load();
+    if (!mounted || saved == null) {
+      return;
+    }
+    _nameController.text = saved;
+    _controller.setDisplayName(saved);
   }
 
   @override
@@ -177,6 +189,11 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                                   return;
                                 }
                                 if (_controller.createdLobbyCode != null) {
+                                  await _playerNameStore
+                                      .save(_controller.displayName);
+                                  if (!mounted) {
+                                    return;
+                                  }
                                   final session = _controller.createdLobbySession;
                                   final bootstrap = LobbyBootstrapData(
                                     code: _controller.createdLobbyCode!,

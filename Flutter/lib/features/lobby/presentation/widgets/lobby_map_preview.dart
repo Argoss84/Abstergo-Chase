@@ -14,6 +14,7 @@ class LobbyMapPreview extends StatelessWidget {
     required this.agentStartZone,
     required this.rogueStartZone,
     required this.objectiveZoneRadiusMeters,
+    this.showObjectives = true,
   });
 
   final GeoPoint center;
@@ -23,6 +24,7 @@ class LobbyMapPreview extends StatelessWidget {
   final GeoPoint? agentStartZone;
   final GeoPoint? rogueStartZone;
   final int objectiveZoneRadiusMeters;
+  final bool showObjectives;
 
   @override
   Widget build(BuildContext context) {
@@ -52,16 +54,17 @@ class LobbyMapPreview extends StatelessWidget {
                     borderStrokeWidth: 2,
                     borderColor: Colors.blue,
                   ),
-                ...objectives.map(
-                  (p) => CircleMarker(
-                    point: LatLng(p.latitude, p.longitude),
-                    radius: objectiveZoneRadiusMeters.toDouble(),
-                    useRadiusInMeter: true,
-                    color: Colors.red.withOpacity(0.08),
-                    borderStrokeWidth: 1,
-                    borderColor: Colors.red,
+                if (showObjectives)
+                  ...objectives.map(
+                    (p) => CircleMarker(
+                      point: LatLng(p.latitude, p.longitude),
+                      radius: objectiveZoneRadiusMeters.toDouble(),
+                      useRadiusInMeter: true,
+                      color: Colors.red.withOpacity(0.08),
+                      borderStrokeWidth: 1,
+                      borderColor: Colors.red,
+                    ),
                   ),
-                ),
                 if (agentStartZone != null)
                   CircleMarker(
                     point: LatLng(
@@ -112,16 +115,17 @@ class LobbyMapPreview extends StatelessWidget {
                     size: 34,
                   ),
                 ),
-                ...objectives.map(
-                  (p) => Marker(
-                    point: LatLng(p.latitude, p.longitude),
-                    builder: (_) => const Icon(
-                      Icons.adjust,
-                      color: Colors.red,
-                      size: 18,
+                if (showObjectives)
+                  ...objectives.map(
+                    (p) => Marker(
+                      point: LatLng(p.latitude, p.longitude),
+                      builder: (_) => const Icon(
+                        Icons.adjust,
+                        color: Colors.red,
+                        size: 18,
+                      ),
                     ),
                   ),
-                ),
                 if (agentStartZone != null)
                   Marker(
                     point: LatLng(
