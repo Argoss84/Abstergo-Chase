@@ -17,24 +17,18 @@ class CreateLobbyPage extends StatefulWidget {
 class _CreateLobbyPageState extends State<CreateLobbyPage> {
   late final CreateLobbyController _controller;
   late final TextEditingController _nameController;
-  late final TextEditingController _serverController;
-  late final TextEditingController _pathController;
 
   @override
   void initState() {
     super.initState();
     _controller = CreateLobbyController();
     _nameController = TextEditingController();
-    _serverController = TextEditingController(text: _controller.serverUrl);
-    _pathController = TextEditingController(text: _controller.socketPath);
     _controller.loadCurrentPosition();
   }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _serverController.dispose();
-    _pathController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -43,11 +37,17 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
     final data = await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (_) => CreateLobbyDetailsSheet(initialData: _controller.form),
+      builder: (_) => CreateLobbyDetailsSheet(
+        initialData: _controller.form,
+        initialServerUrl: _controller.serverUrl,
+        initialSocketPath: _controller.socketPath,
+      ),
     );
 
-    if (data != null) {
-      _controller.updateForm(data);
+    if (data is CreateLobbyDetailsResult) {
+      _controller.updateForm(data.form);
+      _controller.setServerUrl(data.serverUrl);
+      _controller.setSocketPath(data.socketPath);
     }
   }
 
@@ -86,24 +86,6 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                           hintText: 'Entrez votre nom',
                         ),
                         onChanged: _controller.setDisplayName,
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _serverController,
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                          labelText: 'URL serveur',
-                        ),
-                        onChanged: _controller.setServerUrl,
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _pathController,
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                          labelText: 'Socket path',
-                        ),
-                        onChanged: _controller.setSocketPath,
                       ),
                       const SizedBox(height: 12),
                       FilledButton.tonal(

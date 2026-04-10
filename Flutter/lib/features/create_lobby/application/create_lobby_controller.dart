@@ -111,16 +111,28 @@ class CreateLobbyController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final result = _objectiveGenerationService.generate(
-      center: center,
-      mapRadiusMeters: form.mapRadius,
-      objectiveCount: form.objectiveNumber,
-    );
-    objectives = result.objectives;
-    agentStartZone = result.agentStartZone;
-    rogueStartZone = result.rogueStartZone;
-    objectivesGenerated = true;
-    lastError = null;
+    if (streets.isEmpty) {
+      lastError =
+          'Les rues doivent être chargées avant de générer les objectifs.';
+      notifyListeners();
+      return;
+    }
+    try {
+      final result = _objectiveGenerationService.generate(
+        center: center,
+        mapRadiusMeters: form.mapRadius,
+        objectiveCount: form.objectiveNumber,
+        streets: streets,
+      );
+      objectives = result.objectives;
+      agentStartZone = result.agentStartZone;
+      rogueStartZone = result.rogueStartZone;
+      objectivesGenerated = true;
+      lastError = null;
+    } catch (error) {
+      objectivesGenerated = false;
+      lastError = error.toString();
+    }
     notifyListeners();
   }
 
