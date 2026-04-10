@@ -184,6 +184,22 @@ class LobbyController extends ChangeNotifier {
           notifyListeners();
         }
         return;
+      case 'lobby:player-updated':
+        if (payload is Map) {
+          final id = payload['playerId']?.toString();
+          final changes = payload['changes'];
+          if (id != null && changes is Map) {
+            final idx = players.indexWhere((p) => p.id == id);
+            if (idx != -1) {
+              players[idx] = players[idx].copyWith(
+                role: changes['role']?.toString(),
+                status: changes['status']?.toString() ?? players[idx].status,
+              );
+              notifyListeners();
+            }
+          }
+        }
+        return;
       case 'game:started':
       case 'game:created':
         gameStarted = true;

@@ -4,6 +4,7 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 
 class LobbySocketService {
   LobbySocketService();
+  static const String _clientVersion = 'flutter-2026.04.10';
 
   io.Socket? _socket;
   String? _connectedOrigin;
@@ -144,7 +145,7 @@ class LobbySocketService {
                 'oldPlayerId': previousPlayerId,
             },
           };
-    socket.emit('message', envelope);
+    _emitMessage(envelope);
 
     try {
       return await wait.future.timeout(timeout);
@@ -154,47 +155,71 @@ class LobbySocketService {
   }
 
   void sendLobbyChat(String text) {
-    _socket?.emit('message', <String, dynamic>{
+    _emitMessage(
+      <String, dynamic>{
       'type': 'lobby:chat',
       'payload': <String, dynamic>{'text': text},
-    });
+      },
+    );
   }
 
   void sendRoleUpdate({
     required String playerId,
     required String? role,
   }) {
-    _socket?.emit('message', <String, dynamic>{
+    _emitMessage(
+      <String, dynamic>{
       'type': 'player:role-update',
       'payload': <String, dynamic>{'playerId': playerId, 'role': role},
-    });
+      },
+    );
   }
 
   void requestLatestState() {
-    _socket?.emit('message', const <String, dynamic>{
+    _emitMessage(
+      const <String, dynamic>{
       'type': 'lobby:request-resync',
       'payload': <String, dynamic>{},
-    });
+      },
+    );
   }
 
   void startGame(String code) {
-    _socket?.emit('message', <String, dynamic>{
+    _emitMessage(
+      <String, dynamic>{
       'type': 'game:create',
       'payload': <String, dynamic>{'code': code.toUpperCase()},
-    });
+      },
+    );
   }
 
   void leaveLobby({
     required String code,
     required String playerId,
   }) {
-    _socket?.emit('message', <String, dynamic>{
+    _emitMessage(
+      <String, dynamic>{
       'type': 'lobby:leave',
       'payload': <String, dynamic>{
         'lobbyCode': code.toUpperCase(),
         'playerId': playerId,
       },
-    });
+      },
+    );
+  }
+
+  void _emitMessage(Map<String, dynamic> message) {
+    final meta = <String, dynamic>{
+      ...((message['meta'] is Map)
+          ? Map<String, dynamic>.from(message['meta'] as Map)
+          : const <String, dynamic>{}),
+      'clientVersion': _clientVersion,
+    };
+    final envelope = <String, dynamic>{
+      ...message,
+      'meta': meta,
+    };
+    _socket?.emit('message', envelope);
   }
 
   void dispose() {

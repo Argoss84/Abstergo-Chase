@@ -6,6 +6,7 @@ class CreateLobbyService {
   CreateLobbyService();
 
   static final CreateLobbyService instance = CreateLobbyService();
+  static const String _clientVersion = 'flutter-2026.04.10';
 
   io.Socket? _socket;
   String? _connectedOrigin;
@@ -136,6 +137,7 @@ class CreateLobbyService {
     socket.emit('message', <String, dynamic>{
       'type': 'lobby:create',
       'payload': <String, dynamic>{'playerName': playerName},
+      'meta': <String, dynamic>{'clientVersion': _clientVersion},
     });
 
     try {

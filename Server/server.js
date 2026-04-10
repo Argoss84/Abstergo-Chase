@@ -8,6 +8,7 @@ dotenv.config();
 
 const PORT = process.env.SIGNALING_PORT || 5174;
 const SOCKET_IO_PATH = process.env.SOCKET_IO_PATH || '/socket.io';
+const SIGNALING_VERSION = process.env.SIGNALING_VERSION || '2026.04.10';
 const bddDisabled =
   process.env.DISABLE_BDD === '1' || /^true$/i.test(process.env.DISABLE_BDD || '');
 const BDD_URL = bddDisabled ? null : (process.env.BDD_URL || 'http://localhost:5175');
@@ -243,33 +244,63 @@ const getGameCodeFromMessage = (type, payload, clientInfo) => {
   return clientInfo?.gameCode || null;
 };
 
+const enrichMessageWithVersion = (message) => {
+  const base = message && typeof message === 'object' ? message : {};
+  const originalMeta = base.meta && typeof base.meta === 'object' ? base.meta : {};
+  return {
+    ...base,
+    meta: {
+      ...originalMeta,
+      signalingVersion: SIGNALING_VERSION,
+      sentAt: Date.now()
+    }
+  };
+};
+
 const send = (socket, message) => {
   if (socket && socket.connected) {
     incrementTotalSocketMessages();
     const clientInfo = clients.get(socket.id);
     incrementLobbySocketMessages(clientInfo?.lobbyCode || null);
     const recipientId = clientInfo?.clientId || 'unknown';
-    log(`[MESSAGE ENVOYÉ] À: ${recipientId}, Type: ${message.type}`);
-    socket.emit('message', message);
+    const finalMessage = enrichMessageWithVersion(message);
+    log(
+      `[MESSAGE ENVOYÉ] À: ${recipientId}, Type: ${finalMessage.type}, Version: ${SIGNALING_VERSION}`
+    );
+    socket.emit('message', finalMessage);
   }
 };
 
 const getLobbySnapshot = (lobby) => ({
   code: lobby.code,
   hostId: lobby.hostId,
-  players: Array.from(lobby.players.values()).map(({ id, name, isHost }) => ({
+  players: Array.from(lobby.players.values()).map(({ id, name, isHost, role, status }) => ({
     id,
     name,
-    isHost
+    isHost,
+    role: role ?? null,
+    status: status ?? 'active'
   }))
 });
 
 io.on('connection', (socket) => {
   const clientId = randomUUID();
-  clients.set(socket.id, { clientId, lobbyCode: null, gameCode: null });
+  clients.set(socket.id, {
+    clientId,
+    lobbyCode: null,
+    gameCode: null,
+    clientVersion: null
+  });
   socketsById.set(clientId, socket);
   
   log(`[CONNEXION] Nouveau client connecté: ${clientId}`);
+  send(socket, {
+    type: 'server:hello',
+    payload: {
+      clientId,
+      signalingVersion: SIGNALING_VERSION
+    }
+  });
 
   socket.on('admin:getStats', (ack) => {
     if (typeof ack === 'function') ack(getServerStats());
@@ -382,6 +413,18 @@ io.on('connection', (socket) => {
     }
 
     const { type, payload } = message || {};
+    const clientVersion =
+      (message?.meta && typeof message.meta.clientVersion === 'string'
+        ? message.meta.clientVersion
+        : null) ||
+      (payload && typeof payload.clientVersion === 'string'
+        ? payload.clientVersion
+        : null);
+    const info = clients.get(socket.id);
+    if (info && clientVersion && info.clientVersion !== clientVersion) {
+      info.clientVersion = clientVersion;
+      log(`[VERSION CLIENT] ${clientId}: ${clientVersion}`);
+    }
     if (!type) {
       log(`[ERREUR] ClientId: ${clientId}, Message sans type`, message);
       send(socket, { type: 'error', payload: { message: 'Type de message manquant.' } });
@@ -603,7 +646,12 @@ io.on('connection', (socket) => {
         // Mettre à jour les maps globales
         socketsById.delete(oldPlayerId);
         socketsById.set(clientId, socket);
-        clients.set(socket.id, { clientId, lobbyCode: code });
+        clients.set(socket.id, {
+          clientId,
+          lobbyCode: code,
+          gameCode: null,
+          clientVersion: clients.get(socket.id)?.clientVersion || null
+        });
 
         send(socket, {
           type: 'lobby:joined',
@@ -925,7 +973,12 @@ io.on('connection', (socket) => {
 
         socketsById.delete(oldPlayerId);
         socketsById.set(clientId, socket);
-        clients.set(socket.id, { clientId, lobbyCode: null, gameCode: code });
+        clients.set(socket.id, {
+          clientId,
+          lobbyCode: null,
+          gameCode: code,
+          clientVersion: clients.get(socket.id)?.clientVersion || null
+        });
 
         send(socket, {
           type: 'game:joined',
@@ -1461,6 +1514,19 @@ io.on('connection', (socket) => {
         const player = lobby.players.get(targetId);
         if (player) {
           player.role = role;
+          // Diffuser immédiatement la mise à jour de rôle à tous les clients du lobby.
+          lobby.players.forEach((p) => {
+            const s = socketsById.get(p.id);
+            if (s) {
+              send(s, {
+                type: 'lobby:player-updated',
+                payload: {
+                  playerId: targetId,
+                  changes: { role: role }
+                }
+              });
+            }
+          });
         }
       }
       return;
