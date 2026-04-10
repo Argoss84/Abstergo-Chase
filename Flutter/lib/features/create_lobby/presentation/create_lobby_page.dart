@@ -118,14 +118,15 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                             child: Text('Chargement de la position GPS...'),
                           ),
                         )
-                      else if (_controller.currentPosition != null &&
-                          _controller.selectedPosition != null)
+                      else if (_controller.currentPosition != null)
                         CreateLobbyMap(
                           currentPosition: _controller.currentPosition!,
-                          selectedPosition: _controller.selectedPosition!,
+                          selectedPosition: _controller.selectedPosition,
                           mapRadiusMeters: _controller.form.mapRadius,
                           objectiveZoneRadiusMeters:
                               _controller.form.objectiveZoneRadius,
+                          streets: _controller.streets,
+                          outerStreetContour: _controller.outerStreetContour,
                           objectives: _controller.objectives,
                           agentStartZone: _controller.agentStartZone,
                           rogueStartZone: _controller.rogueStartZone,
@@ -142,6 +143,33 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                           ),
                         ),
                       const SizedBox(height: 8),
+                      if (_controller.isLoadingStreets)
+                        const Text(
+                          'Chargement des rues accessibles...',
+                          style: TextStyle(fontSize: 13),
+                        ),
+                      if (_controller.selectedPosition == null &&
+                          !_controller.isLoadingGps)
+                        const Text(
+                          'Cliquez sur la carte pour définir le centre de jeu.',
+                          style: TextStyle(fontSize: 13),
+                        ),
+                      if (_controller.streetsLoadError != null) ...[
+                        Text(
+                          _controller.streetsLoadError!,
+                          style:
+                              const TextStyle(color: Colors.red, fontSize: 13),
+                        ),
+                        const SizedBox(height: 6),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: OutlinedButton(
+                            onPressed: _controller.fetchStreets,
+                            child: const Text('Réessayer chargement rues'),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 8),
                       FilledButton.tonal(
                         onPressed: _controller.generateObjectives,
                         child: const Text('Générer les objectifs'),
@@ -150,6 +178,7 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                       if (_controller.objectives.isNotEmpty)
                         Text(
                           'Objectifs: ${_controller.objectives.length} | '
+                          'Contour: ${_controller.outerStreetContour.length >= 3 ? 'Rues' : 'Cercle'} | '
                           'Agent: ${_controller.agentStartZone != null ? 'OK' : 'N/A'} | '
                           'Rogue: ${_controller.rogueStartZone != null ? 'OK' : 'N/A'}',
                           style: const TextStyle(fontSize: 13),

@@ -1,6 +1,8 @@
 import 'package:abstergo_chase/features/create_lobby/data/create_lobby_service.dart';
+import 'package:abstergo_chase/features/create_lobby/data/street_contour_service.dart';
 import 'package:abstergo_chase/features/create_lobby/data/location_service.dart';
 import 'package:abstergo_chase/features/create_lobby/data/objective_generation_service.dart';
+import 'package:abstergo_chase/features/create_lobby/data/street_fetch_service.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_form_data.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
 import 'package:flutter/foundation.dart';
@@ -10,14 +12,21 @@ class CreateLobbyController extends ChangeNotifier {
     CreateLobbyService? service,
     LocationService? locationService,
     ObjectiveGenerationService? objectiveGenerationService,
+    StreetFetchService? streetFetchService,
+    StreetContourService? streetContourService,
   })  : _service = service ?? CreateLobbyService.instance,
         _locationService = locationService ?? const LocationService(),
         _objectiveGenerationService =
-            objectiveGenerationService ?? ObjectiveGenerationService();
+            objectiveGenerationService ?? ObjectiveGenerationService(),
+        _streetFetchService = streetFetchService ?? const StreetFetchService(),
+        _streetContourService =
+            streetContourService ?? const StreetContourService();
 
   final CreateLobbyService _service;
   final LocationService _locationService;
   final ObjectiveGenerationService _objectiveGenerationService;
+  final StreetFetchService _streetFetchService;
+  final StreetContourService _streetContourService;
 
   CreateLobbyFormData form = CreateLobbyFormData.initial();
   String displayName = '';
@@ -26,11 +35,15 @@ class CreateLobbyController extends ChangeNotifier {
   bool isSubmitting = false;
   bool objectivesGenerated = false;
   bool isLoadingGps = false;
+  bool isLoadingStreets = false;
   GeoPoint? currentPosition;
   GeoPoint? selectedPosition;
   List<GeoPoint> objectives = <GeoPoint>[];
   GeoPoint? agentStartZone;
   GeoPoint? rogueStartZone;
+  List<List<GeoPoint>> streets = <List<GeoPoint>>[];
+  List<GeoPoint> outerStreetContour = <GeoPoint>[];
+  String? streetsLoadError;
   String? lastError;
   String? createdLobbyCode;
 
@@ -65,11 +78,10 @@ class CreateLobbyController extends ChangeNotifier {
     try {
       final point = await _locationService.getCurrentPosition();
       currentPosition = point;
-      selectedPosition = point;
-      form = form.copyWith(
-        mapCenterLatitude: point.latitude.toString(),
-        mapCenterLongitude: point.longitude.toString(),
-      );
+      selectedPosition = null;
+      streets = <List<GeoPoint>>[];
+      outerStreetContour = <GeoPoint>[];
+      streetsLoadError = null;
     } catch (error) {
       lastError = error.toString();
     } finally {
@@ -89,6 +101,7 @@ class CreateLobbyController extends ChangeNotifier {
     agentStartZone = null;
     rogueStartZone = null;
     notifyListeners();
+    fetchStreets();
   }
 
   void generateObjectives() {
@@ -109,6 +122,41 @@ class CreateLobbyController extends ChangeNotifier {
     objectivesGenerated = true;
     lastError = null;
     notifyListeners();
+  }
+
+  Future<void> fetchStreets() async {
+    final center = selectedPosition;
+    if (center == null) {
+      streets = <List<GeoPoint>>[];
+      outerStreetContour = <GeoPoint>[];
+      streetsLoadError = null;
+      notifyListeners();
+      return;
+    }
+
+    isLoadingStreets = true;
+    streetsLoadError = null;
+    streets = <List<GeoPoint>>[];
+    notifyListeners();
+
+    try {
+      final fetched = await _streetFetchService.fetchWalkableStreets(
+        center: center,
+        mapRadiusMeters: form.mapRadius,
+      );
+      streets = fetched;
+      outerStreetContour = _streetContourService.computeOuterContour(
+        center: center,
+        radiusMeters: form.mapRadius,
+        streets: streets,
+      );
+    } catch (error) {
+      streetsLoadError = error.toString();
+      outerStreetContour = <GeoPoint>[];
+    } finally {
+      isLoadingStreets = false;
+      notifyListeners();
+    }
   }
 
   Future<void> createLobby() async {
