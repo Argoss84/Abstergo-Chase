@@ -21,7 +21,6 @@ class StreetFetchService {
     'construction',
     'proposed',
   };
-
   Future<List<List<GeoPoint>>> fetchWalkableStreets({
     required GeoPoint center,
     required int mapRadiusMeters,

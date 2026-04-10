@@ -2,7 +2,10 @@ import 'package:abstergo_chase/features/create_lobby/application/create_lobby_co
 import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:abstergo_chase/features/create_lobby/presentation/widgets/create_lobby_details_sheet.dart';
 import 'package:abstergo_chase/features/create_lobby/presentation/widgets/create_lobby_map.dart';
+import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
+import 'package:abstergo_chase/features/lobby/presentation/lobby_page.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 class CreateLobbyPage extends StatefulWidget {
   const CreateLobbyPage({super.key});
@@ -174,12 +177,23 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                                   return;
                                 }
                                 if (_controller.createdLobbyCode != null) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        'Lobby créé: ${_controller.createdLobbyCode}',
-                                      ),
-                                    ),
+                                  final session = _controller.createdLobbySession;
+                                  final bootstrap = LobbyBootstrapData(
+                                    code: _controller.createdLobbyCode!,
+                                    serverUrl: _controller.serverUrl,
+                                    socketPath: _controller.socketPath,
+                                    playerName: _controller.displayName.trim(),
+                                    previousPlayerId: session?.playerId,
+                                    reconnectAsHost: true,
+                                    form: _controller.form,
+                                    objectives: _controller.objectives,
+                                    agentStartZone: _controller.agentStartZone,
+                                    rogueStartZone: _controller.rogueStartZone,
+                                    outerStreetContour: _controller.outerStreetContour,
+                                  );
+                                  context.go(
+                                    '${LobbyPage.routePath}?code=${_controller.createdLobbyCode}',
+                                    extra: bootstrap,
                                   );
                                 } else if (_controller.lastError != null) {
                                   ScaffoldMessenger.of(context).showSnackBar(

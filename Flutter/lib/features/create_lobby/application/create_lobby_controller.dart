@@ -46,6 +46,7 @@ class CreateLobbyController extends ChangeNotifier {
   String? streetsLoadError;
   String? lastError;
   String? createdLobbyCode;
+  CreatedLobbySession? createdLobbySession;
 
   bool get canCreateLobby =>
       !isSubmitting && displayName.trim().isNotEmpty && objectivesGenerated;
@@ -192,16 +193,18 @@ class CreateLobbyController extends ChangeNotifier {
     isSubmitting = true;
     lastError = null;
     createdLobbyCode = null;
+    createdLobbySession = null;
     notifyListeners();
 
     try {
-      final code = await _service.createLobby(
+      final session = await _service.createLobby(
         playerName: displayName.trim(),
         serverUrl: uri,
         socketPath:
             socketPath.trim().isEmpty ? '/socket.io' : socketPath.trim(),
       );
-      createdLobbyCode = code;
+      createdLobbySession = session;
+      createdLobbyCode = session.code;
     } catch (error) {
       lastError = error.toString();
     } finally {

@@ -2,6 +2,8 @@ import 'package:abstergo_chase/features/bootstrap/presentation/bootstrap_page.da
 import 'package:abstergo_chase/features/create_lobby/presentation/create_lobby_page.dart';
 import 'package:abstergo_chase/features/home/presentation/home_menu_page.dart';
 import 'package:abstergo_chase/features/lab/presentation/lab_page.dart';
+import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
+import 'package:abstergo_chase/features/lobby/presentation/lobby_page.dart';
 import 'package:go_router/go_router.dart';
 
 GoRouter buildAppRouter() {
@@ -28,6 +30,16 @@ GoRouter buildAppRouter() {
         name: 'join-lobby',
         builder: (context, state) =>
             const HomeMenuPage(title: 'Rejoindre une partie'),
+      ),
+      GoRoute(
+        path: LobbyPage.routePath,
+        name: LobbyPage.routeName,
+        builder: (context, state) => LobbyPage(
+          initialCode: state.uri.queryParameters['code'],
+          bootstrapData: state.extra is LobbyBootstrapData
+              ? state.extra! as LobbyBootstrapData
+              : null,
+        ),
       ),
       GoRoute(
         path: HomeMenuPage.sessionDiagnosticsPath,

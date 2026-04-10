@@ -76,7 +76,7 @@ class CreateLobbyService {
     }
   }
 
-  Future<String> createLobby({
+  Future<CreatedLobbySession> createLobby({
     required String playerName,
     required Uri serverUrl,
     required String socketPath,
@@ -88,7 +88,7 @@ class CreateLobbyService {
       timeout: timeout,
     );
 
-    final completer = Completer<String>();
+    final completer = Completer<CreatedLobbySession>();
     final socket = _socket!;
 
     void completeWithError(Object error) {
@@ -105,8 +105,20 @@ class CreateLobbyService {
       final payload = data['payload'];
       if (type == 'lobby:created' && payload is Map) {
         final code = payload['code']?.toString();
-        if (code != null && code.isNotEmpty && !completer.isCompleted) {
-          completer.complete(code);
+        final playerId = payload['playerId']?.toString();
+        final hostId = payload['hostId']?.toString();
+        if (code != null &&
+            code.isNotEmpty &&
+            playerId != null &&
+            hostId != null &&
+            !completer.isCompleted) {
+          completer.complete(
+            CreatedLobbySession(
+              code: code,
+              playerId: playerId,
+              hostId: hostId,
+            ),
+          );
         }
       }
       if (type == 'lobby:error') {
@@ -127,11 +139,22 @@ class CreateLobbyService {
     });
 
     try {
-      final code = await completer.future.timeout(timeout);
-      return code;
+      return await completer.future.timeout(timeout);
     } finally {
       socket.off('message', onMessage);
       socket.off('error', onError);
     }
   }
+}
+
+class CreatedLobbySession {
+  const CreatedLobbySession({
+    required this.code,
+    required this.playerId,
+    required this.hostId,
+  });
+
+  final String code;
+  final String playerId;
+  final String hostId;
 }
