@@ -15,6 +15,7 @@ class LobbyMapPreview extends StatelessWidget {
     required this.rogueStartZone,
     required this.objectiveZoneRadiusMeters,
     this.showObjectives = true,
+    this.playerPositions = const <GeoPoint>[],
   });
 
   final GeoPoint center;
@@ -25,6 +26,7 @@ class LobbyMapPreview extends StatelessWidget {
   final GeoPoint? rogueStartZone;
   final int objectiveZoneRadiusMeters;
   final bool showObjectives;
+  final List<GeoPoint> playerPositions;
 
   @override
   Widget build(BuildContext context) {
@@ -150,6 +152,16 @@ class LobbyMapPreview extends StatelessWidget {
                       size: 20,
                     ),
                   ),
+                ...playerPositions.map(
+                  (p) => Marker(
+                    point: LatLng(p.latitude, p.longitude),
+                    builder: (_) => const Icon(
+                      Icons.person_pin_circle,
+                      color: Colors.orange,
+                      size: 22,
+                    ),
+                  ),
+                ),
               ],
             ),
           ],

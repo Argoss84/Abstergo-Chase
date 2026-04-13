@@ -1,5 +1,7 @@
 import 'package:abstergo_chase/features/lobby/application/lobby_controller.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
+import 'package:abstergo_chase/features/game/domain/game_models.dart';
+import 'package:abstergo_chase/features/game/presentation/game_page.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
 import 'package:abstergo_chase/features/lobby/presentation/widgets/lobby_map_preview.dart';
 import 'package:flutter/material.dart';
@@ -27,6 +29,7 @@ class _LobbyPageState extends State<LobbyPage> {
   late final TextEditingController _chatController;
   int _lastReadCount = 0;
   bool _isChatOpen = false;
+  bool _didRouteToGame = false;
 
   @override
   void initState() {
@@ -71,6 +74,25 @@ class _LobbyPageState extends State<LobbyPage> {
             : rawUnread < 0
                 ? 0
                 : (rawUnread > 999 ? 999 : rawUnread);
+        if (_controller.gameStarted &&
+            !_didRouteToGame &&
+            _controller.playerId != null &&
+            bootstrap != null) {
+          _didRouteToGame = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            context.go(
+              GamePage.routePath,
+              extra: GameBootstrapData(
+                lobby: bootstrap,
+                playerId: _controller.playerId!,
+                players: List<LobbyPlayer>.from(_controller.players),
+                gameConfig: _controller.gameConfig,
+                codeOverride: _controller.lobbyCode,
+              ),
+            );
+          });
+        }
         return Scaffold(
           appBar: AppBar(
             title: Row(
