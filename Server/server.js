@@ -12,6 +12,23 @@ dotenv.config();
 const PORT = process.env.SIGNALING_PORT || 5174;
 const SOCKET_IO_PATH = process.env.SOCKET_IO_PATH || '/socket.io';
 const SIGNALING_VERSION = process.env.SIGNALING_VERSION || '2026.04.10';
+const MEMORY_ONLY_MODE =
+  process.env.MEMORY_ONLY_MODE === undefined
+    ? true
+    : process.env.MEMORY_ONLY_MODE === '1' ||
+      /^true$/i.test(process.env.MEMORY_ONLY_MODE || '');
+const LOBBY_TTL_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.LOBBY_TTL_MS || '1800000', 10) || 1_800_000
+);
+const GAME_TTL_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.GAME_TTL_MS || '10800000', 10) || 10_800_000
+);
+const FINISHED_GAME_TTL_MS = Math.max(
+  5_000,
+  Number.parseInt(process.env.FINISHED_GAME_TTL_MS || '30000', 10) || 30_000
+);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const RUNTIME_DATA_DIR = path.join(__dirname, 'data');
@@ -23,6 +40,7 @@ const BDD_URL = bddDisabled ? null : (process.env.BDD_URL || 'http://localhost:5
 
 // Helper : persister vers ServerBDD (replay)
 const persistToBdd = async (path, method, body) => {
+  if (MEMORY_ONLY_MODE) return;
   if (!BDD_URL) return;
   try {
     const res = await fetch(`${BDD_URL}${path}`, {
@@ -52,16 +70,9 @@ const getRemainingTimeSeconds = (game) => {
   if (!game || typeof game.remainingTimeSeconds !== 'number') {
     return null;
   }
-  // Ne décrémenter en temps réel que si le host a démarré le décompte (started + countdown_started).
-  // Sinon afficher la valeur exacte du host (ex. durée avant le début de partie).
-  if (!game.remainingTimeCountdownActive) {
-    return game.remainingTimeSeconds;
-  }
-  const updatedAt = typeof game.remainingTimeUpdatedAt === 'number'
-    ? game.remainingTimeUpdatedAt
-    : Date.now();
-  const elapsedSeconds = Math.floor((Date.now() - updatedAt) / 1000);
-  return Math.max(game.remainingTimeSeconds - elapsedSeconds, 0);
+  // Mode léger: éviter tout calcul temps réel côté serveur.
+  // Le client host reste source de vérité pour le chrono.
+  return game.remainingTimeSeconds;
 };
 
 // Fonction pour obtenir les statistiques du serveur
@@ -168,6 +179,208 @@ let totalSocketMessages = 0;
 const logs = [];
 const MAX_LOGS = 100;
 
+const touchLobby = (code) => {
+  const lobby = lobbies.get(code);
+  if (!lobby) return;
+  lobby.lastActivityAt = Date.now();
+  lobby.expiresAt = lobby.lastActivityAt + LOBBY_TTL_MS;
+};
+
+const touchGame = (code) => {
+  const game = games.get(code);
+  if (!game) return;
+  game.lastActivityAt = Date.now();
+  if (!game.finishedAt) {
+    game.expiresAt = game.lastActivityAt + GAME_TTL_MS;
+  }
+};
+
+const closeLobby = (code, reason = 'Lobby expiré', notify = true) => {
+  const lobby = lobbies.get(code);
+  if (!lobby) return false;
+  if (notify) {
+    lobby.players.forEach((player) => {
+      const playerSocket = socketsById.get(player.id);
+      send(playerSocket, { type: 'lobby:closed', payload: { code, reason } });
+    });
+  }
+  if (disconnectedHosts.has(code)) {
+    clearTimeout(disconnectedHosts.get(code).timeoutId);
+    disconnectedHosts.delete(code);
+  }
+  if (awayHosts.has(code)) {
+    clearTimeout(awayHosts.get(code).timeoutId);
+    awayHosts.delete(code);
+  }
+  lobbies.delete(code);
+  lobbySocketMessageCounts.delete(code);
+  return true;
+};
+
+const closeGame = (code, reason = 'Partie expirée', notify = true) => {
+  const game = games.get(code);
+  if (!game) return false;
+  if (notify) {
+    game.players.forEach((player) => {
+      const playerSocket = socketsById.get(player.id);
+      send(playerSocket, { type: 'game:closed', payload: { code, reason } });
+    });
+  }
+  if (disconnectedGameHosts.has(code)) {
+    clearTimeout(disconnectedGameHosts.get(code).timeoutId);
+    disconnectedGameHosts.delete(code);
+  }
+  games.delete(code);
+  gameSocketMessageCounts.delete(code);
+  return true;
+};
+
+const pickReplacementGameHost = (game, excludedId = null) => {
+  if (!game) return null;
+  const candidates = Array.from(game.players.values()).filter(
+    (player) => player?.id && player.id !== excludedId
+  );
+  if (!candidates.length) return null;
+
+  const connectedActive = candidates.find((player) => {
+    const socket = socketsById.get(player.id);
+    return socket?.connected && (player.status || 'active') === 'active';
+  });
+  if (connectedActive) return connectedActive.id;
+
+  const connectedAny = candidates.find((player) => {
+    const socket = socketsById.get(player.id);
+    return socket?.connected;
+  });
+  if (connectedAny) return connectedAny.id;
+
+  const activeAny = candidates.find((player) => (player.status || 'active') === 'active');
+  if (activeAny) return activeAny.id;
+
+  return candidates[0].id;
+};
+
+const transferGameHost = ({
+  code,
+  oldHostId,
+  reason = 'Le host a quitté la partie'
+}) => {
+  const game = games.get(code);
+  if (!game) return false;
+  const newHostId = pickReplacementGameHost(game, oldHostId);
+  if (!newHostId) return false;
+
+  game.hostId = newHostId;
+  game.players.forEach((player) => {
+    player.isHost = player.id === newHostId;
+  });
+
+  if (disconnectedGameHosts.has(code)) {
+    clearTimeout(disconnectedGameHosts.get(code).timeoutId);
+    disconnectedGameHosts.delete(code);
+  }
+
+  game.players.forEach((player) => {
+    const playerSocket = socketsById.get(player.id);
+    if (playerSocket) {
+      send(playerSocket, {
+        type: 'game:host-transferred',
+        payload: {
+          code,
+          oldHostId,
+          newHostId,
+          reason
+        }
+      });
+      // Compat event déjà utilisé côté clients.
+      send(playerSocket, {
+        type: 'game:host-reconnected',
+        payload: { newHostId }
+      });
+    }
+  });
+  markStateChanged('game:host-transfer', { code, oldHostId, newHostId, reason });
+  return true;
+};
+
+const pickReplacementLobbyHost = (lobby, excludedId = null) => {
+  if (!lobby) return null;
+  const candidates = Array.from(lobby.players.values()).filter(
+    (player) => player?.id && player.id !== excludedId
+  );
+  if (!candidates.length) return null;
+
+  const connectedActive = candidates.find((player) => {
+    const socket = socketsById.get(player.id);
+    return socket?.connected && (player.status || 'active') === 'active';
+  });
+  if (connectedActive) return connectedActive.id;
+
+  const connectedAny = candidates.find((player) => {
+    const socket = socketsById.get(player.id);
+    return socket?.connected;
+  });
+  if (connectedAny) return connectedAny.id;
+
+  const activeAny = candidates.find((player) => (player.status || 'active') === 'active');
+  if (activeAny) return activeAny.id;
+
+  return candidates[0].id;
+};
+
+const transferLobbyHost = ({
+  code,
+  oldHostId,
+  reason = 'Le host a quitté le lobby'
+}) => {
+  const lobby = lobbies.get(code);
+  if (!lobby) return false;
+  const newHostId = pickReplacementLobbyHost(lobby, oldHostId);
+  if (!newHostId) return false;
+
+  lobby.hostId = newHostId;
+  lobby.players.forEach((player) => {
+    player.isHost = player.id === newHostId;
+  });
+
+  if (disconnectedHosts.has(code)) {
+    clearTimeout(disconnectedHosts.get(code).timeoutId);
+    disconnectedHosts.delete(code);
+  }
+  if (awayHosts.has(code)) {
+    clearTimeout(awayHosts.get(code).timeoutId);
+    awayHosts.delete(code);
+  }
+
+  lobby.players.forEach((player) => {
+    const playerSocket = socketsById.get(player.id);
+    if (playerSocket) {
+      if (oldHostId) {
+        send(playerSocket, {
+          type: 'lobby:peer-left',
+          payload: { playerId: oldHostId }
+        });
+      }
+      send(playerSocket, {
+        type: 'lobby:host-transferred',
+        payload: {
+          code,
+          oldHostId,
+          newHostId,
+          reason
+        }
+      });
+      // Compat event already consumed by clients.
+      send(playerSocket, {
+        type: 'lobby:host-reconnected',
+        payload: { newHostId }
+      });
+    }
+  });
+  markStateChanged('lobby:host-transfer', { code, oldHostId, newHostId, reason });
+  return true;
+};
+
 // Helper pour les logs horodatés
 const log = (...args) => {
   const timestamp = new Date().toLocaleString('fr-FR', {
@@ -205,6 +418,8 @@ const serializeLobby = (lobby) => ({
   code: lobby.code,
   hostId: lobby.hostId,
   stateVersion: lobby.stateVersion || 1,
+  createdAt: lobby.createdAt || Date.now(),
+  expiresAt: lobby.expiresAt || Date.now() + LOBBY_TTL_MS,
   config: lobby.config || null,
   players: Array.from(lobby.players.values()).map((p) => ({
     id: p.id,
@@ -219,6 +434,8 @@ const serializeGame = (game) => ({
   code: game.code,
   hostId: game.hostId,
   stateVersion: game.stateVersion || 1,
+  createdAt: game.createdAt || Date.now(),
+  expiresAt: game.expiresAt || Date.now() + GAME_TTL_MS,
   players: Array.from(game.players.values()).map((p) => ({
     id: p.id,
     name: p.name,
@@ -239,6 +456,7 @@ const serializeGame = (game) => ({
 });
 
 const persistRuntimeStateNow = async (reason = 'unspecified') => {
+  if (MEMORY_ONLY_MODE) return;
   if (persistInFlight) {
     persistQueued = true;
     return;
@@ -272,6 +490,7 @@ const persistRuntimeStateNow = async (reason = 'unspecified') => {
 };
 
 const schedulePersist = (reason = 'state-change') => {
+  if (MEMORY_ONLY_MODE) return;
   if (persistTimer) {
     clearTimeout(persistTimer);
   }
@@ -282,6 +501,7 @@ const schedulePersist = (reason = 'state-change') => {
 };
 
 const appendRuntimeEvent = async (type, payload = {}) => {
+  if (MEMORY_ONLY_MODE) return;
   try {
     await fs.mkdir(RUNTIME_DATA_DIR, { recursive: true });
     const line = JSON.stringify({
@@ -301,6 +521,7 @@ const markStateChanged = (type, payload = {}) => {
 };
 
 const hydrateRuntimeState = async () => {
+  if (MEMORY_ONLY_MODE) return;
   try {
     await fs.mkdir(RUNTIME_DATA_DIR, { recursive: true });
     const raw = await fs.readFile(SNAPSHOT_FILE, 'utf8');
@@ -333,6 +554,12 @@ const hydrateRuntimeState = async () => {
           typeof lobby.stateVersion === 'number' && lobby.stateVersion > 0
             ? Math.floor(lobby.stateVersion)
             : 1,
+        createdAt: typeof lobby.createdAt === 'number' ? lobby.createdAt : Date.now(),
+        lastActivityAt: Date.now(),
+        expiresAt:
+          typeof lobby.expiresAt === 'number' && lobby.expiresAt > Date.now()
+            ? lobby.expiresAt
+            : Date.now() + LOBBY_TTL_MS,
         config: lobby.config || null,
         players: playersMap
       });
@@ -359,6 +586,12 @@ const hydrateRuntimeState = async () => {
           typeof game.stateVersion === 'number' && game.stateVersion > 0
             ? Math.floor(game.stateVersion)
             : 1,
+        createdAt: typeof game.createdAt === 'number' ? game.createdAt : Date.now(),
+        lastActivityAt: Date.now(),
+        expiresAt:
+          typeof game.expiresAt === 'number' && game.expiresAt > Date.now()
+            ? game.expiresAt
+            : Date.now() + GAME_TTL_MS,
         players: playersMap,
         remainingTimeSeconds:
           typeof game.remainingTimeSeconds === 'number' ? game.remainingTimeSeconds : undefined,
@@ -586,15 +819,21 @@ const applyGameStateSync = ({
 }) => {
   const remainingTime = statePayload?.gameDetails?.remaining_time;
   if (typeof remainingTime === 'number') {
-    game.remainingTimeSeconds = Math.max(0, Math.floor(remainingTime));
+    game.remainingTimeSeconds = remainingTime;
     game.remainingTimeUpdatedAt = Date.now();
   }
-  game.remainingTimeCountdownActive = !!(
-    statePayload?.gameDetails?.started && statePayload?.gameDetails?.countdown_started
-  );
+  if (typeof statePayload?.gameDetails?.countdown_started === 'boolean') {
+    game.remainingTimeCountdownActive = statePayload.gameDetails.countdown_started;
+  }
+  // Mode léger: le serveur stocke l'état fourni par le host sans recalcul métier.
   game.lastHostState = statePayload || null;
   game.lastHostStateAt = Date.now();
   game.lastHostStateHostId = hostId;
+  const winnerType = statePayload?.gameDetails?.winner_type || null;
+  if (winnerType && !game.finishedAt) {
+    game.finishedAt = Date.now();
+    game.expiresAt = game.finishedAt + FINISHED_GAME_TTL_MS;
+  }
   const stateVersion = bumpGameStateVersion(game);
 
   if (targetId) {
@@ -700,7 +939,10 @@ const tryStartGameFromLobby = ({
     code,
     hostId: lobby.hostId,
     players: new Map(),
-    stateVersion: 1
+    stateVersion: 1,
+    createdAt: Date.now(),
+    lastActivityAt: Date.now(),
+    expiresAt: Date.now() + GAME_TTL_MS
   };
 
   lobby.players.forEach((player) => {
@@ -722,8 +964,7 @@ const tryStartGameFromLobby = ({
     }
   });
 
-  lobbies.delete(code);
-  lobbySocketMessageCounts.delete(code);
+  closeLobby(code, 'Partie démarrée', false);
 
   lobby.players.forEach((player) => {
     const playerSocket = socketsById.get(player.id);
@@ -908,6 +1149,12 @@ io.on('connection', (socket) => {
     const clientInfo = clients.get(socket.id);
     const lobbyCodeForMessage = getLobbyCodeFromMessage(type, payload, clientInfo);
     const gameCodeForMessage = getGameCodeFromMessage(type, payload, clientInfo);
+    if (lobbyCodeForMessage && lobbies.has(lobbyCodeForMessage)) {
+      touchLobby(lobbyCodeForMessage);
+    }
+    if (gameCodeForMessage && games.has(gameCodeForMessage)) {
+      touchGame(gameCodeForMessage);
+    }
     incrementLobbySocketMessages(lobbyCodeForMessage);
     incrementGameSocketMessages(gameCodeForMessage);
 
@@ -922,7 +1169,10 @@ io.on('connection', (socket) => {
         hostId: clientId,
         players: new Map(),
         config: payload?.gameConfig || null,
-        stateVersion: 1
+        stateVersion: 1,
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+        expiresAt: Date.now() + LOBBY_TTL_MS
       };
 
       lobby.players.set(clientId, { id: clientId, name: payload?.playerName || 'Host', isHost: true });
@@ -1222,7 +1472,7 @@ io.on('connection', (socket) => {
         clientId,
         code: lobbyCode?.toUpperCase(),
         requestId,
-        requireRoleCheck: true
+        requireRoleCheck: false
       });
       return;
     }
@@ -1791,39 +2041,17 @@ io.on('connection', (socket) => {
 
       log(`[JOUEUR QUITTE] Lobby: ${code}, Joueur: ${playerId}`);
 
-      // Si c'est le host qui quitte, fermer le lobby
+      // Si c'est le host qui quitte, transférer le host si possible
       if (lobby.hostId === playerId) {
-        log(`[HOST QUITTE] Code: ${code}, Host: ${playerId} - Fermeture du lobby`);
-        
-        // Annuler les timers si ils existent
-        if (disconnectedHosts.has(code)) {
-          const hostInfo = disconnectedHosts.get(code);
-          clearTimeout(hostInfo.timeoutId);
-          disconnectedHosts.delete(code);
-        }
-        if (awayHosts.has(code)) {
-          const awayInfo = awayHosts.get(code);
-          clearTimeout(awayInfo.timeoutId);
-          awayHosts.delete(code);
-        }
-        
-        // Notifier tous les joueurs que le lobby est fermé
-        lobby.players.forEach((player) => {
-          if (player.id !== playerId) {
-            const playerSocket = socketsById.get(player.id);
-            send(playerSocket, { 
-              type: 'lobby:closed', 
-              payload: { 
-                code, 
-                reason: 'Le host a quitté le lobby'
-              } 
-            });
-          }
+        lobby.players.delete(playerId);
+        const transferred = transferLobbyHost({
+          code,
+          oldHostId: playerId,
+          reason: 'Le host a quitté le lobby'
         });
-        
-        // Supprimer le lobby
-        lobbies.delete(code);
-      lobbySocketMessageCounts.delete(code);
+        if (!transferred) {
+          closeLobby(code, 'Le host a quitté le lobby');
+        }
       } else {
         // Joueur normal qui quitte
         lobby.players.delete(playerId);
@@ -1862,24 +2090,15 @@ io.on('connection', (socket) => {
       }
 
       if (game.hostId === playerId) {
-        const lastState = game.lastHostState;
-        const winnerType = lastState?.gameDetails?.winner_type || null;
-        persistToBdd('/api/game-sessions', 'POST', {
-          game_code: code,
-          ended_at: new Date().toISOString(),
-          winner_type: winnerType
+        game.players.delete(playerId);
+        const transferred = transferGameHost({
+          code,
+          oldHostId: playerId,
+          reason: 'Le host a quitté la partie'
         });
-        game.players.forEach((player) => {
-          if (player.id !== playerId) {
-            const playerSocket = socketsById.get(player.id);
-            send(playerSocket, {
-              type: 'game:closed',
-              payload: { code, reason: 'Le host a quitté la partie' }
-            });
-          }
-        });
-        games.delete(code);
-        gameSocketMessageCounts.delete(code);
+        if (!transferred) {
+          closeGame(code, 'Le host a quitté la partie');
+        }
       } else {
         game.players.delete(playerId);
         const hostSocket = socketsById.get(game.hostId);
@@ -1949,23 +2168,16 @@ io.on('connection', (socket) => {
                 
                 // Vérifier si le host est toujours absent
                 if (currentHostPlayer && currentHostPlayer.status === 'away') {
-                  log(`[LOBBY FERMÉ] Code: ${lobbyCode}, Host absent depuis trop longtemps (2 minutes)`);
-                  
-                  // Notifier tous les joueurs que le lobby est fermé
-                  currentLobby.players.forEach((p) => {
-                    const playerSocket = socketsById.get(p.id);
-                    send(playerSocket, { 
-                      type: 'lobby:closed', 
-                      payload: { 
-                        code: lobbyCode, 
-                        reason: 'Host absent depuis trop longtemps'
-                      } 
-                    });
+                  const oldHostId = currentLobby.hostId;
+                  currentLobby.players.delete(oldHostId);
+                  const transferred = transferLobbyHost({
+                    code: lobbyCode,
+                    oldHostId,
+                    reason: 'Host absent trop longtemps, transfert automatique'
                   });
-                  
-                  lobbies.delete(lobbyCode);
-                  lobbySocketMessageCounts.delete(lobbyCode);
-                  awayHosts.delete(lobbyCode);
+                  if (!transferred) {
+                    closeLobby(lobbyCode, 'Host absent depuis trop longtemps');
+                  }
                 }
               }
             }, 2 * 60 * 1000); // 2 minutes
@@ -2199,21 +2411,16 @@ io.on('connection', (socket) => {
           if (games.has(gameCode) && games.get(gameCode).hostId === clientInfo.clientId) {
             const currentGame = games.get(gameCode);
             if (currentGame) {
-              const lastState = currentGame.lastHostState;
-              const winnerType = lastState?.gameDetails?.winner_type || null;
-              persistToBdd('/api/game-sessions', 'POST', {
-                game_code: gameCode,
-                ended_at: new Date().toISOString(),
-                winner_type: winnerType
+              currentGame.players.delete(clientInfo.clientId);
+              const transferred = transferGameHost({
+                code: gameCode,
+                oldHostId: clientInfo.clientId,
+                reason: 'Host déconnecté, transfert automatique'
               });
-              currentGame.players.forEach((player) => {
-                const playerSocket = socketsById.get(player.id);
-                send(playerSocket, { type: 'game:closed', payload: { code: gameCode } });
-              });
+              if (!transferred) {
+                closeGame(gameCode, 'Timeout de reconnexion du host dépassé');
+              }
             }
-            games.delete(gameCode);
-            gameSocketMessageCounts.delete(gameCode);
-            disconnectedGameHosts.delete(gameCode);
           }
         }, 5 * 60 * 1000);
 
@@ -2251,20 +2458,18 @@ io.on('connection', (socket) => {
         // Marquer le lobby comme en attente de reconnexion
         const timeoutId = setTimeout(() => {
           if (lobbies.has(lobbyCode) && lobbies.get(lobbyCode).hostId === clientInfo.clientId) {
-            log(`[LOBBY FERMÉ] Code: ${lobbyCode}, Timeout de reconnexion dépassé`);
-            
             const currentLobby = lobbies.get(lobbyCode);
             if (currentLobby) {
-              // Notifier tous les joueurs que le lobby est fermé
-              currentLobby.players.forEach((player) => {
-                const playerSocket = socketsById.get(player.id);
-                send(playerSocket, { type: 'lobby:closed', payload: { code: lobbyCode } });
+              currentLobby.players.delete(clientInfo.clientId);
+              const transferred = transferLobbyHost({
+                code: lobbyCode,
+                oldHostId: clientInfo.clientId,
+                reason: 'Host déconnecté, transfert automatique'
               });
+              if (!transferred) {
+                closeLobby(lobbyCode, 'Timeout de reconnexion du host dépassé');
+              }
             }
-            
-            lobbies.delete(lobbyCode);
-            lobbySocketMessageCounts.delete(lobbyCode);
-            disconnectedHosts.delete(lobbyCode);
           }
         }, 5 * 60 * 1000); // 5 minutes
         
@@ -2290,12 +2495,34 @@ io.on('connection', (socket) => {
 await hydrateRuntimeState();
 
 setInterval(() => {
-  schedulePersist('periodic');
-}, 15000).unref();
+  const now = Date.now();
+  for (const [code, lobby] of lobbies.entries()) {
+    if (typeof lobby.expiresAt === 'number' && lobby.expiresAt <= now) {
+      log(`[TTL] Fermeture lobby expiré: ${code}`);
+      closeLobby(code, 'Lobby expiré');
+      markStateChanged('lobby:expired', { code });
+    }
+  }
+  for (const [code, game] of games.entries()) {
+    if (typeof game.expiresAt === 'number' && game.expiresAt <= now) {
+      log(`[TTL] Fermeture partie expirée: ${code}`);
+      closeGame(code, game.finishedAt ? 'Partie terminée' : 'Partie expirée');
+      markStateChanged('game:expired', { code, finished: !!game.finishedAt });
+    }
+  }
+}, 30000).unref();
+
+if (!MEMORY_ONLY_MODE) {
+  setInterval(() => {
+    schedulePersist('periodic');
+  }, 15000).unref();
+}
 
 const gracefulPersistAndExit = async (signal) => {
-  log(`[PERSIST] Signal ${signal} reçu, sauvegarde de l'état runtime...`);
-  await persistRuntimeStateNow(`signal:${signal}`);
+  if (!MEMORY_ONLY_MODE) {
+    log(`[PERSIST] Signal ${signal} reçu, sauvegarde de l'état runtime...`);
+    await persistRuntimeStateNow(`signal:${signal}`);
+  }
   process.exit(0);
 };
 
