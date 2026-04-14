@@ -24,6 +24,7 @@ class ObjectiveGenerationService {
     required int mapRadiusMeters,
     required int objectiveCount,
     required List<List<GeoPoint>> streets,
+    List<GeoPoint> finalZoneContour = const <GeoPoint>[],
   }) {
     final sanitizedStreets = streets
         .map((street) => street.toList(growable: false))
@@ -33,24 +34,61 @@ class ObjectiveGenerationService {
       throw Exception('Aucune rue disponible pour générer les objectifs.');
     }
 
-    final objectives = _generateRandomPoints(
+    var objectives = _generateRandomPoints(
       center: center,
       radius: mapRadiusMeters.toDouble(),
       count: objectiveCount,
       streets: sanitizedStreets,
+      finalZoneContour: finalZoneContour,
     );
-    final agentStart = _generateAgentStartZone(
+    var agentStart = _generateAgentStartZone(
       center: center,
       radius: mapRadiusMeters.toDouble(),
       objectives: objectives,
       streets: sanitizedStreets,
     );
-    final rogueStart = _generateRogueStartZone(
+    var rogueStart = _generateRogueStartZone(
       center: center,
       radius: mapRadiusMeters.toDouble(),
       agentStartZone: agentStart,
       objectives: objectives,
       streets: sanitizedStreets,
+    );
+
+    objectives = _regenerateObjectivesAwayFromStartZones(
+      currentObjectives: objectives,
+      center: center,
+      radius: mapRadiusMeters.toDouble(),
+      count: objectiveCount,
+      streets: sanitizedStreets,
+      finalZoneContour: finalZoneContour,
+      agentStartZone: agentStart,
+      rogueStartZone: rogueStart,
+      enforceObjectiveSpacing: true,
+    );
+    agentStart = _generateAgentStartZone(
+      center: center,
+      radius: mapRadiusMeters.toDouble(),
+      objectives: objectives,
+      streets: sanitizedStreets,
+    );
+    rogueStart = _generateRogueStartZone(
+      center: center,
+      radius: mapRadiusMeters.toDouble(),
+      agentStartZone: agentStart,
+      objectives: objectives,
+      streets: sanitizedStreets,
+    );
+    objectives = _regenerateObjectivesAwayFromStartZones(
+      currentObjectives: objectives,
+      center: center,
+      radius: mapRadiusMeters.toDouble(),
+      count: objectiveCount,
+      streets: sanitizedStreets,
+      finalZoneContour: finalZoneContour,
+      agentStartZone: agentStart,
+      rogueStartZone: rogueStart,
+      enforceObjectiveSpacing: true,
     );
 
     return ObjectiveGenerationResult(
@@ -65,7 +103,26 @@ class ObjectiveGenerationService {
     required double radius,
     required int count,
     required List<List<GeoPoint>> streets,
+    required List<GeoPoint> finalZoneContour,
+    List<GeoPoint> forbiddenStartZones = const <GeoPoint>[],
+    double minForbiddenDistanceMeters = 0,
+    double minObjectiveDistanceMeters = 0,
   }) {
+    final contour = _sanitizeContour(finalZoneContour);
+    final fromIntersections = _generatePointsFromStreetIntersections(
+      streets: streets,
+      contour: contour,
+      center: center,
+      radius: radius,
+      count: count,
+      forbiddenStartZones: forbiddenStartZones,
+      minForbiddenDistanceMeters: minForbiddenDistanceMeters,
+      minObjectiveDistanceMeters: minObjectiveDistanceMeters,
+    );
+    if (fromIntersections.length == count) {
+      return fromIntersections;
+    }
+
     final points = <GeoPoint>[];
     final minDistance = radius / 2.5;
     var attempts = 0;
@@ -96,9 +153,16 @@ class ObjectiveGenerationService {
         target: newPoint,
       );
       final farEnough = points.every(
-        (existing) => _distanceMeters(existing, closestNode) >= minDistance,
+        (existing) => _distanceMeters(existing, closestNode) >=
+            max(minDistance, minObjectiveDistanceMeters),
       );
-      if (_isPointInCircle(closestNode, center, radius) && farEnough) {
+      if (_isPointInCircle(closestNode, center, radius) &&
+          farEnough &&
+          _respectsForbiddenStartZones(
+            closestNode,
+            forbiddenStartZones,
+            minForbiddenDistanceMeters,
+          )) {
         points.add(closestNode);
       }
       attempts++;
@@ -108,6 +172,168 @@ class ObjectiveGenerationService {
       throw Exception('Impossible de générer suffisamment de points éloignés.');
     }
     return points;
+  }
+
+  List<GeoPoint> _generatePointsFromStreetIntersections({
+    required List<List<GeoPoint>> streets,
+    required List<GeoPoint> contour,
+    required GeoPoint center,
+    required double radius,
+    required int count,
+    required List<GeoPoint> forbiddenStartZones,
+    required double minForbiddenDistanceMeters,
+    required double minObjectiveDistanceMeters,
+  }) {
+    final nodeCounts = <String, int>{};
+    final nodeByKey = <String, GeoPoint>{};
+    for (final street in streets) {
+      for (final node in street) {
+        final key =
+            '${node.latitude.toStringAsFixed(6)},${node.longitude.toStringAsFixed(6)}';
+        nodeCounts[key] = (nodeCounts[key] ?? 0) + 1;
+        nodeByKey[key] = node;
+      }
+    }
+
+    final intersections = <GeoPoint>[];
+    for (final entry in nodeCounts.entries) {
+      if (entry.value >= 2) {
+        final point = nodeByKey[entry.key];
+        if (point != null) {
+          intersections.add(point);
+        }
+      }
+    }
+
+    bool isAllowed(GeoPoint p) {
+      final inZone = contour.length >= 3
+          ? _isPointInPolygon(p, contour)
+          : _isPointInCircle(p, center, radius);
+      if (!inZone) return false;
+      return _respectsForbiddenStartZones(
+        p,
+        forbiddenStartZones,
+        minForbiddenDistanceMeters,
+      );
+    }
+
+    final pool = _dedupePoints(
+      intersections.where(isAllowed).toList(growable: false),
+      minDistanceMeters: 2,
+    );
+    if (pool.length < count) {
+      final fallbackNodes = <GeoPoint>[];
+      for (final street in streets) {
+        for (final node in street) {
+          if (isAllowed(node)) fallbackNodes.add(node);
+        }
+      }
+      final dedupFallback = _dedupePoints(fallbackNodes, minDistanceMeters: 2);
+      return _pickRandomUniqueWithMinDistance(
+        dedupFallback,
+        count: count,
+        minDistanceMeters: minObjectiveDistanceMeters,
+      );
+    }
+    return _pickRandomUniqueWithMinDistance(
+      pool,
+      count: count,
+      minDistanceMeters: minObjectiveDistanceMeters,
+    );
+  }
+
+  List<GeoPoint> _regenerateObjectivesAwayFromStartZones({
+    required List<GeoPoint> currentObjectives,
+    required GeoPoint center,
+    required double radius,
+    required int count,
+    required List<List<GeoPoint>> streets,
+    required List<GeoPoint> finalZoneContour,
+    required GeoPoint agentStartZone,
+    required GeoPoint rogueStartZone,
+    required bool enforceObjectiveSpacing,
+  }) {
+    final minDistance = _distanceMeters(agentStartZone, rogueStartZone) / 5;
+    if (minDistance <= 0) return currentObjectives;
+    try {
+      return _generateRandomPoints(
+        center: center,
+        radius: radius,
+        count: count,
+        streets: streets,
+        finalZoneContour: finalZoneContour,
+        forbiddenStartZones: <GeoPoint>[agentStartZone, rogueStartZone],
+        minForbiddenDistanceMeters: minDistance,
+        minObjectiveDistanceMeters: enforceObjectiveSpacing ? minDistance : 0,
+      );
+    } catch (_) {
+      return currentObjectives;
+    }
+  }
+
+  bool _respectsForbiddenStartZones(
+    GeoPoint point,
+    List<GeoPoint> forbiddenStartZones,
+    double minForbiddenDistanceMeters,
+  ) {
+    if (forbiddenStartZones.isEmpty || minForbiddenDistanceMeters <= 0) {
+      return true;
+    }
+    for (final zone in forbiddenStartZones) {
+      if (_distanceMeters(point, zone) < minForbiddenDistanceMeters) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  List<GeoPoint> _pickRandomUniqueWithMinDistance(
+    List<GeoPoint> points, {
+    required int count,
+    required double minDistanceMeters,
+  }) {
+    if (points.length < count) return const <GeoPoint>[];
+    final pool = [...points]..shuffle(_random);
+    if (minDistanceMeters <= 0) {
+      return pool.take(count).toList(growable: false);
+    }
+    final selected = <GeoPoint>[];
+    for (final candidate in pool) {
+      final respects = selected.every(
+        (existing) => _distanceMeters(existing, candidate) >= minDistanceMeters,
+      );
+      if (!respects) continue;
+      selected.add(candidate);
+      if (selected.length == count) return selected;
+    }
+    return const <GeoPoint>[];
+  }
+
+  List<GeoPoint> _sanitizeContour(List<GeoPoint> contour) {
+    if (contour.length < 3) return const <GeoPoint>[];
+    final open = <GeoPoint>[...contour];
+    if (_distanceMeters(open.first, open.last) < 2) {
+      open.removeLast();
+    }
+    return open.length >= 3 ? open : const <GeoPoint>[];
+  }
+
+  bool _isPointInPolygon(GeoPoint point, List<GeoPoint> polygon) {
+    var inside = false;
+    for (var i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      final xi = polygon[i].longitude;
+      final yi = polygon[i].latitude;
+      final xj = polygon[j].longitude;
+      final yj = polygon[j].latitude;
+      final intersects = ((yi > point.latitude) != (yj > point.latitude)) &&
+          (point.longitude <
+              (xj - xi) *
+                      (point.latitude - yi) /
+                      ((yj - yi).abs() < 1e-12 ? 1e-12 : (yj - yi)) +
+                  xi);
+      if (intersects) inside = !inside;
+    }
+    return inside;
   }
 
   GeoPoint _generateAgentStartZone({

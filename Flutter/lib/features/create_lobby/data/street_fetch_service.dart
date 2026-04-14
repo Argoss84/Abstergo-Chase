@@ -11,16 +11,6 @@ class StreetFetchService {
   static const int _maxAttemptsPerEndpoint = 3;
   static const Duration _requestTimeout = Duration(seconds: 15);
 
-  static const Set<String> _disallowedHighways = <String>{
-    'motorway',
-    'motorway_link',
-    'trunk',
-    'trunk_link',
-    'bus_guideway',
-    'raceway',
-    'construction',
-    'proposed',
-  };
   Future<List<List<GeoPoint>>> fetchWalkableStreets({
     required GeoPoint center,
     required int mapRadiusMeters,
@@ -47,10 +37,10 @@ class StreetFetchService {
             break;
           }
 
-          final streets = _extractStreets(response.body, center: center);
+          final streets = _extractStreets(response.body);
           if (streets.isEmpty) {
             lastError =
-                Exception('Aucune rue piétonne trouvée pour cette zone.');
+                Exception('Aucune rue trouvée pour cette zone.');
             break;
           }
           return streets;
@@ -93,10 +83,7 @@ class StreetFetchService {
     await Future<void>.delayed(Duration(milliseconds: 400 * attempt));
   }
 
-  List<List<GeoPoint>> _extractStreets(
-    String body, {
-    required GeoPoint center,
-  }) {
+  List<List<GeoPoint>> _extractStreets(String body) {
     final XmlDocument document;
     try {
       document = XmlDocument.parse(body);
@@ -136,14 +123,8 @@ class StreetFetchService {
       }
     }
 
-    final cleanedWays = _trimExteriorDeadEnds(
-      center: center,
-      wayNodeLists: wayNodeLists,
-      nodes: nodes,
-    );
-
     final streets = <List<GeoPoint>>[];
-    for (final nodeList in cleanedWays) {
+    for (final nodeList in wayNodeLists) {
       final points = <GeoPoint>[];
       for (final nodeId in nodeList) {
         final point = nodes[nodeId];
@@ -158,107 +139,6 @@ class StreetFetchService {
     return streets;
   }
 
-  List<List<int>> _trimExteriorDeadEnds({
-    required GeoPoint center,
-    required List<List<int>> wayNodeLists,
-    required Map<int, GeoPoint> nodes,
-  }) {
-    if (wayNodeLists.isEmpty) return const <List<int>>[];
-
-    final allDistances = <double>[];
-    for (final way in wayNodeLists) {
-      for (final nodeId in way) {
-        final point = nodes[nodeId];
-        if (point != null) {
-          allDistances.add(_distanceMeters(center, point));
-        }
-      }
-    }
-    allDistances.sort();
-    final exteriorThreshold = allDistances.isEmpty
-        ? 0.0
-        : allDistances[((allDistances.length - 1) * 0.70).round()];
-
-    final ways = wayNodeLists.map((w) => [...w]).toList(growable: true);
-    for (var round = 0; round < 10; round++) {
-      final degrees = _computeNodeDegrees(ways);
-      var changed = false;
-
-      for (final way in ways) {
-        while (way.length >= 2 &&
-            _isExteriorLeaf(
-              nodeId: way.first,
-              degrees: degrees,
-              nodes: nodes,
-              center: center,
-              exteriorThreshold: exteriorThreshold,
-            )) {
-          way.removeAt(0);
-          changed = true;
-        }
-        while (way.length >= 2 &&
-            _isExteriorLeaf(
-              nodeId: way.last,
-              degrees: degrees,
-              nodes: nodes,
-              center: center,
-              exteriorThreshold: exteriorThreshold,
-            )) {
-          way.removeLast();
-          changed = true;
-        }
-      }
-
-      ways.removeWhere((w) => w.length < 2);
-      if (!changed) break;
-    }
-    return ways;
-  }
-
-  Map<int, int> _computeNodeDegrees(List<List<int>> ways) {
-    final degree = <int, int>{};
-    for (final way in ways) {
-      for (var i = 0; i < way.length - 1; i++) {
-        final a = way[i];
-        final b = way[i + 1];
-        degree[a] = (degree[a] ?? 0) + 1;
-        degree[b] = (degree[b] ?? 0) + 1;
-      }
-    }
-    return degree;
-  }
-
-  bool _isExteriorLeaf({
-    required int nodeId,
-    required Map<int, int> degrees,
-    required Map<int, GeoPoint> nodes,
-    required GeoPoint center,
-    required double exteriorThreshold,
-  }) {
-    if ((degrees[nodeId] ?? 0) != 1) {
-      return false;
-    }
-    final point = nodes[nodeId];
-    if (point == null) {
-      return false;
-    }
-    return _distanceMeters(center, point) >= exteriorThreshold;
-  }
-
-  double _distanceMeters(GeoPoint a, GeoPoint b) {
-    const earthRadius = 6371000.0;
-    final dLat = _degToRad(b.latitude - a.latitude);
-    final dLng = _degToRad(b.longitude - a.longitude);
-    final la1 = _degToRad(a.latitude);
-    final la2 = _degToRad(b.latitude);
-    final h = sin(dLat / 2) * sin(dLat / 2) +
-        cos(la1) * cos(la2) * sin(dLng / 2) * sin(dLng / 2);
-    final c = 2 * atan2(sqrt(h), sqrt(1 - h));
-    return earthRadius * c;
-  }
-
-  double _degToRad(double deg) => deg * pi / 180;
-
   bool _isWalkableWay(XmlElement way) {
     final tags = <String, String>{};
     for (final tag in way.findElements('tag')) {
@@ -269,18 +149,7 @@ class StreetFetchService {
       }
     }
 
-    if (tags['area'] == 'yes') {
-      return false;
-    }
-    if (tags['foot'] == 'no' || tags['access'] == 'private') {
-      return false;
-    }
-
-    final highway = tags['highway'];
-    if (highway != null) {
-      return !_disallowedHighways.contains(highway);
-    }
-
-    return tags['amenity'] == 'square' && tags['foot'] != 'no';
+    if (tags['area'] == 'yes') return false;
+    return tags.containsKey('highway');
   }
 }

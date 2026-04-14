@@ -124,6 +124,7 @@ class CreateLobbyController extends ChangeNotifier {
         mapRadiusMeters: form.mapRadius,
         objectiveCount: form.objectiveNumber,
         streets: streets,
+        finalZoneContour: outerStreetContour,
       );
       objectives = result.objectives;
       agentStartZone = result.agentStartZone;

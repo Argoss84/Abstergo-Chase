@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:abstergo_chase/features/game/application/game_controller.dart';
 import 'package:abstergo_chase/features/game/domain/game_models.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
@@ -49,6 +51,26 @@ class _GamePageState extends State<GamePage> {
         final fallbackCenter = _resolveCenter();
         final socketReady = _controller.connectionStatus == 'connected';
         final topInset = MediaQuery.of(context).padding.top + kToolbarHeight + 8;
+        final objectiveZoneRadius = widget.bootstrap.gameConfig?.objectiveZoneRadius ??
+            widget.bootstrap.lobby.form?.objectiveZoneRadius ??
+            50;
+        final roleUpper = (_controller.playerRole ?? '').toUpperCase();
+        final isRogue = roleUpper == 'ROGUE';
+        final objectiveDisplayPoints = isRogue
+            ? _controller.objectives
+                .where((o) => !o.captured)
+                .map((o) => o.point)
+                .toList(growable: false)
+            : _controller.objectives
+                .where((o) => !o.captured)
+                .map(
+                  (o) => _shiftedZoneCenter(
+                    objective: o.point,
+                    objectiveId: o.id,
+                    zoneRadiusMeters: objectiveZoneRadius.toDouble(),
+                  ),
+                )
+                .toList(growable: false);
 
         return Scaffold(
           extendBodyBehindAppBar: true,
@@ -137,10 +159,7 @@ class _GamePageState extends State<GamePage> {
                                   true
                                   ? widget.bootstrap.gameConfig!.mapStreets
                                   : widget.bootstrap.lobby.outerStreetContour,
-                              objectives: _controller.objectives
-                                  .where((o) => !o.captured)
-                                  .map((o) => o.point)
-                                  .toList(growable: false),
+                              objectives: objectiveDisplayPoints,
                               agentStartZone:
                                   widget.bootstrap.gameConfig?.startZone ??
                                       widget.bootstrap.lobby.agentStartZone,
@@ -148,10 +167,17 @@ class _GamePageState extends State<GamePage> {
                                   widget.bootstrap.gameConfig?.rogueStartZone ??
                                       widget.bootstrap.lobby.rogueStartZone,
                               objectiveZoneRadiusMeters:
-                                  widget.bootstrap.gameConfig?.objectiveZoneRadius ??
-                                      widget.bootstrap.lobby.form?.objectiveZoneRadius ??
-                                      50,
+                                  objectiveZoneRadius,
                               showObjectives: true,
+                              showObjectiveMarkers: isRogue,
+                              showObjectiveZones: !isRogue,
+                              objectiveMarkerIcon: isRogue
+                                  ? Icons.location_on
+                                  : Icons.adjust,
+                              objectiveMarkerColor: isRogue
+                                  ? Colors.purpleAccent
+                                  : Colors.red,
+                              objectiveMarkerSize: isRogue ? 30 : 18,
                               guidancePath: _controller.gameStarted
                                   ? const <GeoPoint>[]
                                   : _controller.buildPathToMyStartZone(),
@@ -334,6 +360,34 @@ class _GamePageState extends State<GamePage> {
       return widget.bootstrap.lobby.outerStreetContour.first;
     }
     return null;
+  }
+
+  GeoPoint _shiftedZoneCenter({
+    required GeoPoint objective,
+    required String objectiveId,
+    required double zoneRadiusMeters,
+  }) {
+    if (zoneRadiusMeters <= 1) return objective;
+    final seed = _stableHash(objectiveId);
+    final ratio = 0.35 + ((seed % 40) / 100.0); // 0.35 -> 0.74
+    final distanceMeters = zoneRadiusMeters * ratio;
+    final angle = ((seed % 360) * pi) / 180.0;
+    final dx = distanceMeters * cos(angle);
+    final dy = distanceMeters * sin(angle);
+    const metersPerDegLat = 111320.0;
+    final metersPerDegLng = metersPerDegLat * cos(objective.latitude * pi / 180);
+    final lat = objective.latitude + (dy / metersPerDegLat);
+    final lng = objective.longitude + (dx / (metersPerDegLng.abs() < 1e-6 ? 1e-6 : metersPerDegLng));
+    return GeoPoint(latitude: lat, longitude: lng);
+  }
+
+  int _stableHash(String value) {
+    var h = 2166136261;
+    for (final code in value.codeUnits) {
+      h ^= code;
+      h = (h * 16777619) & 0x7fffffff;
+    }
+    return h;
   }
 
   Future<void> _openChat() async {

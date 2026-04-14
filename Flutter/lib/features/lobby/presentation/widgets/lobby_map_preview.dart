@@ -15,6 +15,11 @@ class LobbyMapPreview extends StatelessWidget {
     required this.rogueStartZone,
     required this.objectiveZoneRadiusMeters,
     this.showObjectives = true,
+    this.showObjectiveMarkers = true,
+    this.showObjectiveZones = true,
+    this.objectiveMarkerIcon = Icons.adjust,
+    this.objectiveMarkerColor = Colors.red,
+    this.objectiveMarkerSize = 18,
     this.playerPositions = const <GeoPoint>[],
     this.guidancePath = const <GeoPoint>[],
     this.height = 260,
@@ -28,6 +33,11 @@ class LobbyMapPreview extends StatelessWidget {
   final GeoPoint? rogueStartZone;
   final int objectiveZoneRadiusMeters;
   final bool showObjectives;
+  final bool showObjectiveMarkers;
+  final bool showObjectiveZones;
+  final IconData objectiveMarkerIcon;
+  final Color objectiveMarkerColor;
+  final double objectiveMarkerSize;
   final List<GeoPoint> playerPositions;
   final List<GeoPoint> guidancePath;
   final double? height;
@@ -60,7 +70,7 @@ class LobbyMapPreview extends StatelessWidget {
                     borderStrokeWidth: 2,
                     borderColor: Colors.blue,
                   ),
-                if (showObjectives)
+                if (showObjectives && showObjectiveZones)
                   ...objectives.map(
                     (p) => CircleMarker(
                       point: LatLng(p.latitude, p.longitude),
@@ -133,14 +143,14 @@ class LobbyMapPreview extends StatelessWidget {
                     size: 34,
                   ),
                 ),
-                if (showObjectives)
+                if (showObjectives && showObjectiveMarkers)
                   ...objectives.map(
                     (p) => Marker(
                       point: LatLng(p.latitude, p.longitude),
-                      builder: (_) => const Icon(
-                        Icons.adjust,
-                        color: Colors.red,
-                        size: 18,
+                      builder: (_) => Icon(
+                        objectiveMarkerIcon,
+                        color: objectiveMarkerColor,
+                        size: objectiveMarkerSize,
                       ),
                     ),
                   ),
