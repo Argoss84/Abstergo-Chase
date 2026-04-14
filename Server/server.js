@@ -436,6 +436,7 @@ const serializeGame = (game) => ({
   stateVersion: game.stateVersion || 1,
   createdAt: game.createdAt || Date.now(),
   expiresAt: game.expiresAt || Date.now() + GAME_TTL_MS,
+  config: game.config || null,
   players: Array.from(game.players.values()).map((p) => ({
     id: p.id,
     name: p.name,
@@ -592,6 +593,7 @@ const hydrateRuntimeState = async () => {
           typeof game.expiresAt === 'number' && game.expiresAt > Date.now()
             ? game.expiresAt
             : Date.now() + GAME_TTL_MS,
+        config: game.config || null,
         players: playersMap,
         remainingTimeSeconds:
           typeof game.remainingTimeSeconds === 'number' ? game.remainingTimeSeconds : undefined,
@@ -938,6 +940,7 @@ const tryStartGameFromLobby = ({
   const game = {
     code,
     hostId: lobby.hostId,
+    config: lobby.config || null,
     players: new Map(),
     stateVersion: 1,
     createdAt: Date.now(),
@@ -1504,7 +1507,7 @@ io.on('connection', (socket) => {
           id: clientId,
           name: payload?.playerName || existingPlayer?.name || 'Joueur',
           isHost: existingPlayer?.isHost || false,
-          status: existingPlayer?.status || 'active',
+          status: 'active',
           role: existingPlayer?.role ?? undefined
         });
 
@@ -1530,19 +1533,32 @@ io.on('connection', (socket) => {
           }
         });
 
-        if (game.hostId !== clientId) {
-          const hostSocket = socketsById.get(game.hostId);
-          if (hostSocket) {
-            send(hostSocket, {
+        game.players.forEach((p) => {
+          if (p.id === clientId) return;
+          const s = socketsById.get(p.id);
+          if (s) {
+            send(s, {
+              type: 'game:peer-joined',
+              payload: {
+                playerId: clientId,
+                oldPlayerId,
+                playerName: existingPlayer?.name || payload?.playerName || 'Joueur',
+                role: existingPlayer?.role ?? null,
+                status: 'active'
+              }
+            });
+            send(s, {
               type: 'game:peer-reconnected',
               payload: {
                 playerId: clientId,
                 oldPlayerId,
-                playerName: existingPlayer?.name || payload?.playerName || 'Joueur'
+                playerName: existingPlayer?.name || payload?.playerName || 'Joueur',
+                role: existingPlayer?.role ?? null,
+                status: 'active'
               }
             });
           }
-        }
+        });
         return;
       }
 
@@ -1644,16 +1660,21 @@ io.on('connection', (socket) => {
         }
       });
 
-      const hostSocketForJoin = socketsById.get(game.hostId);
-      if (hostSocketForJoin) {
-        send(hostSocketForJoin, {
-          type: 'game:peer-joined',
-          payload: {
-            playerId: clientId,
-            playerName: payload?.playerName || 'Joueur'
-          }
-        });
-      }
+      game.players.forEach((p) => {
+        if (p.id === clientId) return;
+        const s = socketsById.get(p.id);
+        if (s) {
+          send(s, {
+            type: 'game:peer-joined',
+            payload: {
+              playerId: clientId,
+              playerName: payload?.playerName || 'Joueur',
+              role: game.players.get(clientId)?.role ?? null,
+              status: game.players.get(clientId)?.status || 'active'
+            }
+          });
+        }
+      });
       return;
     }
 
@@ -2100,14 +2121,20 @@ io.on('connection', (socket) => {
           closeGame(code, 'Le host a quitté la partie');
         }
       } else {
-        game.players.delete(playerId);
-        const hostSocket = socketsById.get(game.hostId);
-        if (hostSocket) {
-          send(hostSocket, {
-            type: 'game:peer-left',
-            payload: { playerId }
-          });
+        const leavingPlayer = game.players.get(playerId);
+        if (leavingPlayer) {
+          leavingPlayer.status = 'disconnected';
         }
+        game.players.forEach((p) => {
+          if (p.id === playerId) return;
+          const s = socketsById.get(p.id);
+          if (s) {
+            send(s, {
+              type: 'game:peer-left',
+              payload: { playerId }
+            });
+          }
+        });
       }
 
       const clientInfo = clients.get(socket.id);
@@ -2430,11 +2457,20 @@ io.on('connection', (socket) => {
           disconnectedAt: Date.now()
         });
       } else {
-        // Ne pas supprimer le joueur de game.players : on garde rôle, etc. pour la reconnexion.
-        // On notifie le host qui marquera le joueur déconnecté ; au game:join avec oldPlayerId
-        // on remplacera l'entrée par le nouveau clientId.
-        const hostSocket = socketsById.get(game.hostId);
-        if (hostSocket) send(hostSocket, { type: 'game:peer-left', payload: { playerId: clientInfo.clientId } });
+        const player = game.players.get(clientInfo.clientId);
+        if (player) {
+          player.status = 'disconnected';
+        }
+        game.players.forEach((p) => {
+          if (p.id === clientInfo.clientId) return;
+          const s = socketsById.get(p.id);
+          if (s) {
+            send(s, {
+              type: 'game:peer-left',
+              payload: { playerId: clientInfo.clientId }
+            });
+          }
+        });
       }
     }
 

@@ -24,6 +24,7 @@ class LobbyController extends ChangeNotifier {
   String connectionStatus = 'idle';
   LobbyBootstrapData? bootstrapData;
   final List<String> objectiveNames = <String>[];
+  bool shouldOpenGameForCode = false;
 
   static const List<String> _objectiveNamePool = <String>[
     'Serveur de donnees',
@@ -56,6 +57,7 @@ class LobbyController extends ChangeNotifier {
     isLoading = true;
     error = null;
     connectionStatus = 'connecting';
+    shouldOpenGameForCode = false;
     notifyListeners();
 
     try {
@@ -244,7 +246,12 @@ class LobbyController extends ChangeNotifier {
         return;
       case 'lobby:closed':
       case 'lobby:error':
-        error = payload?.toString() ?? 'Lobby indisponible.';
+        final message = payload?.toString() ?? 'Lobby indisponible.';
+        error = message;
+        if (message.toLowerCase().contains('lobby introuvable')) {
+          // If lobby doesn't exist, code may correspond to an already running game.
+          shouldOpenGameForCode = true;
+        }
         connectionStatus = 'error';
         notifyListeners();
         return;

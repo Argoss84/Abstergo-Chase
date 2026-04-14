@@ -30,6 +30,7 @@ class _LobbyPageState extends State<LobbyPage> {
   int _lastReadCount = 0;
   bool _isChatOpen = false;
   bool _didRouteToGame = false;
+  bool _didFallbackRouteToGame = false;
 
   @override
   void initState() {
@@ -89,6 +90,24 @@ class _LobbyPageState extends State<LobbyPage> {
                 players: List<LobbyPlayer>.from(_controller.players),
                 gameConfig: _controller.gameConfig,
                 codeOverride: _controller.lobbyCode,
+              ),
+            );
+          });
+        }
+        if (_controller.shouldOpenGameForCode &&
+            !_didFallbackRouteToGame &&
+            bootstrap != null) {
+          _didFallbackRouteToGame = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            context.go(
+              GamePage.routePath,
+              extra: GameBootstrapData(
+                lobby: bootstrap,
+                playerId: bootstrap.previousPlayerId ?? '',
+                players: const <LobbyPlayer>[],
+                gameConfig: null,
+                codeOverride: _controller.lobbyCode ?? bootstrap.code,
               ),
             );
           });

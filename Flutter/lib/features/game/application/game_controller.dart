@@ -4,6 +4,8 @@ import 'package:abstergo_chase/app/config/app_runtime_config.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
 import 'package:abstergo_chase/features/game/data/game_socket_service.dart';
 import 'package:abstergo_chase/features/game/domain/game_models.dart';
+import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
+import 'package:abstergo_chase/features/lobby/data/player_session_store.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -26,9 +28,11 @@ class GameController extends ChangeNotifier {
       : _socketService = socketService ?? GameSocketService();
 
   final GameSocketService _socketService;
+  final PlayerSessionStore _playerSessionStore = PlayerSessionStore();
   StreamSubscription<Map<String, dynamic>>? _messagesSub;
   StreamSubscription<Position>? _positionSub;
   Timer? _countdownTimer;
+  Timer? _joinWatchdogTimer;
 
   bool isLoading = true;
   String? error;
@@ -44,6 +48,7 @@ class GameController extends ChangeNotifier {
   final List<GamePlayer> players = <GamePlayer>[];
   final List<GameObjective> objectives = <GameObjective>[];
   final List<GameChatMessage> roleChat = <GameChatMessage>[];
+  LobbyGameConfig? liveGameConfig;
   GeoPoint? myPosition;
   final int realtimeRefreshIntervalMs =
       AppRuntimeConfig.gameRealtimeRefreshIntervalMs;
@@ -53,6 +58,9 @@ class GameController extends ChangeNotifier {
   bool _needsRejoin = false;
   bool _joinInFlight = false;
   bool _requestedInitialSync = false;
+  int _lastJoinAttemptMs = 0;
+
+  LobbyGameConfig? get _effectiveGameConfig => liveGameConfig ?? bootstrap?.gameConfig;
 
   Future<void> initialize(GameBootstrapData data) async {
     bootstrap = data;
@@ -69,9 +77,9 @@ class GameController extends ChangeNotifier {
           status: p.status,
         );
       }));
-    playerRole = players
-        .firstWhere((p) => p.id == playerId, orElse: () => players.first)
-        .role;
+    playerRole = players.where((p) => p.id == playerId).isNotEmpty
+        ? players.firstWhere((p) => p.id == playerId).role
+        : null;
     isHost = players.any((p) => p.id == playerId && p.isHost);
     _bootstrapObjectives(data);
 
@@ -87,9 +95,10 @@ class GameController extends ChangeNotifier {
       );
       _messagesSub?.cancel();
       _messagesSub = _socketService.messages.listen(_onMessage);
+      _startJoinWatchdog();
       _sendJoinGame();
       await _startPositionTracking();
-      connectionStatus = 'connected';
+      connectionStatus = _hasJoinedGame ? 'connected' : 'connecting';
       isLoading = false;
       notifyListeners();
     } catch (e) {
@@ -203,11 +212,15 @@ class GameController extends ChangeNotifier {
       case 'game:created':
         if (payload is Map) {
           _applyJoinedPayload(payload);
+          notifyListeners();
         }
         return;
       case 'socket:connected':
-        connectionStatus = 'connected';
+        connectionStatus = _hasJoinedGame ? 'connected' : 'connecting';
         if (_needsRejoin && !_joinInFlight) {
+          _sendJoinGame();
+        }
+        if (!_hasJoinedGame && !_joinInFlight) {
           _sendJoinGame();
         }
         notifyListeners();
@@ -216,6 +229,7 @@ class GameController extends ChangeNotifier {
         _needsRejoin = true;
         _joinInFlight = false;
         _hasJoinedGame = false;
+        _lastJoinAttemptMs = 0;
         connectionStatus = 'connecting';
         notifyListeners();
         return;
@@ -245,6 +259,36 @@ class GameController extends ChangeNotifier {
           final id = payload['playerId']?.toString();
           if (id != null) {
             players.removeWhere((p) => p.id == id);
+            notifyListeners();
+          }
+        }
+        return;
+      case 'game:peer-joined':
+      case 'game:peer-reconnected':
+        if (payload is Map) {
+          final id = payload['playerId']?.toString();
+          if (id != null && id.isNotEmpty) {
+            final idx = players.indexWhere((p) => p.id == id);
+            final role = payload['role']?.toString();
+            final status = payload['status']?.toString() ?? 'active';
+            final name = payload['playerName']?.toString() ?? 'Joueur';
+            if (idx == -1) {
+              players.add(
+                GamePlayer(
+                  id: id,
+                  name: name,
+                  isHost: false,
+                  role: role,
+                  status: status,
+                ),
+              );
+            } else {
+              players[idx] = players[idx].copyWith(
+                name: name,
+                role: role ?? players[idx].role,
+                status: status,
+              );
+            }
             notifyListeners();
           }
         }
@@ -312,11 +356,13 @@ class GameController extends ChangeNotifier {
         return;
       case 'game:error':
       case 'game:action-rejected':
+        _joinInFlight = false;
         final msg = payload?.toString() ?? 'Erreur game';
         if (msg.contains('Partie introuvable pour action') && !_hasJoinedGame) {
           return;
         }
         error = msg;
+        connectionStatus = _hasJoinedGame ? 'connected' : 'error';
         notifyListeners();
         return;
       case 'game:closed':
@@ -352,17 +398,29 @@ class GameController extends ChangeNotifier {
           );
         }));
     }
-    final me = players.where((p) => p.id == playerId);
-    playerRole = me.isEmpty ? null : me.first.role;
+    final gameConfigRaw = game is Map ? game['config'] : null;
+    if (gameConfigRaw is Map) {
+      liveGameConfig = LobbyGameConfig.fromMap(
+        Map<String, dynamic>.from(gameConfigRaw),
+      );
+    }
+    final selfPlayer = players.where((p) => p.id == playerId);
+    playerRole = selfPlayer.isEmpty ? null : selfPlayer.first.role;
     if (host != null) {
       isHost = host == playerId;
     } else {
       isHost = players.any((p) => p.id == playerId && p.isHost);
     }
     gameCode = payload['code']?.toString() ?? gameCode;
+    final code = gameCode;
+    final selfId = playerId;
+    if (code != null && selfId != null && selfId.isNotEmpty) {
+      _playerSessionStore.savePlayerIdForCode(code: code, playerId: selfId);
+    }
     _hasJoinedGame = true;
     _needsRejoin = false;
     _joinInFlight = false;
+    _lastJoinAttemptMs = 0;
     connectionStatus = 'connected';
     if (!_requestedInitialSync) {
       _requestedInitialSync = true;
@@ -555,12 +613,30 @@ class GameController extends ChangeNotifier {
     final data = bootstrap;
     final code = gameCode;
     if (data == null || code == null) return;
+    _lastJoinAttemptMs = DateTime.now().millisecondsSinceEpoch;
     _joinInFlight = true;
     _socketService.joinGame(
       code: code,
       playerName: data.lobby.playerName,
-      previousPlayerId: playerId,
+      previousPlayerId:
+          (playerId != null && playerId!.isNotEmpty)
+              ? playerId
+              : data.lobby.previousPlayerId,
     );
+  }
+
+  void _startJoinWatchdog() {
+    _joinWatchdogTimer?.cancel();
+    _joinWatchdogTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (_hasJoinedGame) return;
+      if (!_socketService.isConnected) return;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (_joinInFlight && now - _lastJoinAttemptMs < 5000) return;
+      _joinInFlight = false;
+      connectionStatus = 'connecting';
+      _sendJoinGame();
+      notifyListeners();
+    });
   }
 
   bool isPlayerVisibleForCurrentRole(GamePlayer player) {
@@ -578,7 +654,7 @@ class GameController extends ChangeNotifier {
   }
 
   int get startZoneRadiusMeters {
-    return bootstrap?.gameConfig?.objectiveZoneRadius ??
+    return _effectiveGameConfig?.objectiveZoneRadius ??
         bootstrap?.lobby.form?.objectiveZoneRadius ??
         50;
   }
@@ -586,10 +662,10 @@ class GameController extends ChangeNotifier {
   GeoPoint? _startZoneForRole(String? role) {
     final upper = (role ?? '').toUpperCase();
     if (upper == 'ROGUE') {
-      return bootstrap?.gameConfig?.rogueStartZone ?? bootstrap?.lobby.rogueStartZone;
+      return _effectiveGameConfig?.rogueStartZone ?? bootstrap?.lobby.rogueStartZone;
     }
     if (upper == 'AGENT') {
-      return bootstrap?.gameConfig?.startZone ?? bootstrap?.lobby.agentStartZone;
+      return _effectiveGameConfig?.startZone ?? bootstrap?.lobby.agentStartZone;
     }
     return null;
   }
@@ -602,7 +678,7 @@ class GameController extends ChangeNotifier {
     if (start == null || target == null) return const <GeoPoint>[];
 
     final streetNetwork =
-        bootstrap?.gameConfig?.mapStreetNetwork ?? const <List<GeoPoint>>[];
+        _effectiveGameConfig?.mapStreetNetwork ?? const <List<GeoPoint>>[];
     if (streetNetwork.isNotEmpty) {
       final graphPath = _shortestPathOnStreetNetwork(
         start: start,
@@ -614,7 +690,7 @@ class GameController extends ChangeNotifier {
       }
     }
 
-    final network = bootstrap?.gameConfig?.mapStreets ??
+    final network = _effectiveGameConfig?.mapStreets ??
         bootstrap?.lobby.outerStreetContour ??
         const <GeoPoint>[];
     if (network.length < 2) return <GeoPoint>[start, target];
@@ -847,6 +923,7 @@ class GameController extends ChangeNotifier {
   @override
   void dispose() {
     _countdownTimer?.cancel();
+    _joinWatchdogTimer?.cancel();
     _messagesSub?.cancel();
     _positionSub?.cancel();
     _socketService.dispose();

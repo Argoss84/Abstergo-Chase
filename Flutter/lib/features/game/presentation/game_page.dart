@@ -26,6 +26,7 @@ class _GamePageState extends State<GamePage> {
   final TextEditingController _chatController = TextEditingController();
   bool _chatOpen = false;
   int _lastReadCount = 0;
+  bool _isActionFabOpen = false;
 
   @override
   void initState() {
@@ -45,13 +46,15 @@ class _GamePageState extends State<GamePage> {
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
+        final effectiveGameConfig =
+            _controller.liveGameConfig ?? widget.bootstrap.gameConfig;
         final unread = _chatOpen
             ? 0
             : (_controller.roleChat.length - _lastReadCount).clamp(0, 999);
         final fallbackCenter = _resolveCenter();
         final socketReady = _controller.connectionStatus == 'connected';
         final topInset = MediaQuery.of(context).padding.top + kToolbarHeight + 8;
-        final objectiveZoneRadius = widget.bootstrap.gameConfig?.objectiveZoneRadius ??
+        final objectiveZoneRadius = effectiveGameConfig?.objectiveZoneRadius ??
             widget.bootstrap.lobby.form?.objectiveZoneRadius ??
             50;
         final roleUpper = (_controller.playerRole ?? '').toUpperCase();
@@ -102,30 +105,48 @@ class _GamePageState extends State<GamePage> {
               ),
             ],
           ),
-          floatingActionButton: FloatingActionButton(
-            onPressed: _openChat,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.chat_bubble_outline),
-                if (unread > 0)
-                  Positioned(
-                    right: -8,
-                    top: -8,
-                    child: CircleAvatar(
-                      radius: 10,
-                      backgroundColor: Colors.red,
-                      child: Text(
-                        unread > 99 ? '99+' : '$unread',
-                        style: const TextStyle(fontSize: 10, color: Colors.white),
+          floatingActionButton: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              FloatingActionButton(
+                heroTag: 'game-chat-fab',
+                onPressed: _openChat,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Icon(Icons.chat_bubble_outline),
+                    if (unread > 0)
+                      Positioned(
+                        right: -8,
+                        top: -8,
+                        child: CircleAvatar(
+                          radius: 10,
+                          backgroundColor: Colors.red,
+                          child: Text(
+                            unread > 99 ? '99+' : '$unread',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-              ],
-            ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              FloatingActionButton(
+                heroTag: 'game-info-fab',
+                onPressed: _openGameInfo,
+                child: const Icon(Icons.info_outline),
+              ),
+            ],
           ),
-          body: (_controller.isLoading || !socketReady)
-              ? Center(
+          body: Stack(
+            children: [
+              (_controller.isLoading || !socketReady)
+                  ? Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -150,21 +171,21 @@ class _GamePageState extends State<GamePage> {
                               height: null,
                               center: _controller.myPosition ?? fallbackCenter,
                               mapRadiusMeters:
-                                  widget.bootstrap.gameConfig?.mapRadius ??
+                                  effectiveGameConfig?.mapRadius ??
                                       widget.bootstrap.lobby.form?.mapRadius ??
                                       1000,
-                              outerStreetContour: widget
-                                      .bootstrap.gameConfig?.mapStreets
+                              outerStreetContour: effectiveGameConfig
+                                      ?.mapStreets
                                       .isNotEmpty ==
                                   true
-                                  ? widget.bootstrap.gameConfig!.mapStreets
+                                  ? effectiveGameConfig!.mapStreets
                                   : widget.bootstrap.lobby.outerStreetContour,
                               objectives: objectiveDisplayPoints,
                               agentStartZone:
-                                  widget.bootstrap.gameConfig?.startZone ??
+                                  effectiveGameConfig?.startZone ??
                                       widget.bootstrap.lobby.agentStartZone,
                               rogueStartZone:
-                                  widget.bootstrap.gameConfig?.rogueStartZone ??
+                                  effectiveGameConfig?.rogueStartZone ??
                                       widget.bootstrap.lobby.rogueStartZone,
                               objectiveZoneRadiusMeters:
                                   objectiveZoneRadius,
@@ -267,6 +288,18 @@ class _GamePageState extends State<GamePage> {
                     ),
                   ],
                 ),
+              if (socketReady && !_controller.isLoading)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 16,
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: _buildActionFabMenu(),
+                  ),
+                ),
+            ],
+          ),
         );
       },
     );
@@ -335,9 +368,119 @@ class _GamePageState extends State<GamePage> {
     );
   }
 
+  Widget _buildActionFabMenu() {
+    final role = (_controller.playerRole ?? '').toUpperCase();
+    final roleActionIcon =
+        role == 'ROGUE' ? Icons.radio_button_checked : Icons.warning_amber;
+    final roleActionLabel =
+        role == 'ROGUE' ? 'Action rogue' : 'Détection menace';
+    return SizedBox(
+      width: 280,
+      height: 220,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          if (_isActionFabOpen)
+            _fanSecondaryFab(
+              left: 36,
+              bottom: 78,
+              child: _miniActionFab(
+                icon: Icons.visibility,
+                tooltip: 'Mode vision',
+                onTap: () => _showFabPlaceholder('Mode vision'),
+              ),
+            ),
+          if (_isActionFabOpen)
+            _fanSecondaryFab(
+              left: 78,
+              bottom: 126,
+              child: _miniActionFab(
+                icon: Icons.fitness_center,
+                tooltip: 'Contrôle santé',
+                onTap: () => _showFabPlaceholder('Contrôle santé'),
+              ),
+            ),
+          if (_isActionFabOpen)
+            _fanSecondaryFab(
+              right: 78,
+              bottom: 126,
+              child: _miniActionFab(
+                icon: Icons.my_location,
+                tooltip: 'Recentrer carte',
+                onTap: () => _showFabPlaceholder('Recentrage carte'),
+              ),
+            ),
+          if (_isActionFabOpen)
+            _fanSecondaryFab(
+              right: 36,
+              bottom: 78,
+              child: _miniActionFab(
+                icon: roleActionIcon,
+                tooltip: roleActionLabel,
+                onTap: () => _showFabPlaceholder(roleActionLabel),
+              ),
+            ),
+          Positioned(
+            bottom: 16,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: FloatingActionButton(
+                heroTag: 'game-action-menu',
+                mini: true,
+                onPressed: () =>
+                    setState(() => _isActionFabOpen = !_isActionFabOpen),
+                child: const Icon(Icons.adjust),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _fanSecondaryFab({
+    double? left,
+    double? right,
+    required double bottom,
+    required Widget child,
+  }) {
+    return Positioned(
+      left: left,
+      right: right,
+      bottom: bottom,
+      child: child,
+    );
+  }
+
+  Widget _miniActionFab({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    return FloatingActionButton(
+      heroTag: 'game-action-${icon.codePoint}-$tooltip',
+      mini: true,
+      tooltip: tooltip,
+      onPressed: onTap,
+      backgroundColor: Colors.white,
+      foregroundColor: Colors.black87,
+      child: Icon(icon),
+    );
+  }
+
+  void _showFabPlaceholder(String label) {
+    setState(() => _isActionFabOpen = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$label: fonctionnalité bientôt disponible.')),
+    );
+  }
+
   GeoPoint? _resolveCenter() {
-    if (widget.bootstrap.gameConfig != null) {
-      return widget.bootstrap.gameConfig!.mapCenter;
+    final effectiveGameConfig =
+        _controller.liveGameConfig ?? widget.bootstrap.gameConfig;
+    if (effectiveGameConfig != null) {
+      return effectiveGameConfig.mapCenter;
     }
     final form = widget.bootstrap.lobby.form;
     if (form != null) {
@@ -466,5 +609,115 @@ class _GamePageState extends State<GamePage> {
       _chatOpen = false;
       _lastReadCount = _controller.roleChat.length;
     });
+  }
+
+  Future<void> _openGameInfo() async {
+    final bootstrap = widget.bootstrap.lobby;
+    final config = widget.bootstrap.gameConfig;
+    final form = bootstrap.form;
+    final code = (_controller.gameCode ?? bootstrap.code).toUpperCase();
+    final role = (_controller.playerRole ?? 'AUCUN').toUpperCase();
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.9,
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              const Text(
+                'Informations de la partie',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 14),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Code de la partie',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      SelectableText(
+                        code,
+                        style: const TextStyle(
+                          fontSize: 30,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    children: [
+                      _kvInfo('Role', role),
+                      _kvInfo('Etat socket', _controller.connectionStatus),
+                      _kvInfo('Joueurs', '${_controller.players.length}'),
+                      _kvInfo('Objectifs', '${_controller.objectives.length}'),
+                      _kvInfo(
+                        'Temps restant',
+                        _controller.remainingSeconds != null
+                            ? _formatDuration(_controller.remainingSeconds!)
+                            : 'n/a',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    children: [
+                      _kvInfo('Serveur', bootstrap.serverUrl),
+                      _kvInfo('Socket path', bootstrap.socketPath),
+                      _kvInfo('Rayon map', '${config?.mapRadius ?? form?.mapRadius ?? 0} m'),
+                      _kvInfo(
+                        'Rayon zone objectif',
+                        '${config?.objectiveZoneRadius ?? form?.objectiveZoneRadius ?? 0} m',
+                      ),
+                      _kvInfo(
+                        'Duree',
+                        '${form?.duration ?? _controller.remainingSeconds ?? 0} sec',
+                      ),
+                      _kvInfo(
+                        'Victoire objectifs',
+                        '${form?.victoryConditionObjectives ?? 'n/a'}',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _kvInfo(String key, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              key,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          Flexible(child: Text(value, textAlign: TextAlign.right)),
+        ],
+      ),
+    );
   }
 }

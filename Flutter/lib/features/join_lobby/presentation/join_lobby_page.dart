@@ -1,5 +1,6 @@
 import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:abstergo_chase/features/lobby/data/player_name_store.dart';
+import 'package:abstergo_chase/features/lobby/data/player_session_store.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
 import 'package:abstergo_chase/features/lobby/presentation/lobby_page.dart';
 import 'package:flutter/material.dart';
@@ -21,6 +22,7 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
   late final TextEditingController _nameController;
   late final TextEditingController _codeController;
   final PlayerNameStore _playerNameStore = PlayerNameStore();
+  final PlayerSessionStore _playerSessionStore = PlayerSessionStore();
 
   @override
   void initState() {
@@ -48,7 +50,7 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
     setState(() {});
   }
 
-  void _joinLobby() {
+  Future<void> _joinLobby() async {
     final displayName = _nameController.text.trim();
     final code = _codeController.text.trim().toUpperCase();
     if (displayName.isEmpty) {
@@ -64,13 +66,16 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
       return;
     }
 
-    _playerNameStore.save(displayName);
+    await _playerNameStore.save(displayName);
+    final previousPlayerId = await _playerSessionStore.loadPlayerIdForCode(code);
     final bootstrap = LobbyBootstrapData(
       code: code,
       serverUrl: 'http://10.0.2.2:5174',
       socketPath: '/socket.io',
       playerName: displayName,
+      previousPlayerId: previousPlayerId,
     );
+    if (!mounted) return;
     context.go('${LobbyPage.routePath}?code=$code', extra: bootstrap);
   }
 
