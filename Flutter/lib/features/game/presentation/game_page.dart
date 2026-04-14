@@ -48,11 +48,16 @@ class _GamePageState extends State<GamePage> {
             : (_controller.roleChat.length - _lastReadCount).clamp(0, 999);
         final fallbackCenter = _resolveCenter();
         final socketReady = _controller.connectionStatus == 'connected';
+        final topInset = MediaQuery.of(context).padding.top + kToolbarHeight + 8;
 
         return Scaffold(
+          extendBodyBehindAppBar: true,
           appBar: AppBar(
+            backgroundColor: Colors.black.withOpacity(0.35),
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
             title: Text(
-              'Game (${(_controller.playerRole ?? 'N/A').toUpperCase()})',
+              (_controller.playerRole ?? 'N/A').toUpperCase(),
             ),
             actions: [
               Padding(
@@ -114,103 +119,112 @@ class _GamePageState extends State<GamePage> {
                     ],
                   ),
                 )
-              : Column(
+              : Stack(
                   children: [
-                    if (_controller.error != null)
-                      Container(
-                        width: double.infinity,
-                        color: Colors.red.shade100,
-                        padding: const EdgeInsets.all(8),
-                        child: Text(_controller.error!),
-                      ),
-                    Expanded(
+                    Positioned.fill(
                       child: fallbackCenter == null
                           ? const Center(child: Text('Carte indisponible'))
-                          : Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: LobbyMapPreview(
-                                center: _controller.myPosition ??
-                                    fallbackCenter,
-                                mapRadiusMeters:
-                                    widget.bootstrap.gameConfig?.mapRadius ??
-                                        widget.bootstrap.lobby.form?.mapRadius ??
-                                        1000,
-                                outerStreetContour: widget
-                                        .bootstrap.gameConfig?.mapStreets
-                                        .isNotEmpty ==
-                                    true
-                                    ? widget.bootstrap.gameConfig!.mapStreets
-                                    : widget.bootstrap.lobby.outerStreetContour,
-                                objectives: _controller.objectives
-                                    .where((o) => !o.captured)
-                                    .map((o) => o.point)
-                                    .toList(growable: false),
-                                agentStartZone:
-                                    widget.bootstrap.gameConfig?.startZone ??
-                                        widget.bootstrap.lobby.agentStartZone,
-                                rogueStartZone:
-                                    widget.bootstrap.gameConfig?.rogueStartZone ??
-                                        widget.bootstrap.lobby.rogueStartZone,
-                                objectiveZoneRadiusMeters:
-                                    widget.bootstrap.gameConfig?.objectiveZoneRadius ??
-                                        widget.bootstrap.lobby.form?.objectiveZoneRadius ??
-                                        50,
-                                showObjectives: true,
-                                guidancePath: _controller.gameStarted
-                                    ? const <GeoPoint>[]
-                                    : _controller.buildPathToMyStartZone(),
-                                playerPositions: _controller.players
-                                    .where(_controller.isPlayerVisibleForCurrentRole)
-                                    .where((p) =>
-                                        p.latitude != null && p.longitude != null)
-                                    .map((p) => GeoPoint(
-                                          latitude: p.latitude!,
-                                          longitude: p.longitude!,
-                                        ))
-                                    .toList(growable: false),
-                              ),
+                          : LobbyMapPreview(
+                              height: null,
+                              center: _controller.myPosition ?? fallbackCenter,
+                              mapRadiusMeters:
+                                  widget.bootstrap.gameConfig?.mapRadius ??
+                                      widget.bootstrap.lobby.form?.mapRadius ??
+                                      1000,
+                              outerStreetContour: widget
+                                      .bootstrap.gameConfig?.mapStreets
+                                      .isNotEmpty ==
+                                  true
+                                  ? widget.bootstrap.gameConfig!.mapStreets
+                                  : widget.bootstrap.lobby.outerStreetContour,
+                              objectives: _controller.objectives
+                                  .where((o) => !o.captured)
+                                  .map((o) => o.point)
+                                  .toList(growable: false),
+                              agentStartZone:
+                                  widget.bootstrap.gameConfig?.startZone ??
+                                      widget.bootstrap.lobby.agentStartZone,
+                              rogueStartZone:
+                                  widget.bootstrap.gameConfig?.rogueStartZone ??
+                                      widget.bootstrap.lobby.rogueStartZone,
+                              objectiveZoneRadiusMeters:
+                                  widget.bootstrap.gameConfig?.objectiveZoneRadius ??
+                                      widget.bootstrap.lobby.form?.objectiveZoneRadius ??
+                                      50,
+                              showObjectives: true,
+                              guidancePath: _controller.gameStarted
+                                  ? const <GeoPoint>[]
+                                  : _controller.buildPathToMyStartZone(),
+                              playerPositions: _controller.players
+                                  .where(_controller.isPlayerVisibleForCurrentRole)
+                                  .where((p) =>
+                                      p.latitude != null && p.longitude != null)
+                                  .map((p) => GeoPoint(
+                                        latitude: p.latitude!,
+                                        longitude: p.longitude!,
+                                      ))
+                                  .toList(growable: false),
                             ),
                     ),
-                    if (_controller.isHost && !_controller.gameStarted)
-                      Container(
-                        width: double.infinity,
-                        margin: const EdgeInsets.symmetric(horizontal: 12),
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Verification zones de depart (${_controller.startZoneRadiusMeters}m)',
-                              style: const TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                            const SizedBox(height: 6),
-                            ..._controller.players.map((player) {
-                              final inZone = _controller.isPlayerInStartZone(player);
-                              final role = (player.role ?? 'AUCUN').toUpperCase();
-                              final label = inZone ? 'Dans zone' : 'Hors zone';
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 4),
-                                child: Text(
-                                  '${player.name} [$role] - $label',
-                                  style: TextStyle(
-                                    color: inZone ? Colors.green.shade700 : Colors.red.shade700,
-                                  ),
-                                ),
-                              );
-                            }),
-                          ],
+                    if (_controller.error != null)
+                      Positioned(
+                        top: topInset,
+                        left: 12,
+                        right: 12,
+                        child: Container(
+                          color: Colors.red.shade100,
+                          padding: const EdgeInsets.all(8),
+                          child: Text(_controller.error!),
                         ),
                       ),
-                    Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
+                    Positioned(
+                      left: 12,
+                      right: 12,
+                      bottom: 16,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          if (_controller.isHost && !_controller.gameStarted)
+                            Container(
+                              width: double.infinity,
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.9),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Verification zones de depart (${_controller.startZoneRadiusMeters}m)',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  ..._controller.players.map((player) {
+                                    final inZone =
+                                        _controller.isPlayerInStartZone(player);
+                                    final role =
+                                        (player.role ?? 'AUCUN').toUpperCase();
+                                    final label = inZone ? 'Dans zone' : 'Hors zone';
+                                    return Padding(
+                                      padding: const EdgeInsets.only(bottom: 4),
+                                      child: Text(
+                                        '${player.name} [$role] - $label',
+                                        style: TextStyle(
+                                          color: inZone
+                                              ? Colors.green.shade700
+                                              : Colors.red.shade700,
+                                        ),
+                                      ),
+                                    );
+                                  }),
+                                ],
+                              ),
+                            ),
                           if (_controller.isHost && !_controller.gameStarted)
                             FilledButton(
                               onPressed: _controller.canHostStartGame

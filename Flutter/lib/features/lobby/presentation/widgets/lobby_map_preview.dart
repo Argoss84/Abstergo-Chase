@@ -17,6 +17,7 @@ class LobbyMapPreview extends StatelessWidget {
     this.showObjectives = true,
     this.playerPositions = const <GeoPoint>[],
     this.guidancePath = const <GeoPoint>[],
+    this.height = 260,
   });
 
   final GeoPoint center;
@@ -29,11 +30,12 @@ class LobbyMapPreview extends StatelessWidget {
   final bool showObjectives;
   final List<GeoPoint> playerPositions;
   final List<GeoPoint> guidancePath;
+  final double? height;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 260,
+      height: height,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: FlutterMap(
