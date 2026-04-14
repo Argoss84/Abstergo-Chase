@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:abstergo_chase/app/config/app_runtime_config.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
 import 'package:abstergo_chase/features/game/data/game_socket_service.dart';
 import 'package:abstergo_chase/features/game/domain/game_models.dart';
@@ -44,7 +45,8 @@ class GameController extends ChangeNotifier {
   final List<GameObjective> objectives = <GameObjective>[];
   final List<GameChatMessage> roleChat = <GameChatMessage>[];
   GeoPoint? myPosition;
-  int realtimeRefreshIntervalMs = 1000;
+  final int realtimeRefreshIntervalMs =
+      AppRuntimeConfig.gameRealtimeRefreshIntervalMs;
   int _lastPositionPublishMs = 0;
   int _lastSnapshotPushMs = 0;
   bool _hasJoinedGame = false;
@@ -144,11 +146,6 @@ class GameController extends ChangeNotifier {
       _publishPositionIfDue(position.latitude, position.longitude);
       notifyListeners();
     });
-  }
-
-  void setRealtimeRefreshIntervalMs(int value) {
-    realtimeRefreshIntervalMs = value.clamp(300, 5000);
-    notifyListeners();
   }
 
   void _publishPositionIfDue(double latitude, double longitude) {
@@ -578,6 +575,133 @@ class GameController extends ChangeNotifier {
       return targetRole == 'AGENT';
     }
     return true;
+  }
+
+  int get startZoneRadiusMeters {
+    return bootstrap?.gameConfig?.objectiveZoneRadius ??
+        bootstrap?.lobby.form?.objectiveZoneRadius ??
+        50;
+  }
+
+  GeoPoint? _startZoneForRole(String? role) {
+    final upper = (role ?? '').toUpperCase();
+    if (upper == 'ROGUE') {
+      return bootstrap?.gameConfig?.rogueStartZone ?? bootstrap?.lobby.rogueStartZone;
+    }
+    if (upper == 'AGENT') {
+      return bootstrap?.gameConfig?.startZone ?? bootstrap?.lobby.agentStartZone;
+    }
+    return null;
+  }
+
+  GeoPoint? get myStartZone => _startZoneForRole(playerRole);
+
+  List<GeoPoint> buildPathToMyStartZone() {
+    final start = myPosition;
+    final target = myStartZone;
+    if (start == null || target == null) return const <GeoPoint>[];
+
+    final network = bootstrap?.gameConfig?.mapStreets ??
+        bootstrap?.lobby.outerStreetContour ??
+        const <GeoPoint>[];
+    if (network.length < 2) {
+      return <GeoPoint>[start, target];
+    }
+
+    final startIdx = _nearestPointIndex(network, start);
+    final targetIdx = _nearestPointIndex(network, target);
+    if (startIdx == -1 || targetIdx == -1) {
+      return <GeoPoint>[start, target];
+    }
+
+    final forward = _pathBetweenIndices(network, startIdx, targetIdx, true);
+    final backward = _pathBetweenIndices(network, startIdx, targetIdx, false);
+    final best = _pathLengthMeters(forward) <= _pathLengthMeters(backward)
+        ? forward
+        : backward;
+
+    return <GeoPoint>[
+      start,
+      if (best.isNotEmpty) ...best,
+      target,
+    ];
+  }
+
+  int _nearestPointIndex(List<GeoPoint> points, GeoPoint target) {
+    var bestIndex = -1;
+    var bestDistance = double.infinity;
+    for (var i = 0; i < points.length; i++) {
+      final p = points[i];
+      final d = Geolocator.distanceBetween(
+        p.latitude,
+        p.longitude,
+        target.latitude,
+        target.longitude,
+      );
+      if (d < bestDistance) {
+        bestDistance = d;
+        bestIndex = i;
+      }
+    }
+    return bestIndex;
+  }
+
+  List<GeoPoint> _pathBetweenIndices(
+    List<GeoPoint> points,
+    int from,
+    int to,
+    bool forward,
+  ) {
+    if (points.isEmpty) return const <GeoPoint>[];
+    final path = <GeoPoint>[];
+    final n = points.length;
+    var idx = from;
+    path.add(points[idx]);
+    while (idx != to) {
+      idx = forward ? (idx + 1) % n : (idx - 1 + n) % n;
+      path.add(points[idx]);
+      if (path.length > n + 1) break;
+    }
+    return path;
+  }
+
+  double _pathLengthMeters(List<GeoPoint> points) {
+    if (points.length < 2) return 0;
+    var sum = 0.0;
+    for (var i = 1; i < points.length; i++) {
+      final a = points[i - 1];
+      final b = points[i];
+      sum += Geolocator.distanceBetween(
+        a.latitude,
+        a.longitude,
+        b.latitude,
+        b.longitude,
+      );
+    }
+    return sum;
+  }
+
+  bool isPlayerInStartZone(GamePlayer player) {
+    if (player.latitude == null || player.longitude == null) return false;
+    final zone = _startZoneForRole(player.role);
+    if (zone == null) return false;
+    final distance = Geolocator.distanceBetween(
+      player.latitude!,
+      player.longitude!,
+      zone.latitude,
+      zone.longitude,
+    );
+    return distance <= startZoneRadiusMeters;
+  }
+
+  bool get canHostStartGame {
+    if (!isHost || gameStarted) return false;
+    final relevant = players.where((p) {
+      final role = (p.role ?? '').toUpperCase();
+      return role == 'AGENT' || role == 'ROGUE';
+    }).toList(growable: false);
+    if (relevant.isEmpty) return false;
+    return relevant.every(isPlayerInStartZone);
   }
 
   @override

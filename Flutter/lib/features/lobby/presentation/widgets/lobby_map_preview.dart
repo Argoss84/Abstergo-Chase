@@ -16,6 +16,7 @@ class LobbyMapPreview extends StatelessWidget {
     required this.objectiveZoneRadiusMeters,
     this.showObjectives = true,
     this.playerPositions = const <GeoPoint>[],
+    this.guidancePath = const <GeoPoint>[],
   });
 
   final GeoPoint center;
@@ -27,6 +28,7 @@ class LobbyMapPreview extends StatelessWidget {
   final int objectiveZoneRadiusMeters;
   final bool showObjectives;
   final List<GeoPoint> playerPositions;
+  final List<GeoPoint> guidancePath;
 
   @override
   Widget build(BuildContext context) {
@@ -104,6 +106,18 @@ class LobbyMapPreview extends StatelessWidget {
                     borderColor: Colors.blue,
                     borderStrokeWidth: 2.5,
                     isFilled: true,
+                  ),
+                ],
+              ),
+            if (guidancePath.length >= 2)
+              PolylineLayer(
+                polylines: [
+                  Polyline(
+                    points: guidancePath
+                        .map((p) => LatLng(p.latitude, p.longitude))
+                        .toList(growable: false),
+                    strokeWidth: 4,
+                    color: Colors.deepPurple,
                   ),
                 ],
               ),

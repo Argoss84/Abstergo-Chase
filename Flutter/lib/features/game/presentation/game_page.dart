@@ -156,6 +156,9 @@ class _GamePageState extends State<GamePage> {
                                         widget.bootstrap.lobby.form?.objectiveZoneRadius ??
                                         50,
                                 showObjectives: true,
+                                guidancePath: _controller.gameStarted
+                                    ? const <GeoPoint>[]
+                                    : _controller.buildPathToMyStartZone(),
                                 playerPositions: _controller.players
                                     .where(_controller.isPlayerVisibleForCurrentRole)
                                     .where((p) =>
@@ -168,6 +171,40 @@ class _GamePageState extends State<GamePage> {
                               ),
                             ),
                     ),
+                    if (_controller.isHost && !_controller.gameStarted)
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.symmetric(horizontal: 12),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Verification zones de depart (${_controller.startZoneRadiusMeters}m)',
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: 6),
+                            ..._controller.players.map((player) {
+                              final inZone = _controller.isPlayerInStartZone(player);
+                              final role = (player.role ?? 'AUCUN').toUpperCase();
+                              final label = inZone ? 'Dans zone' : 'Hors zone';
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 4),
+                                child: Text(
+                                  '${player.name} [$role] - $label',
+                                  style: TextStyle(
+                                    color: inZone ? Colors.green.shade700 : Colors.red.shade700,
+                                  ),
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
                     Padding(
                       padding: const EdgeInsets.all(12),
                       child: Wrap(
@@ -176,31 +213,15 @@ class _GamePageState extends State<GamePage> {
                         children: [
                           if (_controller.isHost && !_controller.gameStarted)
                             FilledButton(
-                              onPressed: _controller.startGameFromHost,
-                              child: const Text('Démarrer'),
+                              onPressed: _controller.canHostStartGame
+                                  ? _controller.startGameFromHost
+                                  : null,
+                              child: Text(
+                                _controller.canHostStartGame
+                                    ? 'Démarrer'
+                                    : 'En attente des zones de départ',
+                              ),
                             ),
-                          DropdownButton<int>(
-                            value: _controller.realtimeRefreshIntervalMs,
-                            items: const [
-                              DropdownMenuItem(
-                                value: 500,
-                                child: Text('Refresh 500ms'),
-                              ),
-                              DropdownMenuItem(
-                                value: 1000,
-                                child: Text('Refresh 1s'),
-                              ),
-                              DropdownMenuItem(
-                                value: 2000,
-                                child: Text('Refresh 2s'),
-                              ),
-                            ],
-                            onChanged: (value) {
-                              if (value != null) {
-                                _controller.setRealtimeRefreshIntervalMs(value);
-                              }
-                            },
-                          ),
                         ],
                       ),
                     ),
