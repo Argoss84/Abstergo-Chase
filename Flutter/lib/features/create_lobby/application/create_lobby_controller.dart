@@ -224,6 +224,14 @@ class CreateLobbyController extends ChangeNotifier {
                       .toList(growable: false),
                 ]
               : null,
+          'street_network': streets
+              .where((street) => street.length >= 2)
+              .map(
+                (street) => street
+                    .map((p) => <double>[p.latitude, p.longitude])
+                    .toList(growable: false),
+              )
+              .toList(growable: false),
         },
       );
       createdLobbySession = session;

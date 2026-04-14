@@ -601,12 +601,23 @@ class GameController extends ChangeNotifier {
     final target = myStartZone;
     if (start == null || target == null) return const <GeoPoint>[];
 
+    final streetNetwork =
+        bootstrap?.gameConfig?.mapStreetNetwork ?? const <List<GeoPoint>>[];
+    if (streetNetwork.isNotEmpty) {
+      final graphPath = _shortestPathOnStreetNetwork(
+        start: start,
+        target: target,
+        streets: streetNetwork,
+      );
+      if (graphPath.length >= 2) {
+        return graphPath;
+      }
+    }
+
     final network = bootstrap?.gameConfig?.mapStreets ??
         bootstrap?.lobby.outerStreetContour ??
         const <GeoPoint>[];
-    if (network.length < 2) {
-      return <GeoPoint>[start, target];
-    }
+    if (network.length < 2) return <GeoPoint>[start, target];
 
     final startIdx = _nearestPointIndex(network, start);
     final targetIdx = _nearestPointIndex(network, target);
@@ -625,6 +636,135 @@ class GameController extends ChangeNotifier {
       if (best.isNotEmpty) ...best,
       target,
     ];
+  }
+
+  List<GeoPoint> _shortestPathOnStreetNetwork({
+    required GeoPoint start,
+    required GeoPoint target,
+    required List<List<GeoPoint>> streets,
+  }) {
+    final nodes = <GeoPoint>[];
+    final nodeIndexByKey = <String, int>{};
+    final adjacency = <int, Map<int, double>>{};
+
+    int ensureNode(GeoPoint p) {
+      final key = '${p.latitude.toStringAsFixed(6)},${p.longitude.toStringAsFixed(6)}';
+      final existing = nodeIndexByKey[key];
+      if (existing != null) return existing;
+      final idx = nodes.length;
+      nodes.add(p);
+      nodeIndexByKey[key] = idx;
+      adjacency[idx] = <int, double>{};
+      return idx;
+    }
+
+    void addEdge(int a, int b) {
+      if (a == b) return;
+      final pa = nodes[a];
+      final pb = nodes[b];
+      final distance = Geolocator.distanceBetween(
+        pa.latitude,
+        pa.longitude,
+        pb.latitude,
+        pb.longitude,
+      );
+      final existingAB = adjacency[a]![b];
+      if (existingAB == null || distance < existingAB) {
+        adjacency[a]![b] = distance;
+      }
+      final existingBA = adjacency[b]![a];
+      if (existingBA == null || distance < existingBA) {
+        adjacency[b]![a] = distance;
+      }
+    }
+
+    for (final street in streets) {
+      if (street.length < 2) continue;
+      var previous = ensureNode(street.first);
+      for (var i = 1; i < street.length; i++) {
+        final current = ensureNode(street[i]);
+        addEdge(previous, current);
+        previous = current;
+      }
+    }
+    if (nodes.length < 2) return const <GeoPoint>[];
+
+    final startNode = _nearestNodeIndex(nodes, start);
+    final targetNode = _nearestNodeIndex(nodes, target);
+    if (startNode == -1 || targetNode == -1) return const <GeoPoint>[];
+
+    final distances = <int, double>{};
+    final previous = <int, int>{};
+    final visited = <int>{};
+    for (var i = 0; i < nodes.length; i++) {
+      distances[i] = double.infinity;
+    }
+    distances[startNode] = 0;
+
+    while (visited.length < nodes.length) {
+      int? current;
+      var currentDistance = double.infinity;
+      for (var i = 0; i < nodes.length; i++) {
+        if (visited.contains(i)) continue;
+        final d = distances[i] ?? double.infinity;
+        if (d < currentDistance) {
+          currentDistance = d;
+          current = i;
+        }
+      }
+      if (current == null || currentDistance == double.infinity) break;
+      if (current == targetNode) break;
+      visited.add(current);
+
+      final neighbors = adjacency[current] ?? const <int, double>{};
+      for (final entry in neighbors.entries) {
+        final next = entry.key;
+        if (visited.contains(next)) continue;
+        final candidate = currentDistance + entry.value;
+        if (candidate < (distances[next] ?? double.infinity)) {
+          distances[next] = candidate;
+          previous[next] = current;
+        }
+      }
+    }
+
+    if ((distances[targetNode] ?? double.infinity) == double.infinity) {
+      return const <GeoPoint>[];
+    }
+
+    final reversePath = <GeoPoint>[nodes[targetNode]];
+    var cursor = targetNode;
+    while (cursor != startNode) {
+      final prev = previous[cursor];
+      if (prev == null) break;
+      cursor = prev;
+      reversePath.add(nodes[cursor]);
+    }
+    final pathOnStreets = reversePath.reversed.toList(growable: false);
+    return <GeoPoint>[
+      start,
+      ...pathOnStreets,
+      target,
+    ];
+  }
+
+  int _nearestNodeIndex(List<GeoPoint> nodes, GeoPoint target) {
+    var best = -1;
+    var bestDistance = double.infinity;
+    for (var i = 0; i < nodes.length; i++) {
+      final p = nodes[i];
+      final d = Geolocator.distanceBetween(
+        p.latitude,
+        p.longitude,
+        target.latitude,
+        target.longitude,
+      );
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = i;
+      }
+    }
+    return best;
   }
 
   int _nearestPointIndex(List<GeoPoint> points, GeoPoint target) {
