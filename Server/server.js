@@ -2,6 +2,7 @@ import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -28,6 +29,19 @@ const GAME_TTL_MS = Math.max(
 const FINISHED_GAME_TTL_MS = Math.max(
   5_000,
   Number.parseInt(process.env.FINISHED_GAME_TTL_MS || '30000', 10) || 30_000
+);
+const ENABLE_COST_METRICS =
+  process.env.ENABLE_COST_METRICS === undefined
+    ? true
+    : process.env.ENABLE_COST_METRICS === '1' ||
+      /^true$/i.test(process.env.ENABLE_COST_METRICS || '');
+const COST_METRICS_INTERVAL_MS = Math.max(
+  5_000,
+  Number.parseInt(process.env.COST_METRICS_INTERVAL_MS || '60000', 10) || 60_000
+);
+const COST_METRICS_HISTORY_SIZE = Math.max(
+  10,
+  Number.parseInt(process.env.COST_METRICS_HISTORY_SIZE || '120', 10) || 120
 );
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -73,6 +87,73 @@ const getRemainingTimeSeconds = (game) => {
   // Mode léger: éviter tout calcul temps réel côté serveur.
   // Le client host reste source de vérité pour le chrono.
   return game.remainingTimeSeconds;
+};
+
+const COST_METRICS_PATH = '/monitoring/cost';
+let costMetricsLastCpuUsage = process.cpuUsage();
+let costMetricsLastHrtimeNs = process.hrtime.bigint();
+let costMetricsLastTotalMessages = 0;
+let latestCostMetrics = null;
+const costMetricsHistory = [];
+
+const buildCostMetricsSample = () => {
+  const now = new Date();
+  const nowHr = process.hrtime.bigint();
+  const elapsedNs = Number(nowHr - costMetricsLastHrtimeNs);
+  const elapsedMs = Math.max(elapsedNs / 1e6, 1);
+
+  const cpuNow = process.cpuUsage();
+  const cpuUserUs = Math.max(0, cpuNow.user - costMetricsLastCpuUsage.user);
+  const cpuSystemUs = Math.max(0, cpuNow.system - costMetricsLastCpuUsage.system);
+  const cpuTotalMs = (cpuUserUs + cpuSystemUs) / 1000;
+  const cpuCoreCount = Math.max(1, os.cpus()?.length || 1);
+  const cpuPercentOfSingleCore = Math.min(100, (cpuTotalMs / elapsedMs) * 100);
+  const cpuPercentOfMachine = Math.min(
+    100,
+    (cpuTotalMs / (elapsedMs * cpuCoreCount)) * 100
+  );
+
+  const mem = process.memoryUsage();
+  const totalMessages = totalSocketMessages;
+  const messageDelta = Math.max(0, totalMessages - costMetricsLastTotalMessages);
+  const messagesPerSecond = (messageDelta * 1000) / elapsedMs;
+
+  const sample = {
+    timestampIso: now.toISOString(),
+    intervalMs: Math.round(elapsedMs),
+    connectedClients: clients.size,
+    activeLobbies: lobbies.size,
+    activeGames: games.size,
+    socketMessagesTotal: totalMessages,
+    socketMessagesDelta: messageDelta,
+    socketMessagesPerSecond: Number(messagesPerSecond.toFixed(2)),
+    cpu: {
+      coreCount: cpuCoreCount,
+      userMs: Number((cpuUserUs / 1000).toFixed(2)),
+      systemMs: Number((cpuSystemUs / 1000).toFixed(2)),
+      totalMs: Number(cpuTotalMs.toFixed(2)),
+      percentSingleCore: Number(cpuPercentOfSingleCore.toFixed(2)),
+      percentMachine: Number(cpuPercentOfMachine.toFixed(2))
+    },
+    memory: {
+      rssBytes: mem.rss,
+      heapUsedBytes: mem.heapUsed,
+      heapTotalBytes: mem.heapTotal,
+      externalBytes: mem.external,
+      arrayBuffersBytes: mem.arrayBuffers || 0
+    }
+  };
+
+  costMetricsLastCpuUsage = cpuNow;
+  costMetricsLastHrtimeNs = nowHr;
+  costMetricsLastTotalMessages = totalMessages;
+  latestCostMetrics = sample;
+  costMetricsHistory.push(sample);
+  if (costMetricsHistory.length > COST_METRICS_HISTORY_SIZE) {
+    costMetricsHistory.splice(0, costMetricsHistory.length - COST_METRICS_HISTORY_SIZE);
+  }
+
+  return sample;
 };
 
 // Fonction pour obtenir les statistiques du serveur
@@ -136,12 +217,32 @@ const getServerStats = () => ({
     uptime: process.uptime(),
     memoryUsage: process.memoryUsage()
   },
+  costMetrics: {
+    enabled: ENABLE_COST_METRICS,
+    intervalMs: COST_METRICS_INTERVAL_MS,
+    latest: latestCostMetrics
+  },
   logs: logs.slice(-50).reverse() // 50 derniers logs, plus récent en premier
 });
 
 // HTTP minimal : handshake Engine.IO / Socket.IO uniquement sur SOCKET_IO_PATH
 const server = createServer((req, res) => {
   const url = req.url || '';
+  if (url === COST_METRICS_PATH || url.startsWith(`${COST_METRICS_PATH}?`)) {
+    const requestUrl = new URL(url, 'http://localhost');
+    const includeHistory = requestUrl.searchParams.get('history') === '1';
+    const payload = {
+      enabled: ENABLE_COST_METRICS,
+      intervalMs: COST_METRICS_INTERVAL_MS,
+      latest: latestCostMetrics,
+      ...(includeHistory
+        ? { history: costMetricsHistory.slice(-COST_METRICS_HISTORY_SIZE) }
+        : {})
+    };
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(payload));
+    return;
+  }
   if (
     url === SOCKET_IO_PATH ||
     url.startsWith(`${SOCKET_IO_PATH}/`) ||
@@ -2576,6 +2677,14 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
   void gracefulPersistAndExit('SIGTERM');
 });
+
+if (ENABLE_COST_METRICS) {
+  buildCostMetricsSample();
+  setInterval(() => {
+    const sample = buildCostMetricsSample();
+    log('[COST_METRICS]', sample);
+  }, COST_METRICS_INTERVAL_MS).unref();
+}
 
 server.listen(PORT, () => {
   const address = server.address();
