@@ -268,10 +268,24 @@ class GameController extends ChangeNotifier {
         if (payload is Map) {
           final id = payload['playerId']?.toString();
           if (id != null && id.isNotEmpty) {
+            final oldId = payload['oldPlayerId']?.toString();
+            if (oldId != null && oldId.isNotEmpty && oldId != id) {
+              players.removeWhere((p) => p.id == oldId);
+            }
             final idx = players.indexWhere((p) => p.id == id);
             final role = payload['role']?.toString();
             final status = payload['status']?.toString() ?? 'active';
             final name = payload['playerName']?.toString() ?? 'Joueur';
+            // Defensive dedupe for transient reconnect states:
+            // keep newest socket id and remove stale same-name entries.
+            players.removeWhere(
+              (p) =>
+                  p.id != id &&
+                  p.name.toLowerCase() == name.toLowerCase() &&
+                  (p.status.toLowerCase() == 'disconnected' ||
+                      p.role == null ||
+                      p.role!.isEmpty),
+            );
             if (idx == -1) {
               players.add(
                 GamePlayer(
@@ -913,6 +927,7 @@ class GameController extends ChangeNotifier {
   bool get canHostStartGame {
     if (!isHost || gameStarted) return false;
     final relevant = players.where((p) {
+      if ((p.status).toLowerCase() == 'disconnected') return false;
       final role = (p.role ?? '').toUpperCase();
       return role == 'AGENT' || role == 'ROGUE';
     }).toList(growable: false);

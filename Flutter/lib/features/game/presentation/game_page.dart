@@ -21,8 +21,9 @@ class GamePage extends StatefulWidget {
   State<GamePage> createState() => _GamePageState();
 }
 
-class _GamePageState extends State<GamePage> {
+class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin {
   late final GameController _controller;
+  late final AnimationController _guidancePulseController;
   final TextEditingController _chatController = TextEditingController();
   bool _chatOpen = false;
   int _lastReadCount = 0;
@@ -31,11 +32,18 @@ class _GamePageState extends State<GamePage> {
   @override
   void initState() {
     super.initState();
+    _guidancePulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1300),
+      lowerBound: 0,
+      upperBound: 1,
+    )..repeat(reverse: true);
     _controller = GameController()..initialize(widget.bootstrap);
   }
 
   @override
   void dispose() {
+    _guidancePulseController.dispose();
     _chatController.dispose();
     _controller.dispose();
     super.dispose();
@@ -44,7 +52,10 @@ class _GamePageState extends State<GamePage> {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: _controller,
+      animation: Listenable.merge(<Listenable>[
+        _controller,
+        _guidancePulseController,
+      ]),
       builder: (context, _) {
         final effectiveGameConfig =
             _controller.liveGameConfig ?? widget.bootstrap.gameConfig;
@@ -59,6 +70,7 @@ class _GamePageState extends State<GamePage> {
             50;
         final roleUpper = (_controller.playerRole ?? '').toUpperCase();
         final isRogue = roleUpper == 'ROGUE';
+        final guidanceColor = isRogue ? Colors.green : Colors.blue;
         final objectiveDisplayPoints = isRogue
             ? _controller.objectives
                 .where((o) => !o.captured)
@@ -202,8 +214,14 @@ class _GamePageState extends State<GamePage> {
                               guidancePath: _controller.gameStarted
                                   ? const <GeoPoint>[]
                                   : _controller.buildPathToMyStartZone(),
+                              guidancePathColor: guidanceColor,
+                              guidancePathDotted: true,
+                              guidanceNeonPulse: _guidancePulseController.value,
                               playerPositions: _controller.players
                                   .where(_controller.isPlayerVisibleForCurrentRole)
+                                  .where(
+                                    (p) => p.status.toLowerCase() != 'disconnected',
+                                  )
                                   .where((p) =>
                                       p.latitude != null && p.longitude != null)
                                   .map((p) => GeoPoint(
@@ -251,7 +269,13 @@ class _GamePageState extends State<GamePage> {
                                     ),
                                   ),
                                   const SizedBox(height: 6),
-                                  ..._controller.players.map((player) {
+                                  ..._controller.players
+                                      .where(
+                                        (player) =>
+                                            player.status.toLowerCase() !=
+                                            'disconnected',
+                                      )
+                                      .map((player) {
                                     final inZone =
                                         _controller.isPlayerInStartZone(player);
                                     final role =

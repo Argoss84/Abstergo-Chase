@@ -2111,7 +2111,11 @@ io.on('connection', (socket) => {
       }
 
       if (game.hostId === playerId) {
-        game.players.delete(playerId);
+        const leavingHost = game.players.get(playerId);
+        if (leavingHost) {
+          leavingHost.status = 'disconnected';
+          leavingHost.isHost = false;
+        }
         const transferred = transferGameHost({
           code,
           oldHostId: playerId,
@@ -2438,7 +2442,11 @@ io.on('connection', (socket) => {
           if (games.has(gameCode) && games.get(gameCode).hostId === clientInfo.clientId) {
             const currentGame = games.get(gameCode);
             if (currentGame) {
-              currentGame.players.delete(clientInfo.clientId);
+              const hostPlayer = currentGame.players.get(clientInfo.clientId);
+              if (hostPlayer) {
+                hostPlayer.status = 'disconnected';
+                hostPlayer.isHost = false;
+              }
               const transferred = transferGameHost({
                 code: gameCode,
                 oldHostId: clientInfo.clientId,

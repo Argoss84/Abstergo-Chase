@@ -22,6 +22,9 @@ class LobbyMapPreview extends StatelessWidget {
     this.objectiveMarkerSize = 18,
     this.playerPositions = const <GeoPoint>[],
     this.guidancePath = const <GeoPoint>[],
+    this.guidancePathColor = Colors.deepPurple,
+    this.guidancePathDotted = false,
+    this.guidanceNeonPulse = 0,
     this.height = 260,
   });
 
@@ -40,6 +43,9 @@ class LobbyMapPreview extends StatelessWidget {
   final double objectiveMarkerSize;
   final List<GeoPoint> playerPositions;
   final List<GeoPoint> guidancePath;
+  final Color guidancePathColor;
+  final bool guidancePathDotted;
+  final double guidanceNeonPulse;
   final double? height;
 
   @override
@@ -128,8 +134,21 @@ class LobbyMapPreview extends StatelessWidget {
                     points: guidancePath
                         .map((p) => LatLng(p.latitude, p.longitude))
                         .toList(growable: false),
+                    strokeWidth: 9 + (guidanceNeonPulse * 3),
+                    color: guidancePathColor.withOpacity(
+                      0.20 + (guidanceNeonPulse * 0.35),
+                    ),
+                    isDotted: false,
+                  ),
+                  Polyline(
+                    points: guidancePath
+                        .map((p) => LatLng(p.latitude, p.longitude))
+                        .toList(growable: false),
                     strokeWidth: 4,
-                    color: Colors.deepPurple,
+                    color: guidancePathColor.withOpacity(
+                      0.80 + (guidanceNeonPulse * 0.20),
+                    ),
+                    isDotted: guidancePathDotted,
                   ),
                 ],
               ),
