@@ -71,6 +71,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
         final roleUpper = (_controller.playerRole ?? '').toUpperCase();
         final isRogue = roleUpper == 'ROGUE';
         final guidanceColor = isRogue ? Colors.green : Colors.blue;
+        final rogueCaptureRemaining = _controller.rogueCaptureRemainingSeconds;
+        final rogueCaptureProgress = _controller.rogueCaptureProgress;
         final objectiveDisplayPoints = isRogue
             ? _controller.objectives
                 .where((o) => !o.captured)
@@ -86,6 +88,19 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                   ),
                 )
                 .toList(growable: false);
+        final capturingDisplayPoints = !isRogue
+            ? _controller.objectives
+                .where((o) => !o.captured)
+                .where((o) => o.state.toUpperCase() == 'CAPTURING')
+                .map(
+                  (o) => _shiftedZoneCenter(
+                    objective: o.point,
+                    objectiveId: o.id,
+                    zoneRadiusMeters: objectiveZoneRadius.toDouble(),
+                  ),
+                )
+                .toList(growable: false)
+            : const <GeoPoint>[];
 
         return Scaffold(
           extendBodyBehindAppBar: true,
@@ -217,6 +232,10 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                               guidancePathColor: guidanceColor,
                               guidancePathDotted: true,
                               guidanceNeonPulse: _guidancePulseController.value,
+                              highlightObjectiveZones: capturingDisplayPoints,
+                              highlightObjectiveZoneRadiusMeters: objectiveZoneRadius,
+                              highlightObjectivePulse:
+                                  _guidancePulseController.value,
                               playerPositions: _controller.players
                                   .where(_controller.isPlayerVisibleForCurrentRole)
                                   .where(
@@ -240,6 +259,16 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                           color: Colors.red.shade100,
                           padding: const EdgeInsets.all(8),
                           child: Text(_controller.error!),
+                        ),
+                      ),
+                    if (isRogue && rogueCaptureRemaining != null)
+                      Positioned(
+                        top: topInset,
+                        left: 12,
+                        right: 12,
+                        child: _buildRogueCaptureFeedback(
+                          remainingSeconds: rogueCaptureRemaining,
+                          progress: rogueCaptureProgress,
                         ),
                       ),
                     Positioned(
@@ -392,12 +421,74 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     );
   }
 
+  Widget _buildRogueCaptureFeedback({
+    required int remainingSeconds,
+    required double progress,
+  }) {
+    final clamped = remainingSeconds < 0 ? 0 : remainingSeconds;
+    final clampedProgress = progress < 0
+        ? 0.0
+        : (progress > 1 ? 1.0 : progress);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.red.shade700.withOpacity(0.88),
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.redAccent.withOpacity(0.45),
+            blurRadius: 14,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.terminal, color: Colors.white),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Capture en cours... ${clamped}s',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text(
+                '${(clampedProgress * 100).round()}%',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              minHeight: 8,
+              value: clampedProgress,
+              backgroundColor: Colors.white.withOpacity(0.25),
+              valueColor: const AlwaysStoppedAnimation<Color>(Colors.orangeAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildActionFabMenu() {
     final role = (_controller.playerRole ?? '').toUpperCase();
     final roleActionIcon =
-        role == 'ROGUE' ? Icons.radio_button_checked : Icons.warning_amber;
+        role == 'ROGUE' ? Icons.terminal : Icons.warning_amber;
     final roleActionLabel =
-        role == 'ROGUE' ? 'Action rogue' : 'Détection menace';
+        role == 'ROGUE' ? 'Hacker objectif' : 'Détection menace';
+    final rogueActionReady = role == 'ROGUE' && _controller.canTriggerRogueObjectiveCapture;
     return SizedBox(
       width: 280,
       height: 220,
@@ -441,7 +532,30 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
               child: _miniActionFab(
                 icon: roleActionIcon,
                 tooltip: roleActionLabel,
-                onTap: () => _showFabPlaceholder(roleActionLabel),
+                onTap: () {
+                  if (role == 'ROGUE') {
+                    if (_controller.isAnyObjectiveCapturing) {
+                      _showFabPlaceholder('Capture déjà en cours');
+                      return;
+                    }
+                    if (!_controller.canTriggerRogueObjectiveCapture) {
+                      _showFabPlaceholder('Aucun objectif a portée');
+                      return;
+                    }
+                    setState(() => _isActionFabOpen = false);
+                    _controller.triggerRogueSpecialAction();
+                    return;
+                  }
+                  _showFabPlaceholder(roleActionLabel);
+                },
+                backgroundColor: rogueActionReady
+                    ? Colors.red.shade700
+                    : Colors.white,
+                foregroundColor: rogueActionReady
+                    ? Colors.white
+                    : Colors.black87,
+                pulseAura: rogueActionReady,
+                pulseValue: _guidancePulseController.value,
               ),
             ),
           Positioned(
@@ -481,15 +595,33 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     required IconData icon,
     required String tooltip,
     required VoidCallback onTap,
+    Color backgroundColor = Colors.white,
+    Color foregroundColor = Colors.black87,
+    bool pulseAura = false,
+    double pulseValue = 0,
   }) {
-    return FloatingActionButton(
-      heroTag: 'game-action-${icon.codePoint}-$tooltip',
-      mini: true,
-      tooltip: tooltip,
-      onPressed: onTap,
-      backgroundColor: Colors.white,
-      foregroundColor: Colors.black87,
-      child: Icon(icon),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        boxShadow: pulseAura
+            ? <BoxShadow>[
+                BoxShadow(
+                  color: Colors.redAccent.withOpacity(0.35 + (pulseValue * 0.45)),
+                  blurRadius: 8 + (pulseValue * 14),
+                  spreadRadius: 1 + (pulseValue * 4),
+                ),
+              ]
+            : const <BoxShadow>[],
+      ),
+      child: FloatingActionButton(
+        heroTag: 'game-action-${icon.codePoint}-$tooltip',
+        mini: true,
+        tooltip: tooltip,
+        onPressed: onTap,
+        backgroundColor: backgroundColor,
+        foregroundColor: foregroundColor,
+        child: Icon(icon),
+      ),
     );
   }
 

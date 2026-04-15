@@ -59,6 +59,8 @@ class GameController extends ChangeNotifier {
   bool _joinInFlight = false;
   bool _requestedInitialSync = false;
   int _lastJoinAttemptMs = 0;
+  final Map<String, int> _objectiveCaptureEndAtMs = <String, int>{};
+  final Map<String, int> _objectiveCaptureSeenAtMs = <String, int>{};
 
   LobbyGameConfig? get _effectiveGameConfig => liveGameConfig ?? bootstrap?.gameConfig;
 
@@ -68,6 +70,22 @@ class GameController extends ChangeNotifier {
     final fromConfig = _effectiveGameConfig?.durationSeconds;
     if (fromConfig != null && fromConfig > 0) return fromConfig;
     return 900;
+  }
+
+  int _configuredHackDurationMs() {
+    final fromForm = bootstrap?.lobby.form?.hackDurationMs;
+    if (fromForm != null && fromForm > 0) return fromForm;
+    final fromConfig = _effectiveGameConfig?.hackDurationMs;
+    if (fromConfig != null && fromConfig > 0) return fromConfig;
+    return 10000;
+  }
+
+  double _configuredRogueRangeMeters() {
+    final fromForm = bootstrap?.lobby.form?.rogueRange;
+    if (fromForm != null && fromForm > 0) return fromForm.toDouble();
+    final fromConfig = _effectiveGameConfig?.rogueRange;
+    if (fromConfig != null && fromConfig > 0) return fromConfig.toDouble();
+    return 120;
   }
 
   Future<void> initialize(GameBootstrapData data) async {
@@ -236,6 +254,7 @@ class GameController extends ChangeNotifier {
       if (remainingSeconds! % 2 == 0) {
         _pushSnapshot();
       }
+      _tickObjectiveCapturesIfHost();
       notifyListeners();
     });
   }
@@ -466,6 +485,7 @@ class GameController extends ChangeNotifier {
         Map<String, dynamic>.from(gameConfigRaw),
       );
     }
+    _refreshObjectiveCaptureTrackingFromStates();
     final selfPlayer = players.where((p) => p.id == playerId);
     playerRole = selfPlayer.isEmpty ? null : selfPlayer.first.role;
     if (host != null) {
@@ -524,6 +544,7 @@ class GameController extends ChangeNotifier {
           ..clear()
           ..addAll(next);
       }
+      _refreshObjectiveCaptureTrackingFromStates();
     }
     final playersRaw = payload['players'];
     if (playersRaw is List) {
@@ -614,6 +635,10 @@ class GameController extends ChangeNotifier {
     final action = payload['action'];
     if (fromId == null || action is! Map) return;
     final type = action['type']?.toString();
+    if (type == 'rogue-capture-request') {
+      _handleRogueCaptureRequest(fromId);
+      return;
+    }
     if (type != 'position-update') return;
     final lat = double.tryParse(action['latitude']?.toString() ?? '');
     final lng = double.tryParse(action['longitude']?.toString() ?? '');
@@ -625,7 +650,88 @@ class GameController extends ChangeNotifier {
       longitude: lng,
     );
     _pushSnapshotThrottled();
+    _tickObjectiveCapturesIfHost();
     notifyListeners();
+  }
+
+  void _handleRogueCaptureRequest(String roguePlayerId) {
+    final objectiveId = _nearestHackableObjectiveIdForPlayer(roguePlayerId);
+    if (objectiveId == null) return;
+    if (_objectiveCaptureEndAtMs.containsKey(objectiveId)) return;
+    final idx = objectives.indexWhere((o) => o.id == objectiveId);
+    if (idx == -1) return;
+    final current = objectives[idx];
+    if (current.captured) return;
+    objectives[idx] = current.copyWith(state: 'CAPTURING');
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _objectiveCaptureSeenAtMs[objectiveId] = now;
+    _objectiveCaptureEndAtMs[objectiveId] = now + _configuredHackDurationMs();
+    _pushSnapshot();
+    notifyListeners();
+  }
+
+  String? _nearestHackableObjectiveIdForPlayer(String playerIdToCheck) {
+    final p = players.where((p) => p.id == playerIdToCheck).toList(growable: false);
+    if (p.isEmpty) return null;
+    final player = p.first;
+    if ((player.role ?? '').toUpperCase() != 'ROGUE') return null;
+    if (player.latitude == null || player.longitude == null) return null;
+    final rangeMeters = _configuredRogueRangeMeters();
+    String? bestId;
+    var bestDistance = double.infinity;
+    for (final objective in objectives) {
+      if (objective.captured) continue;
+      if (objective.state.toUpperCase() == 'CAPTURING') continue;
+      final d = Geolocator.distanceBetween(
+        player.latitude!,
+        player.longitude!,
+        objective.point.latitude,
+        objective.point.longitude,
+      );
+      if (d <= rangeMeters && d < bestDistance) {
+        bestDistance = d;
+        bestId = objective.id;
+      }
+    }
+    return bestId;
+  }
+
+  void _tickObjectiveCapturesIfHost() {
+    if (!isHost || _objectiveCaptureEndAtMs.isEmpty) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    var changed = false;
+    final doneIds = <String>[];
+    for (final entry in _objectiveCaptureEndAtMs.entries) {
+      if (entry.value > now) continue;
+      doneIds.add(entry.key);
+    }
+    for (final id in doneIds) {
+      _objectiveCaptureEndAtMs.remove(id);
+      _objectiveCaptureSeenAtMs.remove(id);
+      final idx = objectives.indexWhere((o) => o.id == id);
+      if (idx == -1) continue;
+      final objective = objectives[idx];
+      if (objective.captured) continue;
+      objectives[idx] = objective.copyWith(state: 'CAPTURED');
+      changed = true;
+    }
+    if (changed) {
+      _pushSnapshot();
+      notifyListeners();
+    }
+  }
+
+  void _refreshObjectiveCaptureTrackingFromStates() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final activeIds = objectives
+        .where((o) => o.state.toUpperCase() == 'CAPTURING')
+        .map((o) => o.id)
+        .toSet();
+    for (final id in activeIds) {
+      _objectiveCaptureSeenAtMs[id] ??= now;
+    }
+    _objectiveCaptureSeenAtMs.removeWhere((id, _) => !activeIds.contains(id));
+    _objectiveCaptureEndAtMs.removeWhere((id, _) => !activeIds.contains(id));
   }
 
   String? _winnerTypeIfAny() {
@@ -727,6 +833,72 @@ class GameController extends ChangeNotifier {
   }
 
   GeoPoint? get myStartZone => _startZoneForRole(playerRole);
+
+  bool get canTriggerRogueObjectiveCapture {
+    final me = playerId;
+    if (me == null || me.isEmpty) return false;
+    if (isAnyObjectiveCapturing) return false;
+    return _nearestHackableObjectiveIdForPlayer(me) != null;
+  }
+
+  bool get isRogueRole => (playerRole ?? '').toUpperCase() == 'ROGUE';
+
+  bool get isAnyObjectiveCapturing =>
+      objectives.any((o) => o.state.toUpperCase() == 'CAPTURING');
+
+  int? get rogueCaptureRemainingSeconds {
+    if (!isRogueRole || !isAnyObjectiveCapturing) return null;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    int? remainingMs;
+    if (_objectiveCaptureEndAtMs.isNotEmpty) {
+      for (final endAt in _objectiveCaptureEndAtMs.values) {
+        final remaining = endAt - now;
+        if (remainingMs == null || remaining < remainingMs) {
+          remainingMs = remaining;
+        }
+      }
+    } else if (_objectiveCaptureSeenAtMs.isNotEmpty) {
+      final hackDuration = _configuredHackDurationMs();
+      for (final startedAt in _objectiveCaptureSeenAtMs.values) {
+        final remaining = (startedAt + hackDuration) - now;
+        if (remainingMs == null || remaining < remainingMs) {
+          remainingMs = remaining;
+        }
+      }
+    }
+    if (remainingMs == null) return null;
+    if (remainingMs <= 0) return 0;
+    return (remainingMs / 1000).ceil();
+  }
+
+  int get configuredHackDurationMs => _configuredHackDurationMs();
+
+  double get rogueCaptureProgress {
+    final remaining = rogueCaptureRemainingSeconds;
+    if (remaining == null) return 0;
+    final totalMs = configuredHackDurationMs;
+    if (totalMs <= 0) return 0;
+    final remainingMs = remaining * 1000;
+    final progress = 1 - (remainingMs / totalMs);
+    if (progress < 0) return 0;
+    if (progress > 1) return 1;
+    return progress;
+  }
+
+  void triggerRogueSpecialAction() {
+    if (!isRogueRole || !gameStarted) return;
+    final me = playerId;
+    if (me == null || me.isEmpty) return;
+    if (isAnyObjectiveCapturing) return;
+    if (isHost) {
+      _handleRogueCaptureRequest(me);
+      return;
+    }
+    _socketService.sendGameAction(<String, dynamic>{
+      'type': 'rogue-capture-request',
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
 
   List<GeoPoint> buildPathToMyStartZone() {
     final start = myPosition;

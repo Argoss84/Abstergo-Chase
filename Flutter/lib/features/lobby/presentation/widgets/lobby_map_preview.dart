@@ -25,6 +25,9 @@ class LobbyMapPreview extends StatelessWidget {
     this.guidancePathColor = Colors.deepPurple,
     this.guidancePathDotted = false,
     this.guidanceNeonPulse = 0,
+    this.highlightObjectiveZones = const <GeoPoint>[],
+    this.highlightObjectiveZoneRadiusMeters = 0,
+    this.highlightObjectivePulse = 0,
     this.height = 260,
   });
 
@@ -46,6 +49,9 @@ class LobbyMapPreview extends StatelessWidget {
   final Color guidancePathColor;
   final bool guidancePathDotted;
   final double guidanceNeonPulse;
+  final List<GeoPoint> highlightObjectiveZones;
+  final int highlightObjectiveZoneRadiusMeters;
+  final double highlightObjectivePulse;
   final double? height;
 
   @override
@@ -85,6 +91,40 @@ class LobbyMapPreview extends StatelessWidget {
                       color: Colors.red.withOpacity(0.08),
                       borderStrokeWidth: 1,
                       borderColor: Colors.red,
+                    ),
+                  ),
+                if (showObjectives &&
+                    showObjectiveZones &&
+                    highlightObjectiveZoneRadiusMeters > 0)
+                  ...highlightObjectiveZones.map(
+                    (p) => CircleMarker(
+                      point: LatLng(p.latitude, p.longitude),
+                      radius: highlightObjectiveZoneRadiusMeters.toDouble(),
+                      useRadiusInMeter: true,
+                      color: Colors.orange.withOpacity(
+                        0.18 + (highlightObjectivePulse * 0.30),
+                      ),
+                      borderStrokeWidth: 2 + (highlightObjectivePulse * 1.4),
+                      borderColor: Colors.deepOrangeAccent.withOpacity(
+                        0.65 + (highlightObjectivePulse * 0.35),
+                      ),
+                    ),
+                  ),
+                if (showObjectives &&
+                    showObjectiveZones &&
+                    highlightObjectiveZoneRadiusMeters > 0)
+                  ...highlightObjectiveZones.map(
+                    (p) => CircleMarker(
+                      point: LatLng(p.latitude, p.longitude),
+                      radius:
+                          highlightObjectiveZoneRadiusMeters.toDouble() +
+                          (18 + (highlightObjectivePulse * 55)),
+                      useRadiusInMeter: true,
+                      color: Colors.transparent,
+                      borderStrokeWidth: 1.8 - (highlightObjectivePulse * 1.0),
+                      borderColor: Colors.deepOrangeAccent.withOpacity(
+                        0.65 - (highlightObjectivePulse * 0.55),
+                      ),
                     ),
                   ),
                 if (agentStartZone != null)
