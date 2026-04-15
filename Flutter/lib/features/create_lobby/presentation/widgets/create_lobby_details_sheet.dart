@@ -22,6 +22,8 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
   late CreateLobbyFormData _form;
   late final TextEditingController _serverController;
   late final TextEditingController _socketPathController;
+  late int _durationMinutes;
+  late int _durationSeconds;
 
   @override
   void initState() {
@@ -30,6 +32,8 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
     _serverController = TextEditingController(text: widget.initialServerUrl);
     _socketPathController =
         TextEditingController(text: widget.initialSocketPath);
+    _durationMinutes = _form.duration ~/ 60;
+    _durationSeconds = _form.duration % 60;
   }
 
   @override
@@ -56,11 +60,7 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
               value: _form.objectiveNumber,
               onChanged: (v) => _form = _form.copyWith(objectiveNumber: v),
             ),
-            _numberField(
-              label: 'Durée (secondes)',
-              value: _form.duration,
-              onChanged: (v) => _form = _form.copyWith(duration: v),
-            ),
+            _durationField(),
             _numberField(
               label: "Objectifs pour victoire",
               value: _form.victoryConditionObjectives,
@@ -134,6 +134,74 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
         onChanged: (raw) => onChanged(int.tryParse(raw) ?? value),
       ),
     );
+  }
+
+  Widget _durationField() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: InputDecorator(
+        decoration: const InputDecoration(
+          border: OutlineInputBorder(),
+          labelText: 'Durée (minutes + secondes)',
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<int>(
+                value: _durationMinutes,
+                decoration: const InputDecoration(
+                  labelText: 'Minutes',
+                  border: OutlineInputBorder(),
+                ),
+                items: List.generate(
+                  61,
+                  (i) => DropdownMenuItem<int>(
+                    value: i,
+                    child: Text(i.toString().padLeft(2, '0')),
+                  ),
+                ),
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() {
+                    _durationMinutes = value;
+                    _applyDuration();
+                  });
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: DropdownButtonFormField<int>(
+                value: _durationSeconds,
+                decoration: const InputDecoration(
+                  labelText: 'Secondes',
+                  border: OutlineInputBorder(),
+                ),
+                items: List.generate(
+                  60,
+                  (i) => DropdownMenuItem<int>(
+                    value: i,
+                    child: Text(i.toString().padLeft(2, '0')),
+                  ),
+                ),
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() {
+                    _durationSeconds = value;
+                    _applyDuration();
+                  });
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _applyDuration() {
+    final total = (_durationMinutes * 60) + _durationSeconds;
+    _form = _form.copyWith(duration: total <= 0 ? 1 : total);
   }
 
   Widget _textField({

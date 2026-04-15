@@ -82,6 +82,7 @@ class LobbyGameConfig {
     required this.mapCenter,
     required this.mapRadius,
     required this.objectiveZoneRadius,
+    required this.durationSeconds,
     required this.startZone,
     required this.rogueStartZone,
     required this.mapStreets,
@@ -91,6 +92,7 @@ class LobbyGameConfig {
   final GeoPoint mapCenter;
   final int mapRadius;
   final int objectiveZoneRadius;
+  final int durationSeconds;
   final GeoPoint? startZone;
   final GeoPoint? rogueStartZone;
   final List<GeoPoint> mapStreets;
@@ -153,6 +155,7 @@ class LobbyGameConfig {
       mapRadius: int.tryParse(raw['map_radius']?.toString() ?? '') ?? 1000,
       objectiveZoneRadius:
           int.tryParse(raw['objectiv_zone_radius']?.toString() ?? '') ?? 50,
+      durationSeconds: int.tryParse(raw['duration']?.toString() ?? '') ?? 900,
       startZone: parsePoint(raw['start_zone_latitude'], raw['start_zone_longitude']),
       rogueStartZone: parsePoint(
         raw['start_zone_rogue_latitude'],

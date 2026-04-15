@@ -62,6 +62,14 @@ class GameController extends ChangeNotifier {
 
   LobbyGameConfig? get _effectiveGameConfig => liveGameConfig ?? bootstrap?.gameConfig;
 
+  int _configuredDurationSeconds() {
+    final fromForm = bootstrap?.lobby.form?.duration;
+    if (fromForm != null && fromForm > 0) return fromForm;
+    final fromConfig = _effectiveGameConfig?.durationSeconds;
+    if (fromConfig != null && fromConfig > 0) return fromConfig;
+    return 900;
+  }
+
   Future<void> initialize(GameBootstrapData data) async {
     bootstrap = data;
     gameCode = data.codeOverride ?? data.lobby.code;
@@ -178,7 +186,13 @@ class GameController extends ChangeNotifier {
     if (!isHost || gameStarted) return;
     gameStarted = true;
     convergingPhase = false;
-    remainingSeconds ??= bootstrap?.lobby.form?.duration ?? 900;
+    // Always start from configured duration, never from stale pre-start sync.
+    remainingSeconds = _configuredDurationSeconds();
+    // Broadcast the initial shared countdown value immediately.
+    _socketService.updateRemainingTime(
+      remaining: remainingSeconds!,
+      countdownStarted: true,
+    );
     _startTimer();
     _pushSnapshot();
     notifyListeners();
@@ -190,6 +204,14 @@ class GameController extends ChangeNotifier {
       if (!isHost || remainingSeconds == null) return;
       if (remainingSeconds! <= 0) {
         _countdownTimer?.cancel();
+        gameStarted = false;
+        convergingPhase = false;
+        _socketService.updateRemainingTime(
+          remaining: 0,
+          countdownStarted: false,
+        );
+        _pushSnapshot();
+        notifyListeners();
         return;
       }
       remainingSeconds = remainingSeconds! - 1;
@@ -197,6 +219,18 @@ class GameController extends ChangeNotifier {
         remaining: remainingSeconds!,
         countdownStarted: true,
       );
+      if (remainingSeconds! == 0) {
+        _countdownTimer?.cancel();
+        gameStarted = false;
+        convergingPhase = false;
+        _socketService.updateRemainingTime(
+          remaining: 0,
+          countdownStarted: false,
+        );
+        _pushSnapshot();
+        notifyListeners();
+        return;
+      }
       if (remainingSeconds! % 2 == 0) {
         _pushSnapshot();
       }
@@ -333,7 +367,8 @@ class GameController extends ChangeNotifier {
           final rem = int.tryParse(payload['remaining_time']?.toString() ?? '');
           if (rem != null) {
             remainingSeconds = rem;
-            gameStarted = true;
+            final started = payload['countdown_started'] == true;
+            gameStarted = started && rem > 0;
             convergingPhase = false;
             notifyListeners();
           }
@@ -412,6 +447,14 @@ class GameController extends ChangeNotifier {
           );
         }));
     }
+    if (game is Map) {
+      final serverRemaining = int.tryParse(
+        game['remainingTimeSeconds']?.toString() ?? '',
+      );
+      if (serverRemaining != null) {
+        remainingSeconds = serverRemaining;
+      }
+    }
     final gameConfigRaw = game is Map ? game['config'] : null;
     if (gameConfigRaw is Map) {
       liveGameConfig = LobbyGameConfig.fromMap(
@@ -445,8 +488,14 @@ class GameController extends ChangeNotifier {
   void _applyStateSync(Map payload) {
     gameStarted = payload['started'] == true || payload['countdown_started'] == true;
     convergingPhase = payload['is_converging_phase'] == true;
-    remainingSeconds = int.tryParse(payload['remaining_time']?.toString() ?? '') ??
-        remainingSeconds;
+    final syncedRemaining =
+        int.tryParse(payload['remaining_time']?.toString() ?? '');
+    if (syncedRemaining != null) {
+      // Avoid clobbering host duration with pre-start zero snapshots.
+      if (gameStarted || syncedRemaining > 0) {
+        remainingSeconds = syncedRemaining;
+      }
+    }
     final props = payload['props'];
     if (props is List && props.isNotEmpty) {
       final next = <GameObjective>[];
