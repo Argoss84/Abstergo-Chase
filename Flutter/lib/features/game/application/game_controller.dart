@@ -74,6 +74,7 @@ class GameController extends ChangeNotifier {
     bootstrap = data;
     gameCode = data.codeOverride ?? data.lobby.code;
     playerId = data.playerId;
+    remainingSeconds = _configuredDurationSeconds();
     players
       ..clear()
       ..addAll(data.players.map((p) {
@@ -187,7 +188,8 @@ class GameController extends ChangeNotifier {
     gameStarted = true;
     convergingPhase = false;
     // Always start from configured duration, never from stale pre-start sync.
-    remainingSeconds = _configuredDurationSeconds();
+    final configured = _configuredDurationSeconds();
+    remainingSeconds = configured > 0 ? configured : 900;
     // Broadcast the initial shared countdown value immediately.
     _socketService.updateRemainingTime(
       remaining: remainingSeconds!,
@@ -452,7 +454,10 @@ class GameController extends ChangeNotifier {
         game['remainingTimeSeconds']?.toString() ?? '',
       );
       if (serverRemaining != null) {
-        remainingSeconds = serverRemaining;
+        final countdownActive = game['remainingTimeCountdownActive'] == true;
+        if (countdownActive || serverRemaining > 0) {
+          remainingSeconds = serverRemaining;
+        }
       }
     }
     final gameConfigRaw = game is Map ? game['config'] : null;
@@ -649,18 +654,6 @@ class GameController extends ChangeNotifier {
     final role = playerRole ?? 'AGENT';
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
-    roleChat.add(
-      GameChatMessage(
-        playerId: playerId ?? '',
-        playerName: bootstrap?.lobby.playerName ?? 'Moi',
-        text: trimmed,
-        timestampMs: DateTime.now().millisecondsSinceEpoch,
-      ),
-    );
-    if (roleChat.length > 150) {
-      roleChat.removeRange(0, roleChat.length - 150);
-    }
-    notifyListeners();
     _socketService.sendRoleChat(role: role, text: trimmed);
   }
 

@@ -198,6 +198,7 @@ class CreateLobbyController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final safeDuration = form.duration > 0 ? form.duration : 900;
       final session = await _service.createLobby(
         playerName: displayName.trim(),
         serverUrl: uri,
@@ -205,7 +206,7 @@ class CreateLobbyController extends ChangeNotifier {
             socketPath.trim().isEmpty ? '/socket.io' : socketPath.trim(),
         gameConfig: <String, dynamic>{
           'objectif_number': form.objectiveNumber,
-          'duration': form.duration,
+          'duration': safeDuration,
           'victory_condition_nb_objectivs': form.victoryConditionObjectives,
           'hack_duration_ms': form.hackDurationMs,
           'objectiv_zone_radius': form.objectiveZoneRadius,
