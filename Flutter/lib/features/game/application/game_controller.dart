@@ -411,6 +411,7 @@ class GameController extends ChangeNotifier {
                 status: status,
               );
             }
+            _dedupePlayers();
             notifyListeners();
           }
         }
@@ -451,6 +452,7 @@ class GameController extends ChangeNotifier {
       case 'state:sync':
         if (payload is Map) {
           _applyStateSync(payload);
+          _dedupePlayers();
           notifyListeners();
         }
         return;
@@ -643,6 +645,44 @@ class GameController extends ChangeNotifier {
       final me = players.where((p) => p.id == playerId);
       playerRole = me.isEmpty ? playerRole : me.first.role;
     }
+  }
+
+  void _dedupePlayers() {
+    if (players.length < 2) return;
+    final byId = <String, GamePlayer>{};
+    for (final p in players) {
+      if (p.id.isEmpty) continue;
+      byId[p.id] = p;
+    }
+    var next = byId.values.toList(growable: false);
+
+    // Dedupe by (name, role) to reduce reconnection artifacts.
+    final grouped = <String, List<GamePlayer>>{};
+    for (final p in next) {
+      final key = '${p.name.toLowerCase()}|${(p.role ?? '').toUpperCase()}';
+      (grouped[key] ??= <GamePlayer>[]).add(p);
+    }
+    final deduped = <GamePlayer>[];
+    for (final entry in grouped.entries) {
+      final list = entry.value;
+      if (list.length == 1) {
+        deduped.add(list.first);
+        continue;
+      }
+      list.sort((a, b) {
+        final aDisc = a.status.toLowerCase() == 'disconnected';
+        final bDisc = b.status.toLowerCase() == 'disconnected';
+        if (aDisc != bDisc) return aDisc ? 1 : -1;
+        final aPos = (a.latitude != null && a.longitude != null) ? 0 : 1;
+        final bPos = (b.latitude != null && b.longitude != null) ? 0 : 1;
+        if (aPos != bPos) return aPos - bPos;
+        return 0;
+      });
+      deduped.add(list.first);
+    }
+    players
+      ..clear()
+      ..addAll(deduped);
   }
 
   void _pushSnapshot({String? targetId}) {
