@@ -92,6 +92,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
         final rogueCaptureRemaining = _controller.rogueCaptureRemainingSeconds;
         final rogueCaptureProgress = _controller.rogueCaptureProgress;
         final winnerType = _controller.winnerType;
+        final winnerReason = (_controller.winnerReason ?? '').toUpperCase();
         final outOfZone = _controller.isOutOfGameZone;
         final myPos = _controller.myPosition;
         final objectiveDisplayPoints = isRogue
@@ -454,9 +455,10 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                                 ),
                                 const SizedBox(height: 12),
                                 Text(
-                                  (winnerType.toUpperCase() == 'AGENT')
-                                      ? 'Tous les rogues ont été capturés.'
-                                      : 'Le temps est écoulé.',
+                                  _winnerReasonMessage(
+                                    winnerType: winnerType,
+                                    winnerReason: winnerReason,
+                                  ),
                                   textAlign: TextAlign.center,
                                 ),
                                 const SizedBox(height: 16),
@@ -1151,6 +1153,32 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
         ],
       ),
     );
+  }
+
+  String _winnerReasonMessage({
+    required String winnerType,
+    required String winnerReason,
+  }) {
+    final type = winnerType.toUpperCase();
+    if (type == 'ROGUE') {
+      final captured = _controller.objectives.where((o) => o.captured).length;
+      final required = _controller.victoryObjectivesRequired ??
+          widget.bootstrap.lobby.form?.victoryConditionObjectives ??
+          _controller.objectives.length;
+      if (winnerReason == 'OBJECTIVES_CAPTURED') {
+        return 'Objectifs capturés ($captured/$required).';
+      }
+      return 'Objectifs capturés.';
+    }
+
+    // AGENT
+    if (winnerReason == 'ALL_ROGUES_CAPTURED') {
+      return 'Tous les rogues ont été capturés.';
+    }
+    if (winnerReason == 'TIMEOUT') {
+      return 'Le temps est écoulé.';
+    }
+    return 'Victoire confirmée.';
   }
 }
 

@@ -47,6 +47,8 @@ class GameController extends ChangeNotifier {
   bool convergingPhase = true;
   int? remainingSeconds;
   String? winnerType;
+  String? winnerReason;
+  int? victoryObjectivesRequired;
   bool isOutOfGameZone = false;
   final List<GamePlayer> players = <GamePlayer>[];
   final List<GameObjective> objectives = <GameObjective>[];
@@ -97,6 +99,9 @@ class GameController extends ChangeNotifier {
     playerId = data.playerId;
     remainingSeconds = _configuredDurationSeconds();
     winnerType = null;
+    winnerReason = null;
+    final required = data.lobby.form?.victoryConditionObjectives;
+    victoryObjectivesRequired = (required != null && required > 0) ? required : null;
     isOutOfGameZone = false;
     players
       ..clear()
@@ -275,7 +280,8 @@ class GameController extends ChangeNotifier {
       if (!isHost || remainingSeconds == null) return;
       if (remainingSeconds! <= 0) {
         _countdownTimer?.cancel();
-        winnerType ??= 'ROGUE';
+        winnerType ??= 'AGENT';
+        winnerReason ??= 'TIMEOUT';
         gameStarted = false;
         convergingPhase = false;
         _socketService.updateRemainingTime(
@@ -293,7 +299,8 @@ class GameController extends ChangeNotifier {
       );
       if (remainingSeconds! == 0) {
         _countdownTimer?.cancel();
-        winnerType ??= 'ROGUE';
+        winnerType ??= 'AGENT';
+        winnerReason ??= 'TIMEOUT';
         gameStarted = false;
         convergingPhase = false;
         _socketService.updateRemainingTime(
@@ -308,6 +315,7 @@ class GameController extends ChangeNotifier {
         _pushSnapshot();
       }
       _tickObjectiveCapturesIfHost();
+      _evaluateWinConditionsIfHost();
       notifyListeners();
     });
   }
@@ -572,6 +580,13 @@ class GameController extends ChangeNotifier {
     if (details is Map) {
       final winner = details['winner_type']?.toString();
       winnerType = (winner == null || winner.isEmpty) ? winnerType : winner;
+      final reason = details['winner_reason']?.toString();
+      winnerReason = (reason == null || reason.isEmpty) ? winnerReason : reason;
+      final required =
+          int.tryParse(details['victory_objectives_required']?.toString() ?? '');
+      if (required != null && required > 0) {
+        victoryObjectivesRequired = required;
+      }
     }
     final syncedRemaining =
         int.tryParse(payload['remaining_time']?.toString() ?? '');
@@ -649,6 +664,7 @@ class GameController extends ChangeNotifier {
 
   void _dedupePlayers() {
     if (players.length < 2) return;
+    final selfId = playerId;
     final byId = <String, GamePlayer>{};
     for (final p in players) {
       if (p.id.isEmpty) continue;
@@ -670,9 +686,19 @@ class GameController extends ChangeNotifier {
         continue;
       }
       list.sort((a, b) {
+        // Prefer keeping the local player entry when duplicated.
+        if (selfId != null && selfId.isNotEmpty) {
+          final aIsSelf = a.id == selfId;
+          final bIsSelf = b.id == selfId;
+          if (aIsSelf != bIsSelf) return aIsSelf ? -1 : 1;
+        }
         final aDisc = a.status.toLowerCase() == 'disconnected';
         final bDisc = b.status.toLowerCase() == 'disconnected';
         if (aDisc != bDisc) return aDisc ? 1 : -1;
+        // Prefer active over captured.
+        final aCap = a.status.toUpperCase() == 'CAPTURED';
+        final bCap = b.status.toUpperCase() == 'CAPTURED';
+        if (aCap != bCap) return aCap ? 1 : -1;
         final aPos = (a.latitude != null && a.longitude != null) ? 0 : 1;
         final bPos = (b.latitude != null && b.longitude != null) ? 0 : 1;
         if (aPos != bPos) return aPos - bPos;
@@ -687,6 +713,8 @@ class GameController extends ChangeNotifier {
 
   void _pushSnapshot({String? targetId}) {
     if (!isHost) return;
+    // Ensure host also updates its local winner state.
+    _ensureWinnerFieldsIfAny();
     final payload = <String, dynamic>{
       'started': gameStarted,
       'countdown_started': gameStarted,
@@ -713,10 +741,52 @@ class GameController extends ChangeNotifier {
         };
       }).toList(),
       'gameDetails': <String, dynamic>{
-        'winner_type': _winnerTypeIfAny(),
+        'winner_type': winnerType,
+        'winner_reason': winnerReason,
+        'victory_objectives_required': victoryObjectivesRequired ??
+            bootstrap?.lobby.form?.victoryConditionObjectives,
       },
     };
     _socketService.pushState(state: payload, targetId: targetId);
+  }
+
+  void _ensureWinnerFieldsIfAny() {
+    if (winnerType != null && winnerType!.isNotEmpty) return;
+    final outcome = _winnerOutcomeIfAny();
+    if (outcome == null) return;
+    winnerType = outcome.type;
+    winnerReason = outcome.reason;
+  }
+
+  _WinnerOutcome? _winnerOutcomeIfAny() {
+    // Rogue wins by capturing enough objectives.
+    final captured = objectives.where((o) => o.captured).length;
+    final required =
+        bootstrap?.lobby.form?.victoryConditionObjectives ?? objectives.length;
+    if (required > 0 && captured >= required) {
+      return const _WinnerOutcome(
+        type: 'ROGUE',
+        reason: 'OBJECTIVES_CAPTURED',
+      );
+    }
+
+    // Agents win if all rogues are captured.
+    final roguePlayers =
+        players.where((p) => (p.role ?? '').toUpperCase() == 'ROGUE');
+    if (roguePlayers.isNotEmpty &&
+        roguePlayers.every((p) => p.status.toUpperCase() == 'CAPTURED')) {
+      return const _WinnerOutcome(
+        type: 'AGENT',
+        reason: 'ALL_ROGUES_CAPTURED',
+      );
+    }
+
+    // Agents win if time is over.
+    if (remainingSeconds != null && remainingSeconds! <= 0) {
+      return const _WinnerOutcome(type: 'AGENT', reason: 'TIMEOUT');
+    }
+
+    return null;
   }
 
   void _pushSnapshotThrottled({String? targetId}) {
@@ -759,6 +829,11 @@ class GameController extends ChangeNotifier {
   }
 
   void _handleRogueCaptureRequest(String roguePlayerId) {
+    final selfIdx = players.indexWhere((p) => p.id == roguePlayerId);
+    if (selfIdx != -1) {
+      final status = players[selfIdx].status.toUpperCase();
+      if (status == 'CAPTURED' || status == 'DISCONNECTED') return;
+    }
     final objectiveId = _nearestHackableObjectiveIdForPlayer(roguePlayerId);
     if (objectiveId == null) return;
     if (_objectiveCaptureEndAtMs.containsKey(objectiveId)) return;
@@ -796,6 +871,8 @@ class GameController extends ChangeNotifier {
     if (p.isEmpty) return null;
     final player = p.first;
     if ((player.role ?? '').toUpperCase() != 'ROGUE') return null;
+    final status = player.status.toUpperCase();
+    if (status == 'CAPTURED' || status == 'DISCONNECTED') return null;
     if (player.latitude == null || player.longitude == null) return null;
     final rangeMeters = _configuredRogueRangeMeters();
     String? bestId;
@@ -838,6 +915,7 @@ class GameController extends ChangeNotifier {
     }
     if (changed) {
       _pushSnapshot();
+      _evaluateWinConditionsIfHost();
       notifyListeners();
     }
   }
@@ -855,27 +933,13 @@ class GameController extends ChangeNotifier {
     _objectiveCaptureEndAtMs.removeWhere((id, _) => !activeIds.contains(id));
   }
 
-  String? _winnerTypeIfAny() {
-    final roguePlayers = players.where((p) => (p.role ?? '').toUpperCase() == 'ROGUE');
-    if (roguePlayers.isNotEmpty && roguePlayers.every((p) => p.status == 'CAPTURED')) {
-      return 'AGENT';
-    }
-    if (remainingSeconds != null && remainingSeconds! <= 0) {
-      return 'ROGUE';
-    }
-    final captured = objectives.where((o) => o.captured).length;
-    final required = bootstrap?.lobby.form?.victoryConditionObjectives ?? objectives.length;
-    if (required > 0 && captured >= required) {
-      return 'ROGUE';
-    }
-    return null;
-  }
-
   void _evaluateWinConditionsIfHost() {
     if (!isHost) return;
-    final winner = _winnerTypeIfAny();
-    if (winner != null) {
-      winnerType = winner;
+    if (winnerType != null && winnerType!.isNotEmpty) return;
+    final outcome = _winnerOutcomeIfAny();
+    if (outcome != null) {
+      winnerType = outcome.type;
+      winnerReason = outcome.reason;
       remainingSeconds = 0;
       gameStarted = false;
       convergingPhase = false;
@@ -1330,4 +1394,14 @@ class GameController extends ChangeNotifier {
     _socketService.dispose();
     super.dispose();
   }
+}
+
+class _WinnerOutcome {
+  const _WinnerOutcome({
+    required this.type,
+    required this.reason,
+  });
+
+  final String type;
+  final String reason;
 }

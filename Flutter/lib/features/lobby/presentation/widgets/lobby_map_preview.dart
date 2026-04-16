@@ -242,18 +242,56 @@ class LobbyMapPreview extends StatelessWidget {
                   ),
                 ...playerPositions.map(
                   (p) => Marker(
+                    width: 40,
+                    height: 44,
                     point: LatLng(p.latitude, p.longitude),
-                    builder: (_) => const Icon(
-                      Icons.person_pin_circle,
-                      color: Colors.orange,
-                      size: 22,
-                    ),
+                    anchorPos: AnchorPos.align(AnchorAlign.bottom),
+                    builder: (_) => const _PlayerGpsPin(),
                   ),
                 ),
               ],
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PlayerGpsPin extends StatelessWidget {
+  const _PlayerGpsPin();
+
+  @override
+  Widget build(BuildContext context) {
+    // Material 'location_on' has internal padding; we push it down so the tip
+    // sits exactly on the marker anchor (bottom-center).
+    return const SizedBox(
+      width: 40,
+      height: 44,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: -4,
+            child: Icon(
+              Icons.location_on,
+              color: Colors.white,
+              size: 38,
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: -4,
+            child: Icon(
+              Icons.location_on,
+              color: Colors.orange,
+              size: 34,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -6,6 +6,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { inspect } from 'util';
 
 // Charger les variables d'environnement depuis le fichier .env
 dotenv.config();
@@ -79,6 +80,14 @@ const formatRemainingTime = (seconds) => {
   const remainingSeconds = safeSeconds % 60;
   return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
 };
+
+const prettyInspect = (value) =>
+  inspect(value, {
+    depth: 6,
+    colors: false,
+    compact: false,
+    maxArrayLength: 50
+  });
 
 const getRemainingTimeSeconds = (game) => {
   if (!game || typeof game.remainingTimeSeconds !== 'number') {
@@ -2081,6 +2090,23 @@ io.on('connection', (socket) => {
       const requestId = payload?.requestId || null;
       const targetId = payload?.targetId || null;
       const inner = payload?.payload || null;
+      if (inner && typeof inner === 'object') {
+        try {
+          log(
+            `[STATE_SYNC_REQUEST] ${clientId} -> ${gameCode} requestId=${requestId || 'n/a'} ` +
+              `props=${Array.isArray(inner.props) ? inner.props.length : 0} ` +
+              `players=${Array.isArray(inner.players) ? inner.players.length : 0}`
+          );
+          if (Array.isArray(inner.props)) {
+            log('[STATE_SYNC_REQUEST][props]', prettyInspect(inner.props));
+          }
+          if (Array.isArray(inner.players)) {
+            log('[STATE_SYNC_REQUEST][players]', prettyInspect(inner.players));
+          }
+        } catch (e) {
+          log('[STATE_SYNC_REQUEST][debug] failed to inspect payload', e?.message || e);
+        }
+      }
       if (!gameCode || !games.has(gameCode)) {
         sendGameActionRejected(socket, 'state-sync', requestId, 'Partie introuvable.');
         return;
