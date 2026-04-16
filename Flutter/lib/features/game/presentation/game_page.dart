@@ -81,6 +81,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
         final guidanceColor = isRogue ? Colors.green : Colors.blue;
         final rogueCaptureRemaining = _controller.rogueCaptureRemainingSeconds;
         final rogueCaptureProgress = _controller.rogueCaptureProgress;
+        final winnerType = _controller.winnerType;
+        final outOfZone = _controller.isOutOfGameZone;
         final objectiveDisplayPoints = isRogue
             ? _controller.objectives
                 .where((o) => !o.captured)
@@ -270,6 +272,32 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                           child: Text(_controller.error!),
                         ),
                       ),
+                    if (winnerType == null && outOfZone)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: Center(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.65),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Text(
+                                'Retournez dans la zone de jeux',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     if (isRogue && rogueCaptureRemaining != null)
                       Positioned(
                         top: topInset,
@@ -357,7 +385,64 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                   bottom: 16,
                   child: Align(
                     alignment: Alignment.bottomCenter,
-                    child: _buildActionFabMenu(),
+                    child: winnerType == null ? _buildActionFabMenu() : const SizedBox.shrink(),
+                  ),
+                ),
+              if (winnerType != null)
+                Positioned.fill(
+                  child: Container(
+                    color: Colors.black.withOpacity(0.72),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 420),
+                        child: Card(
+                          margin: const EdgeInsets.all(16),
+                          child: Padding(
+                            padding: const EdgeInsets.all(18),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text(
+                                  'Fin de partie',
+                                  style: TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  (winnerType.toUpperCase() == 'AGENT')
+                                      ? 'Victoire des Agents'
+                                      : 'Victoire des Rogues',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w700,
+                                    color: (winnerType.toUpperCase() == 'AGENT')
+                                        ? Colors.blue.shade700
+                                        : Colors.purple.shade700,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  (winnerType.toUpperCase() == 'AGENT')
+                                      ? 'Tous les rogues ont été capturés.'
+                                      : 'Le temps est écoulé.',
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 16),
+                                FilledButton(
+                                  onPressed: () {
+                                    _controller.leaveGame();
+                                    if (mounted) context.go('/');
+                                  },
+                                  child: const Text('Quitter'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
             ],

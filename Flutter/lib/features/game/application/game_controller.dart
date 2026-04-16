@@ -46,6 +46,8 @@ class GameController extends ChangeNotifier {
   bool gameStarted = false;
   bool convergingPhase = true;
   int? remainingSeconds;
+  String? winnerType;
+  bool isOutOfGameZone = false;
   final List<GamePlayer> players = <GamePlayer>[];
   final List<GameObjective> objectives = <GameObjective>[];
   final List<GameChatMessage> roleChat = <GameChatMessage>[];
@@ -94,6 +96,8 @@ class GameController extends ChangeNotifier {
     gameCode = data.codeOverride ?? data.lobby.code;
     playerId = data.playerId;
     remainingSeconds = _configuredDurationSeconds();
+    winnerType = null;
+    isOutOfGameZone = false;
     players
       ..clear()
       ..addAll(data.players.map((p) {
@@ -173,6 +177,7 @@ class GameController extends ChangeNotifier {
         latitude: position.latitude,
         longitude: position.longitude,
       );
+      isOutOfGameZone = !_isMyPositionInsideGameZone();
       final idx = players.indexWhere((p) => p.id == playerId);
       if (idx != -1) {
         players[idx] = players[idx].copyWith(
@@ -183,6 +188,51 @@ class GameController extends ChangeNotifier {
       _publishPositionIfDue(position.latitude, position.longitude);
       notifyListeners();
     });
+  }
+
+  bool _isMyPositionInsideGameZone() {
+    final pos = myPosition;
+    if (pos == null) return true;
+    final contour =
+        _effectiveGameConfig?.mapStreets ?? bootstrap?.lobby.outerStreetContour;
+    final polygon = _sanitizeContour(contour ?? const <GeoPoint>[]);
+    if (polygon.length < 3) return true;
+    return _isPointInPolygon(pos, polygon);
+  }
+
+  List<GeoPoint> _sanitizeContour(List<GeoPoint> contour) {
+    if (contour.length < 3) return const <GeoPoint>[];
+    final open = <GeoPoint>[...contour];
+    final first = open.first;
+    final last = open.last;
+    final closeMeters = Geolocator.distanceBetween(
+      first.latitude,
+      first.longitude,
+      last.latitude,
+      last.longitude,
+    );
+    if (closeMeters < 2) {
+      open.removeLast();
+    }
+    return open.length >= 3 ? open : const <GeoPoint>[];
+  }
+
+  bool _isPointInPolygon(GeoPoint point, List<GeoPoint> polygon) {
+    var inside = false;
+    for (var i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      final xi = polygon[i].longitude;
+      final yi = polygon[i].latitude;
+      final xj = polygon[j].longitude;
+      final yj = polygon[j].latitude;
+      final intersects = ((yi > point.latitude) != (yj > point.latitude)) &&
+          (point.longitude <
+              (xj - xi) *
+                      (point.latitude - yi) /
+                      ((yj - yi).abs() < 1e-12 ? 1e-12 : (yj - yi)) +
+                  xi);
+      if (intersects) inside = !inside;
+    }
+    return inside;
   }
 
   void _publishPositionIfDue(double latitude, double longitude) {
@@ -225,6 +275,7 @@ class GameController extends ChangeNotifier {
       if (!isHost || remainingSeconds == null) return;
       if (remainingSeconds! <= 0) {
         _countdownTimer?.cancel();
+        winnerType ??= 'ROGUE';
         gameStarted = false;
         convergingPhase = false;
         _socketService.updateRemainingTime(
@@ -242,6 +293,7 @@ class GameController extends ChangeNotifier {
       );
       if (remainingSeconds! == 0) {
         _countdownTimer?.cancel();
+        winnerType ??= 'ROGUE';
         gameStarted = false;
         convergingPhase = false;
         _socketService.updateRemainingTime(
@@ -514,6 +566,11 @@ class GameController extends ChangeNotifier {
   void _applyStateSync(Map payload) {
     gameStarted = payload['started'] == true || payload['countdown_started'] == true;
     convergingPhase = payload['is_converging_phase'] == true;
+    final details = payload['gameDetails'];
+    if (details is Map) {
+      final winner = details['winner_type']?.toString();
+      winnerType = (winner == null || winner.isEmpty) ? winnerType : winner;
+    }
     final syncedRemaining =
         int.tryParse(payload['remaining_time']?.toString() ?? '');
     if (syncedRemaining != null) {
@@ -763,6 +820,9 @@ class GameController extends ChangeNotifier {
     if (roguePlayers.isNotEmpty && roguePlayers.every((p) => p.status == 'CAPTURED')) {
       return 'AGENT';
     }
+    if (remainingSeconds != null && remainingSeconds! <= 0) {
+      return 'ROGUE';
+    }
     final captured = objectives.where((o) => o.captured).length;
     final required = bootstrap?.lobby.form?.victoryConditionObjectives ?? objectives.length;
     if (required > 0 && captured >= required) {
@@ -775,8 +835,17 @@ class GameController extends ChangeNotifier {
     if (!isHost) return;
     final winner = _winnerTypeIfAny();
     if (winner != null) {
+      winnerType = winner;
       remainingSeconds = 0;
+      gameStarted = false;
+      convergingPhase = false;
+      _countdownTimer?.cancel();
+      _socketService.updateRemainingTime(
+        remaining: 0,
+        countdownStarted: false,
+      );
       _pushSnapshot();
+      notifyListeners();
     }
   }
 
