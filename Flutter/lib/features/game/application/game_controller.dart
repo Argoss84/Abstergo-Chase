@@ -835,6 +835,7 @@ class GameController extends ChangeNotifier {
   GeoPoint? get myStartZone => _startZoneForRole(playerRole);
 
   bool get canTriggerRogueObjectiveCapture {
+    if (!gameStarted) return false;
     final me = playerId;
     if (me == null || me.isEmpty) return false;
     if (isAnyObjectiveCapturing) return false;

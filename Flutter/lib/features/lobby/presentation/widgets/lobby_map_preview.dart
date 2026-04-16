@@ -28,6 +28,7 @@ class LobbyMapPreview extends StatelessWidget {
     this.highlightObjectiveZones = const <GeoPoint>[],
     this.highlightObjectiveZoneRadiusMeters = 0,
     this.highlightObjectivePulse = 0,
+    this.mapController,
     this.height = 260,
   });
 
@@ -52,6 +53,7 @@ class LobbyMapPreview extends StatelessWidget {
   final List<GeoPoint> highlightObjectiveZones;
   final int highlightObjectiveZoneRadiusMeters;
   final double highlightObjectivePulse;
+  final MapController? mapController;
   final double? height;
 
   @override
@@ -61,6 +63,7 @@ class LobbyMapPreview extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: FlutterMap(
+          mapController: mapController,
           options: MapOptions(
             center: LatLng(center.latitude, center.longitude),
             zoom: 15.5,

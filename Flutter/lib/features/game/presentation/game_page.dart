@@ -5,7 +5,9 @@ import 'package:abstergo_chase/features/game/domain/game_models.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
 import 'package:abstergo_chase/features/lobby/presentation/widgets/lobby_map_preview.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:go_router/go_router.dart';
+import 'package:latlong2/latlong.dart';
 
 class GamePage extends StatefulWidget {
   const GamePage({
@@ -24,6 +26,7 @@ class GamePage extends StatefulWidget {
 class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin {
   late final GameController _controller;
   late final AnimationController _guidancePulseController;
+  late final MapController _mapController;
   final TextEditingController _chatController = TextEditingController();
   bool _chatOpen = false;
   int _lastReadCount = 0;
@@ -38,6 +41,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       lowerBound: 0,
       upperBound: 1,
     )..repeat(reverse: true);
+    _mapController = MapController();
     _controller = GameController()..initialize(widget.bootstrap);
   }
 
@@ -195,6 +199,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                       child: fallbackCenter == null
                           ? const Center(child: Text('Carte indisponible'))
                           : LobbyMapPreview(
+                              mapController: _mapController,
                               height: null,
                               center: _controller.myPosition ?? fallbackCenter,
                               mapRadiusMeters:
@@ -522,7 +527,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
               child: _miniActionFab(
                 icon: Icons.my_location,
                 tooltip: 'Recentrer carte',
-                onTap: () => _showFabPlaceholder('Recentrage carte'),
+                onTap: _recenterMapOnPlayer,
               ),
             ),
           if (_isActionFabOpen)
@@ -534,6 +539,10 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 tooltip: roleActionLabel,
                 onTap: () {
                   if (role == 'ROGUE') {
+                    if (!_controller.gameStarted) {
+                      _showFabPlaceholder('Partie non démarrée');
+                      return;
+                    }
                     if (_controller.isAnyObjectiveCapturing) {
                       _showFabPlaceholder('Capture déjà en cours');
                       return;
@@ -630,6 +639,18 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$label: fonctionnalité bientôt disponible.')),
     );
+  }
+
+  void _recenterMapOnPlayer() {
+    setState(() => _isActionFabOpen = false);
+    final target = _controller.myPosition ?? _resolveCenter();
+    if (target == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Position joueur indisponible.')),
+      );
+      return;
+    }
+    _mapController.move(LatLng(target.latitude, target.longitude), 16.5);
   }
 
   GeoPoint? _resolveCenter() {

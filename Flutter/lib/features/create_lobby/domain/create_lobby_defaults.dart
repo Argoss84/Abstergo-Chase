@@ -7,7 +7,7 @@ class CreateLobbyDefaults {
   static const int hackDurationMs = 10000;
   static const int objectiveZoneRadius = 25;
   static const int startZoneRadius = 45;
-  static const int rogueRange = 120;
+  static const int rogueRange = 10;
   static const int agentRange = 80;
   static const int mapRadius = 200;
   static const int maxPlayerNameLength = 20;
