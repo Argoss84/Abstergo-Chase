@@ -95,6 +95,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
         final winnerReason = (_controller.winnerReason ?? '').toUpperCase();
         final outOfZone = _controller.isOutOfGameZone;
         final myPos = _controller.myPosition;
+        final startCountdownSeconds = _startCountdownSeconds();
         final objectiveDisplayPoints = isRogue
             ? _controller.objectives
                 .where((o) => !o.captured)
@@ -323,6 +324,47 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                                   color: Colors.white,
                                   fontSize: 18,
                                   fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (winnerType == null && startCountdownSeconds != null)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: Container(
+                            color: Colors.black.withOpacity(0.55),
+                            child: Center(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
+                                  vertical: 16,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.95),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Text(
+                                      'La partie commence dans…',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      '$startCountdownSeconds',
+                                      style: const TextStyle(
+                                        fontSize: 56,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -1153,6 +1195,19 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
         ],
       ),
     );
+  }
+
+  int? _startCountdownSeconds() {
+    final endAt = _controller.startCountdownEndAtMs;
+    if (endAt == null) return null;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final remainingMs = endAt - now;
+    if (remainingMs <= 0) return null;
+    // Show 3,2,1 for a 3 second countdown.
+    final seconds = (remainingMs / 1000).ceil();
+    if (seconds <= 0) return null;
+    if (seconds > 3) return 3;
+    return seconds;
   }
 
   String _winnerReasonMessage({

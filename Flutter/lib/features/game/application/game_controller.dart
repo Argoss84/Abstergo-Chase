@@ -49,6 +49,8 @@ class GameController extends ChangeNotifier {
   String? winnerType;
   String? winnerReason;
   int? victoryObjectivesRequired;
+  int? startCountdownEndAtMs;
+  Timer? _startCountdownTimer;
   bool isOutOfGameZone = false;
   final List<GamePlayer> players = <GamePlayer>[];
   final List<GameObjective> objectives = <GameObjective>[];
@@ -102,6 +104,7 @@ class GameController extends ChangeNotifier {
     winnerReason = null;
     final required = data.lobby.form?.victoryConditionObjectives;
     victoryObjectivesRequired = (required != null && required > 0) ? required : null;
+    startCountdownEndAtMs = null;
     isOutOfGameZone = false;
     players
       ..clear()
@@ -259,6 +262,31 @@ class GameController extends ChangeNotifier {
 
   void startGameFromHost() {
     if (!isHost || gameStarted) return;
+    // Start a 3s synchronized countdown before the actual game starts.
+    final now = DateTime.now().millisecondsSinceEpoch;
+    startCountdownEndAtMs = now + 3000;
+    gameStarted = false;
+    convergingPhase = false;
+    _startCountdownTimer?.cancel();
+    _startCountdownTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+      final endAt = startCountdownEndAtMs;
+      if (endAt == null) return;
+      final remainingMs = endAt - DateTime.now().millisecondsSinceEpoch;
+      if (remainingMs <= 0) {
+        _startCountdownTimer?.cancel();
+        _startCountdownTimer = null;
+        startCountdownEndAtMs = null;
+        _beginGameNow();
+        return;
+      }
+      notifyListeners();
+    });
+    _pushSnapshot();
+    notifyListeners();
+  }
+
+  void _beginGameNow() {
+    if (!isHost) return;
     gameStarted = true;
     convergingPhase = false;
     // Always start from configured duration, never from stale pre-start sync.
@@ -587,6 +615,8 @@ class GameController extends ChangeNotifier {
       if (required != null && required > 0) {
         victoryObjectivesRequired = required;
       }
+      final endAt = int.tryParse(details['start_countdown_end_at_ms']?.toString() ?? '');
+      startCountdownEndAtMs = endAt;
     }
     final syncedRemaining =
         int.tryParse(payload['remaining_time']?.toString() ?? '');
@@ -745,6 +775,7 @@ class GameController extends ChangeNotifier {
         'winner_reason': winnerReason,
         'victory_objectives_required': victoryObjectivesRequired ??
             bootstrap?.lobby.form?.victoryConditionObjectives,
+        'start_countdown_end_at_ms': startCountdownEndAtMs,
       },
     };
     _socketService.pushState(state: payload, targetId: targetId);
@@ -1387,6 +1418,7 @@ class GameController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _startCountdownTimer?.cancel();
     _countdownTimer?.cancel();
     _joinWatchdogTimer?.cancel();
     _messagesSub?.cancel();
