@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:math';
+import 'dart:convert';
 
 import 'package:abstergo_chase/features/game/application/game_controller.dart';
 import 'package:abstergo_chase/features/game/domain/game_models.dart';
@@ -8,6 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:qr_code_scanner/qr_code_scanner.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 class GamePage extends StatefulWidget {
   const GamePage({
@@ -490,9 +494,9 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   Widget _buildActionFabMenu() {
     final role = (_controller.playerRole ?? '').toUpperCase();
     final roleActionIcon =
-        role == 'ROGUE' ? Icons.terminal : Icons.warning_amber;
+        role == 'ROGUE' ? Icons.terminal : Icons.center_focus_strong;
     final roleActionLabel =
-        role == 'ROGUE' ? 'Hacker objectif' : 'Détection menace';
+        role == 'ROGUE' ? 'Hacker objectif' : 'Capturer rogue';
     final rogueActionReady = role == 'ROGUE' && _controller.canTriggerRogueObjectiveCapture;
     return SizedBox(
       width: 280,
@@ -505,9 +509,9 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
               left: 36,
               bottom: 78,
               child: _miniActionFab(
-                icon: Icons.visibility,
-                tooltip: 'Mode vision',
-                onTap: () => _showFabPlaceholder('Mode vision'),
+                icon: Icons.favorite,
+                tooltip: 'Vitalité',
+                onTap: _openVitalityQr,
               ),
             ),
           if (_isActionFabOpen)
@@ -555,7 +559,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                     _controller.triggerRogueSpecialAction();
                     return;
                   }
-                  _showFabPlaceholder(roleActionLabel);
+                  _openAgentCaptureScanner();
                 },
                 backgroundColor: rogueActionReady
                     ? Colors.red.shade700
@@ -651,6 +655,142 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       return;
     }
     _mapController.move(LatLng(target.latitude, target.longitude), 16.5);
+  }
+
+  Future<void> _openVitalityQr() async {
+    setState(() => _isActionFabOpen = false);
+    final payload = _buildVitalityQrPayload();
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Identifiant Vitalité',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 12),
+                QrImageView(
+                  data: payload,
+                  version: QrVersions.auto,
+                  size: 220,
+                  eyeStyle: const QrEyeStyle(
+                    eyeShape: QrEyeShape.square,
+                    color: Colors.black,
+                  ),
+                  dataModuleStyle: const QrDataModuleStyle(
+                    dataModuleShape: QrDataModuleShape.square,
+                    color: Colors.black,
+                  ),
+                  backgroundColor: Colors.white,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  (_controller.gameCode ?? widget.bootstrap.lobby.code).toUpperCase(),
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Fermer'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _buildVitalityQrPayload() {
+    final selfId = _controller.playerId ?? '';
+    final self = _controller.players.where((p) => p.id == selfId).toList();
+    final playerName = self.isNotEmpty ? self.first.name : 'Joueur';
+    return jsonEncode(<String, dynamic>{
+      'type': 'player-vitality-id',
+      'gameCode': (_controller.gameCode ?? widget.bootstrap.lobby.code).toUpperCase(),
+      'playerId': selfId,
+      'playerName': playerName,
+      'role': (_controller.playerRole ?? '').toUpperCase(),
+    });
+  }
+
+  Future<void> _openAgentCaptureScanner() async {
+    setState(() => _isActionFabOpen = false);
+    if ((_controller.playerRole ?? '').toUpperCase() != 'AGENT') {
+      _showFabPlaceholder('Action réservée agent');
+      return;
+    }
+    if (!_controller.gameStarted) {
+      _showFabPlaceholder('Partie non démarrée');
+      return;
+    }
+    QRViewController? scannerController;
+    StreamSubscription<Barcode>? scanSubscription;
+    var handled = false;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        final qrKey = GlobalKey(debugLabel: 'agent-capture-qr');
+        return Dialog(
+          insetPadding: const EdgeInsets.all(12),
+          child: AspectRatio(
+            aspectRatio: 3 / 4,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                QRView(
+                  key: qrKey,
+                  onQRViewCreated: (controller) {
+                    scannerController = controller;
+                    scanSubscription?.cancel();
+                    scanSubscription = controller.scannedDataStream.listen((scan) {
+                      if (handled) return;
+                      final raw = scan.code?.trim() ?? '';
+                      if (raw.isEmpty) return;
+                      handled = true;
+                      Navigator.of(dialogContext).pop();
+                      _handleScannedCaptureQr(raw);
+                    });
+                  },
+                ),
+                Align(
+                  alignment: Alignment.topCenter,
+                  child: Container(
+                    margin: const EdgeInsets.only(top: 12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.55),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      'Scannez le QR Vitalité du Rogue',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    scanSubscription?.cancel();
+    scannerController?.dispose();
+  }
+
+  void _handleScannedCaptureQr(String rawQr) {
+    final feedback = _controller.triggerAgentCaptureFromQr(rawQr);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(feedback)));
   }
 
   GeoPoint? _resolveCenter() {

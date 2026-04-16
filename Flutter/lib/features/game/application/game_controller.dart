@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:abstergo_chase/app/config/app_runtime_config.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
@@ -639,6 +640,12 @@ class GameController extends ChangeNotifier {
       _handleRogueCaptureRequest(fromId);
       return;
     }
+    if (type == 'agent-capture-request') {
+      final targetPlayerId = action['targetPlayerId']?.toString();
+      if (targetPlayerId == null || targetPlayerId.isEmpty) return;
+      _handleAgentCaptureRequest(fromId, targetPlayerId);
+      return;
+    }
     if (type != 'position-update') return;
     final lat = double.tryParse(action['latitude']?.toString() ?? '');
     final lng = double.tryParse(action['longitude']?.toString() ?? '');
@@ -667,6 +674,23 @@ class GameController extends ChangeNotifier {
     _objectiveCaptureSeenAtMs[objectiveId] = now;
     _objectiveCaptureEndAtMs[objectiveId] = now + _configuredHackDurationMs();
     _pushSnapshot();
+    notifyListeners();
+  }
+
+  void _handleAgentCaptureRequest(String agentPlayerId, String targetPlayerId) {
+    if (!isHost || !gameStarted) return;
+    final agentIdx = players.indexWhere((p) => p.id == agentPlayerId);
+    final targetIdx = players.indexWhere((p) => p.id == targetPlayerId);
+    if (agentIdx == -1 || targetIdx == -1) return;
+    final agent = players[agentIdx];
+    final target = players[targetIdx];
+    if ((agent.role ?? '').toUpperCase() != 'AGENT') return;
+    if ((target.role ?? '').toUpperCase() != 'ROGUE') return;
+    if (target.status.toUpperCase() == 'CAPTURED') return;
+    if (target.status.toLowerCase() == 'disconnected') return;
+    players[targetIdx] = target.copyWith(status: 'CAPTURED');
+    _pushSnapshot();
+    _evaluateWinConditionsIfHost();
     notifyListeners();
   }
 
@@ -899,6 +923,44 @@ class GameController extends ChangeNotifier {
       'type': 'rogue-capture-request',
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     });
+  }
+
+  String triggerAgentCaptureFromQr(String rawPayload) {
+    if (!gameStarted) return 'La partie n\'a pas démarré.';
+    if ((playerRole ?? '').toUpperCase() != 'AGENT') {
+      return 'Action réservée aux agents.';
+    }
+    final dynamic decoded;
+    try {
+      decoded = jsonDecode(rawPayload);
+    } catch (_) {
+      return 'QR invalide.';
+    }
+    if (decoded is! Map) return 'QR invalide.';
+    final type = decoded['type']?.toString();
+    final scannedCode = decoded['gameCode']?.toString().toUpperCase();
+    final targetId = decoded['playerId']?.toString();
+    final targetRole = decoded['role']?.toString().toUpperCase();
+    final currentCode = (gameCode ?? bootstrap?.lobby.code ?? '').toUpperCase();
+    if (type != 'player-vitality-id') return 'QR non reconnu.';
+    if (scannedCode != currentCode) return 'QR d\'une autre partie.';
+    if (targetId == null || targetId.isEmpty) return 'QR incomplet.';
+    if (targetRole != 'ROGUE') return 'Ce joueur n\'est pas un rogue.';
+    if (targetId == playerId) return 'Auto-capture impossible.';
+
+    if (isHost) {
+      final me = playerId;
+      if (me == null || me.isEmpty) return 'Agent introuvable.';
+      _handleAgentCaptureRequest(me, targetId);
+      return 'Capture envoyée.';
+    }
+
+    _socketService.sendGameAction(<String, dynamic>{
+      'type': 'agent-capture-request',
+      'targetPlayerId': targetId,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
+    return 'Capture envoyée.';
   }
 
   List<GeoPoint> buildPathToMyStartZone() {
