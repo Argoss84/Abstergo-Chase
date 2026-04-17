@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'dart:convert';
+import 'dart:ui';
 
 import 'package:abstergo_chase/features/game/application/game_controller.dart';
 import 'package:abstergo_chase/features/game/domain/game_models.dart';
@@ -128,9 +129,25 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
         return Scaffold(
           extendBodyBehindAppBar: true,
           appBar: AppBar(
-            backgroundColor: Colors.black.withOpacity(0.35),
+            backgroundColor: Colors.transparent,
             surfaceTintColor: Colors.transparent,
             elevation: 0,
+            flexibleSpace: ClipRect(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.22),
+                    border: Border(
+                      bottom: BorderSide(
+                        color: Colors.white.withOpacity(0.14),
+                        width: 1,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
             title: Text(
               (_controller.playerRole ?? 'N/A').toUpperCase(),
             ),
@@ -381,33 +398,22 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                           progress: rogueCaptureProgress,
                         ),
                       ),
-                    Positioned(
-                      left: 12,
-                      right: 12,
-                      bottom: 16,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          if (_controller.isHost && !_controller.gameStarted)
-                            Container(
-                              width: double.infinity,
-                              margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.9),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
+                    if (_controller.isHost && !_controller.gameStarted)
+                      Positioned(
+                        top: topInset,
+                        left: 12,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+                            child: Container(
+                              width: 260,
+                              padding: const EdgeInsets.all(8),
+                              color: Colors.black.withOpacity(0.08),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Text(
-                                    'Verification zones de depart (${_controller.startZoneRadiusMeters}m)',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
                                   ..._controller.players
                                       .where(
                                         (player) =>
@@ -415,40 +421,43 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                                             'disconnected',
                                       )
                                       .map((player) {
-                                    final inZone =
-                                        _controller.isPlayerInStartZone(player);
-                                    final role =
-                                        (player.role ?? 'AUCUN').toUpperCase();
-                                    final label = inZone ? 'Dans zone' : 'Hors zone';
+                                    final inZone = _controller.isPlayerInStartZone(player);
+                                    final role = (player.role ?? '').toUpperCase();
+                                    final roleShort = role == 'ROGUE'
+                                        ? 'r'
+                                        : role == 'AGENT'
+                                            ? 'a'
+                                            : '-';
                                     return Padding(
                                       padding: const EdgeInsets.only(bottom: 4),
                                       child: Text(
-                                        '${player.name} [$role] - $label',
+                                        '${player.name} [$roleShort]',
                                         style: TextStyle(
                                           color: inZone
-                                              ? Colors.green.shade700
-                                              : Colors.red.shade700,
+                                              ? Colors.greenAccent
+                                              : Colors.redAccent,
+                                          fontWeight: FontWeight.w700,
                                         ),
                                       ),
                                     );
                                   }),
+                                  const SizedBox(height: 6),
+                                  FilledButton(
+                                    onPressed: _controller.canHostStartGame
+                                        ? _controller.startGameFromHost
+                                        : null,
+                                    child: Text(
+                                      _controller.canHostStartGame
+                                          ? 'Démarrer'
+                                          : 'En attente',
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
-                          if (_controller.isHost && !_controller.gameStarted)
-                            FilledButton(
-                              onPressed: _controller.canHostStartGame
-                                  ? _controller.startGameFromHost
-                                  : null,
-                              child: Text(
-                                _controller.canHostStartGame
-                                    ? 'Démarrer'
-                                    : 'En attente des zones de départ',
-                              ),
-                            ),
-                        ],
+                          ),
+                        ),
                       ),
-                    ),
                   ],
                 ),
               if (socketReady && !_controller.isLoading)

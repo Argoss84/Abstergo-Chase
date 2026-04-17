@@ -8,7 +8,6 @@ class HomeMenuPage extends StatelessWidget {
 
   static const String createLobbyPath = '/create-lobby';
   static const String joinLobbyPath = '/join-lobby';
-  static const String sessionDiagnosticsPath = '/session-diagnostics';
 
   final String title;
 

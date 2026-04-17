@@ -63,16 +63,6 @@ class BootstrapPage extends StatelessWidget {
                 title: const Text('Rejoindre une partie'),
                 onTap: () => context.push(HomeMenuPage.joinLobbyPath),
               ),
-              ListTile(
-                title: const Text(
-                  'Diagnostic de session',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.blueGrey,
-                  ),
-                ),
-                onTap: () => context.push(HomeMenuPage.sessionDiagnosticsPath),
-              ),
             ],
           ),
         ),

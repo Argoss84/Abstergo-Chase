@@ -52,12 +52,6 @@ GoRouter buildAppRouter() {
           bootstrap: state.extra! as GameBootstrapData,
         ),
       ),
-      GoRoute(
-        path: HomeMenuPage.sessionDiagnosticsPath,
-        name: 'session-diagnostics',
-        builder: (context, state) =>
-            const HomeMenuPage(title: 'Diagnostic de session'),
-      ),
     ],
   );
 }

@@ -27,6 +27,10 @@ const GAME_TTL_MS = Math.max(
   60_000,
   Number.parseInt(process.env.GAME_TTL_MS || '10800000', 10) || 10_800_000
 );
+const EMPTY_GAME_TTL_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.EMPTY_GAME_TTL_MS || '300000', 10) || 300_000
+);
 const FINISHED_GAME_TTL_MS = Math.max(
   5_000,
   Number.parseInt(process.env.FINISHED_GAME_TTL_MS || '30000', 10) || 30_000
@@ -303,6 +307,13 @@ const touchGame = (code) => {
   if (!game.finishedAt) {
     game.expiresAt = game.lastActivityAt + GAME_TTL_MS;
   }
+};
+
+const hasPresentPlayersInGame = (game) => {
+  if (!game?.players || game.players.size === 0) return false;
+  return Array.from(game.players.values()).some(
+    (player) => (player?.status || 'active').toLowerCase() !== 'disconnected'
+  );
 };
 
 const closeLobby = (code, reason = 'Lobby expiré', notify = true) => {
@@ -942,6 +953,7 @@ const applyGameStateSync = ({
   game.lastHostStateAt = Date.now();
   game.lastHostStateHostId = hostId;
   const winnerType = statePayload?.gameDetails?.winner_type || null;
+  const shouldCloseImmediately = Boolean(winnerType && !game.finishedAt);
   if (winnerType && !game.finishedAt) {
     game.finishedAt = Date.now();
     game.expiresAt = game.finishedAt + FINISHED_GAME_TTL_MS;
@@ -981,6 +993,12 @@ const applyGameStateSync = ({
       });
     }
   });
+
+  if (shouldCloseImmediately) {
+    const closedCode = game.code;
+    closeGame(closedCode, 'Partie terminée', false);
+    markStateChanged('game:finished-immediate', { code: closedCode });
+  }
 
   return stateVersion;
 };
@@ -2675,6 +2693,24 @@ setInterval(() => {
     }
   }
   for (const [code, game] of games.entries()) {
+    if (game.finishedAt) {
+      log(`[TTL] Fermeture immédiate partie terminée: ${code}`);
+      closeGame(code, 'Partie terminée', false);
+      markStateChanged('game:finished-immediate-sweep', { code });
+      continue;
+    }
+
+    if (!hasPresentPlayersInGame(game)) {
+      const lastActivityAt =
+        typeof game.lastActivityAt === 'number' ? game.lastActivityAt : now;
+      if (now - lastActivityAt >= EMPTY_GAME_TTL_MS) {
+        log(`[TTL] Fermeture partie inactive sans joueurs: ${code}`);
+        closeGame(code, 'Partie inactive sans joueurs');
+        markStateChanged('game:expired-empty', { code });
+        continue;
+      }
+    }
+
     if (typeof game.expiresAt === 'number' && game.expiresAt <= now) {
       log(`[TTL] Fermeture partie expirée: ${code}`);
       closeGame(code, game.finishedAt ? 'Partie terminée' : 'Partie expirée');
