@@ -4,6 +4,7 @@ import 'package:abstergo_chase/features/game/domain/game_models.dart';
 import 'package:abstergo_chase/features/game/presentation/game_page.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
 import 'package:abstergo_chase/features/lobby/presentation/widgets/lobby_map_preview.dart';
+import 'package:abstergo_chase/shared/services/vibration_service.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -31,6 +32,9 @@ class _LobbyPageState extends State<LobbyPage> {
   bool _isChatOpen = false;
   bool _didRouteToGame = false;
   bool _didFallbackRouteToGame = false;
+  final VibrationService _vibrationService = VibrationService();
+  Set<String> _knownLobbyPlayerIds = <String>{};
+  bool _knownLobbyPlayersInitialized = false;
 
   @override
   void initState() {
@@ -75,6 +79,7 @@ class _LobbyPageState extends State<LobbyPage> {
             : rawUnread < 0
                 ? 0
                 : (rawUnread > 999 ? 999 : rawUnread);
+        _handleLobbyJoinVibration();
         if (_controller.gameStarted &&
             !_didRouteToGame &&
             _controller.playerId != null &&
@@ -367,6 +372,21 @@ class _LobbyPageState extends State<LobbyPage> {
         );
       },
     );
+  }
+
+  void _handleLobbyJoinVibration() {
+    final ids = _controller.players.map((p) => p.id).toSet();
+    if (!_knownLobbyPlayersInitialized) {
+      _knownLobbyPlayersInitialized = true;
+      _knownLobbyPlayerIds = ids;
+      return;
+    }
+    final newIds = ids.difference(_knownLobbyPlayerIds);
+    final hasNewOtherPlayer = newIds.any((id) => id != _controller.playerId);
+    if (hasNewOtherPlayer) {
+      _vibrationService.vibrateIfEnabled(VibrationEvent.lobbyPlayerJoined);
+    }
+    _knownLobbyPlayerIds = ids;
   }
 
   GeoPoint _pointFromForm(LobbyBootstrapData data) {

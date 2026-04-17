@@ -7,6 +7,7 @@ import 'package:abstergo_chase/features/join_lobby/presentation/join_lobby_page.
 import 'package:abstergo_chase/features/lab/presentation/lab_page.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
 import 'package:abstergo_chase/features/lobby/presentation/lobby_page.dart';
+import 'package:abstergo_chase/features/settings/presentation/vibration_settings_page.dart';
 import 'package:go_router/go_router.dart';
 
 GoRouter buildAppRouter() {
@@ -51,6 +52,11 @@ GoRouter buildAppRouter() {
         builder: (context, state) => GamePage(
           bootstrap: state.extra! as GameBootstrapData,
         ),
+      ),
+      GoRoute(
+        path: SettingsPage.routePath,
+        name: SettingsPage.routeName,
+        builder: (context, state) => const SettingsPage(),
       ),
     ],
   );

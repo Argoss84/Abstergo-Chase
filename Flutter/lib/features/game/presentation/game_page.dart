@@ -7,6 +7,7 @@ import 'package:abstergo_chase/features/game/application/game_controller.dart';
 import 'package:abstergo_chase/features/game/domain/game_models.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
 import 'package:abstergo_chase/features/lobby/presentation/widgets/lobby_map_preview.dart';
+import 'package:abstergo_chase/shared/services/vibration_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_compass/flutter_compass.dart';
@@ -40,6 +41,12 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   bool _chatOpen = false;
   int _lastReadCount = 0;
   bool _isActionFabOpen = false;
+  final VibrationService _vibrationService = VibrationService();
+  bool _prevRogueObjectiveInRange = false;
+  bool _prevSelfInStartZone = false;
+  final Map<String, bool> _hostPlayerInStartZone = <String, bool>{};
+  int? _lastCountdownSecondVibrated;
+  int _lastOutOfZoneVibrationMs = 0;
 
   @override
   void initState() {
@@ -97,6 +104,11 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
         final outOfZone = _controller.isOutOfGameZone;
         final myPos = _controller.myPosition;
         final startCountdownSeconds = _startCountdownSeconds();
+        _handleGameVibrationSignals(
+          startCountdownSeconds: startCountdownSeconds,
+          outOfZone: outOfZone,
+          winnerType: winnerType,
+        );
         final objectiveDisplayPoints = isRogue
             ? _controller.objectives
                 .where((o) => !o.captured)
@@ -1217,6 +1229,76 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     if (seconds <= 0) return null;
     if (seconds > 3) return 3;
     return seconds;
+  }
+
+  void _handleGameVibrationSignals({
+    required int? startCountdownSeconds,
+    required bool outOfZone,
+    required String? winnerType,
+  }) {
+    final isPreStartPhase = !_controller.gameStarted && winnerType == null;
+
+    // Rogue: objective enters hacking range.
+    final rogueInRange =
+        _controller.isRogueRole && _controller.canTriggerRogueObjectiveCapture;
+    if (rogueInRange && !_prevRogueObjectiveInRange) {
+      _vibrationService.vibrateIfEnabled(VibrationEvent.rogueObjectiveInRange);
+    }
+    _prevRogueObjectiveInRange = rogueInRange;
+
+    // Everyone: entering own start zone during pre-start phase.
+    if (isPreStartPhase) {
+      final me = _controller.players
+          .where((p) => p.id == _controller.playerId)
+          .cast<GamePlayer?>()
+          .firstWhere((p) => p != null, orElse: () => null);
+      final selfInZone = me != null && _controller.isPlayerInStartZone(me);
+      if (selfInZone && !_prevSelfInStartZone) {
+        _vibrationService.vibrateIfEnabled(VibrationEvent.selfEnteredStartZone);
+      }
+      _prevSelfInStartZone = selfInZone;
+    } else {
+      _prevSelfInStartZone = false;
+      _hostPlayerInStartZone.clear();
+    }
+
+    // Host: any player entering start zone during pre-start phase.
+    if (isPreStartPhase && _controller.isHost) {
+      var someoneJustEntered = false;
+      for (final player in _controller.players) {
+        if (player.status.toLowerCase() == 'disconnected') continue;
+        final current = _controller.isPlayerInStartZone(player);
+        final previous = _hostPlayerInStartZone[player.id] ?? current;
+        if (current && !previous) {
+          someoneJustEntered = true;
+        }
+        _hostPlayerInStartZone[player.id] = current;
+      }
+      if (someoneJustEntered) {
+        _vibrationService.vibrateIfEnabled(
+          VibrationEvent.hostSawPlayerEnterStartZone,
+        );
+      }
+    }
+
+    // Countdown start vibration on each second 3 -> 2 -> 1.
+    if (startCountdownSeconds != null) {
+      if (_lastCountdownSecondVibrated != startCountdownSeconds) {
+        _lastCountdownSecondVibrated = startCountdownSeconds;
+        _vibrationService.vibrateIfEnabled(VibrationEvent.gameStartCountdown);
+      }
+    } else {
+      _lastCountdownSecondVibrated = null;
+    }
+
+    // While out of game zone, pulse vibration at interval.
+    if (outOfZone && winnerType == null) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now - _lastOutOfZoneVibrationMs >= 3000) {
+        _lastOutOfZoneVibrationMs = now;
+        _vibrationService.vibrateIfEnabled(VibrationEvent.outOfGameZone);
+      }
+    }
   }
 
   String _winnerReasonMessage({
