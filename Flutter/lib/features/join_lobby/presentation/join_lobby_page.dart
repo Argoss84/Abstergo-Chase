@@ -3,6 +3,7 @@ import 'package:abstergo_chase/features/lobby/data/player_name_store.dart';
 import 'package:abstergo_chase/features/lobby/data/player_session_store.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
 import 'package:abstergo_chase/features/lobby/presentation/lobby_page.dart';
+import 'package:abstergo_chase/shared/services/socket_environment_service.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -23,6 +24,8 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
   late final TextEditingController _codeController;
   final PlayerNameStore _playerNameStore = PlayerNameStore();
   final PlayerSessionStore _playerSessionStore = PlayerSessionStore();
+  final SocketEnvironmentService _socketEnvironmentService =
+      SocketEnvironmentService();
 
   @override
   void initState() {
@@ -68,10 +71,11 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
 
     await _playerNameStore.save(displayName);
     final previousPlayerId = await _playerSessionStore.loadPlayerIdForCode(code);
+    final socketConfig = await _socketEnvironmentService.loadConfig();
     final bootstrap = LobbyBootstrapData(
       code: code,
-      serverUrl: 'http://10.0.2.2:5174',
-      socketPath: '/socket.io',
+      serverUrl: socketConfig.serverUrl,
+      socketPath: socketConfig.socketPath,
       playerName: displayName,
       previousPlayerId: previousPlayerId,
     );

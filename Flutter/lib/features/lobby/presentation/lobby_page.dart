@@ -4,6 +4,7 @@ import 'package:abstergo_chase/features/game/domain/game_models.dart';
 import 'package:abstergo_chase/features/game/presentation/game_page.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
 import 'package:abstergo_chase/features/lobby/presentation/widgets/lobby_map_preview.dart';
+import 'package:abstergo_chase/shared/services/socket_environment_service.dart';
 import 'package:abstergo_chase/shared/services/vibration_service.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -33,6 +34,8 @@ class _LobbyPageState extends State<LobbyPage> {
   bool _didRouteToGame = false;
   bool _didFallbackRouteToGame = false;
   final VibrationService _vibrationService = VibrationService();
+  final SocketEnvironmentService _socketEnvironmentService =
+      SocketEnvironmentService();
   Set<String> _knownLobbyPlayerIds = <String>{};
   bool _knownLobbyPlayersInitialized = false;
 
@@ -45,18 +48,24 @@ class _LobbyPageState extends State<LobbyPage> {
     if (bootstrap != null) {
       _controller.initialize(bootstrap: bootstrap);
     } else if ((widget.initialCode ?? '').trim().isNotEmpty) {
-      _controller.initialize(
-        bootstrap: LobbyBootstrapData(
-          code: widget.initialCode!.trim().toUpperCase(),
-          serverUrl: 'http://10.0.2.2:5174',
-          socketPath: '/socket.io',
-          playerName: 'Joueur',
-        ),
-      );
+      _initializeFromCode(widget.initialCode!);
     } else {
       _controller.error = 'Code lobby manquant.';
       _controller.isLoading = false;
     }
+  }
+
+  Future<void> _initializeFromCode(String code) async {
+    final socketConfig = await _socketEnvironmentService.loadConfig();
+    if (!mounted) return;
+    _controller.initialize(
+      bootstrap: LobbyBootstrapData(
+        code: code.trim().toUpperCase(),
+        serverUrl: socketConfig.serverUrl,
+        socketPath: socketConfig.socketPath,
+        playerName: 'Joueur',
+      ),
+    );
   }
 
   @override

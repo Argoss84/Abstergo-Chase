@@ -26,3 +26,13 @@ Thumbs.db
 # Build
 dist/
 build/
+
+# OpenTofu / Terraform local artifacts
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

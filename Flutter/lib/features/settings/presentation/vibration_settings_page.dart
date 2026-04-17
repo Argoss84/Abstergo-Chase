@@ -1,4 +1,5 @@
 import 'package:abstergo_chase/shared/services/vibration_service.dart';
+import 'package:abstergo_chase/shared/services/socket_environment_service.dart';
 import 'package:flutter/material.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -13,7 +14,10 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   final VibrationService _vibrationService = VibrationService();
+  final SocketEnvironmentService _socketEnvironmentService =
+      SocketEnvironmentService();
   Map<VibrationEvent, bool>? _settings;
+  bool? _useProductionSocket;
 
   @override
   void initState() {
@@ -23,9 +27,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _load() async {
     final settings = await _vibrationService.loadSettings();
+    final useProduction = await _socketEnvironmentService.useProduction();
     if (!mounted) return;
     setState(() {
       _settings = settings;
+      _useProductionSocket = useProduction;
     });
   }
 
@@ -45,15 +51,56 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final settings = _settings;
+    final useProductionSocket = _useProductionSocket;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Paramètres'),
       ),
-      body: settings == null
+      body: settings == null || useProductionSocket == null
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Socket',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Basculer entre serveur de production et de développement.',
+                          style: TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 6),
+                        SwitchListTile(
+                          value: useProductionSocket,
+                          onChanged: (value) async {
+                            setState(() {
+                              _useProductionSocket = value;
+                            });
+                            await _socketEnvironmentService.setUseProduction(value);
+                          },
+                          title: const Text('Utiliser le socket de production'),
+                          subtitle: Text(
+                            useProductionSocket
+                                ? 'Production (ALB AWS)'
+                                : 'Développement (10.0.2.2:5174)',
+                          ),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(12),

@@ -1,6 +1,11 @@
 class CreateLobbyDefaults {
   const CreateLobbyDefaults._();
 
+  static const String productionServerUrl =
+      'http://abstergo-signaling-alb-115353581.eu-west-3.elb.amazonaws.com';
+  static const String developmentServerUrl = 'http://10.0.2.2:5174';
+  static const String serverUrl = productionServerUrl;
+  static const String socketPath = '/socket.io';
   static const int objectiveNumber = 3;
   static const int durationSeconds = 1800;
   static const int victoryConditionObjectives = 1;

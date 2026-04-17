@@ -5,6 +5,7 @@ import 'package:abstergo_chase/features/create_lobby/presentation/widgets/create
 import 'package:abstergo_chase/features/lobby/data/player_name_store.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
 import 'package:abstergo_chase/features/lobby/presentation/lobby_page.dart';
+import 'package:abstergo_chase/shared/services/socket_environment_service.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -22,6 +23,8 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
   late final CreateLobbyController _controller;
   late final TextEditingController _nameController;
   final PlayerNameStore _playerNameStore = PlayerNameStore();
+  final SocketEnvironmentService _socketEnvironmentService =
+      SocketEnvironmentService();
 
   @override
   void initState() {
@@ -30,6 +33,7 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
     _nameController = TextEditingController();
     _controller.loadCurrentPosition();
     _restorePlayerName();
+    _restoreSocketEnvironment();
   }
 
   @override
@@ -64,6 +68,13 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
     }
     _nameController.text = saved;
     _controller.setDisplayName(saved);
+  }
+
+  Future<void> _restoreSocketEnvironment() async {
+    final config = await _socketEnvironmentService.loadConfig();
+    if (!mounted) return;
+    _controller.setServerUrl(config.serverUrl);
+    _controller.setSocketPath(config.socketPath);
   }
 
   @override

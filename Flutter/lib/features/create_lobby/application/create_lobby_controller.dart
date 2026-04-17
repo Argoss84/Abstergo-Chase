@@ -3,6 +3,7 @@ import 'package:abstergo_chase/features/create_lobby/data/street_contour_service
 import 'package:abstergo_chase/features/create_lobby/data/location_service.dart';
 import 'package:abstergo_chase/features/create_lobby/data/objective_generation_service.dart';
 import 'package:abstergo_chase/features/create_lobby/data/street_fetch_service.dart';
+import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_form_data.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
 import 'package:flutter/foundation.dart';
@@ -30,8 +31,8 @@ class CreateLobbyController extends ChangeNotifier {
 
   CreateLobbyFormData form = CreateLobbyFormData.initial();
   String displayName = '';
-  String serverUrl = 'http://10.0.2.2:5174';
-  String socketPath = '/socket.io';
+  String serverUrl = CreateLobbyDefaults.serverUrl;
+  String socketPath = CreateLobbyDefaults.socketPath;
   bool isSubmitting = false;
   bool objectivesGenerated = false;
   bool isLoadingGps = false;
