@@ -1,0 +1,59 @@
+name: Publish Signaling Image To ECR
+
+on:
+  push:
+    branches:
+      - PortageAndroid
+    paths:
+      - "Docker/Dockerfile.signaling"
+      - "Server/**"
+      - ".github/workflows/signaling-ecr.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: eu-west-3
+  AWS_ACCOUNT_ID: "812607972480"
+  ECR_REPOSITORY: abstergo/signaling
+  IMAGE_NAME: 812607972480.dkr.ecr.eu-west-3.amazonaws.com/abstergo/signaling
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (IAM user keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          echo "sha_short=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push signaling image
+        run: |
+          docker build \
+            -f Docker/Dockerfile.signaling \
+            -t "${IMAGE_NAME}:latest" \
+            -t "${IMAGE_NAME}:sha-${{ steps.tags.outputs.sha_short }}" \
+            .
+          docker push "${IMAGE_NAME}:latest"
+          docker push "${IMAGE_NAME}:sha-${{ steps.tags.outputs.sha_short }}"
+
+      - name: Summary
+        run: |
+          echo "Published images:"
+          echo "- ${IMAGE_NAME}:latest"
+          echo "- ${IMAGE_NAME}:sha-${{ steps.tags.outputs.sha_short }}"
