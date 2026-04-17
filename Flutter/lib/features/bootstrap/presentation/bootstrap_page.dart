@@ -1,7 +1,6 @@
 import 'package:abstergo_chase/features/create_lobby/presentation/create_lobby_page.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:abstergo_chase/features/lab/presentation/lab_page.dart';
 import 'package:abstergo_chase/features/home/presentation/home_menu_page.dart';
 
 class BootstrapPage extends StatelessWidget {
@@ -14,32 +13,7 @@ class BootstrapPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Home'),
-      ),
-      drawer: Drawer(
-        child: SafeArea(
-          child: ListView(
-            children: [
-              const DrawerHeader(
-                child: Align(
-                  alignment: Alignment.bottomLeft,
-                  child: Text(
-                    'AbstergoChase',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.science_outlined),
-                title: const Text('Lab Page'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  context.push(LabPage.routePath);
-                },
-              ),
-            ],
-          ),
-        ),
+        title: const Text('AbstergoChase'),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
