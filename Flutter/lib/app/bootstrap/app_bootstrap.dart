@@ -6,15 +6,16 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 void bootstrapApp() {
-  WidgetsFlutterBinding.ensureInitialized();
-  GlobalErrorHandler.initialize();
-
   runZonedGuarded<void>(
-    () => runApp(
-      const ProviderScope(
-        child: AbstergoChaseApp(),
-      ),
-    ),
+    () {
+      WidgetsFlutterBinding.ensureInitialized();
+      GlobalErrorHandler.initialize();
+      runApp(
+        const ProviderScope(
+          child: AbstergoChaseApp(),
+        ),
+      );
+    },
     GlobalErrorHandler.onZoneError,
   );
 }
