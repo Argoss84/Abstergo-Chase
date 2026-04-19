@@ -1,0 +1,17 @@
+---
+description: Après modifications Flutter, publier l'APK debug sur les émulateurs Android
+globs: Flutter/**/*
+alwaysApply: false
+---
+
+# Publication APK debug (émulateurs)
+
+À la **fin** d’une série de modifications sous `Flutter/`, exécuter (depuis `Flutter/`), après avoir vérifié que le SDK est dans le PATH si besoin :
+
+1. `flutter build apk --debug`
+2. Pour chaque émulateur listé par `adb devices` comme `emulator-*` + `device` :  
+   `flutter install -d <id> --debug`
+
+Ne pas seulement indiquer la commande à l’utilisateur : **lancer** ces commandes dans le terminal du projet.
+
+Si aucun émulateur n’est connecté, le signaler et ne pas échouer silencieusement.

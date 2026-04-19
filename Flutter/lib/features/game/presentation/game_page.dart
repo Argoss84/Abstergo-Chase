@@ -17,6 +17,12 @@ import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 
+const TextStyle _kTeamChatBubbleStyle = TextStyle(
+  fontSize: 14,
+  height: 1.35,
+  color: Color(0xFF0F172A),
+);
+
 class GamePage extends StatefulWidget {
   const GamePage({
     super.key,
@@ -1043,9 +1049,15 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
           height: MediaQuery.of(context).size.height * 0.65,
           child: Column(
             children: [
-              const Padding(
-                padding: EdgeInsets.all(12),
-                child: Text('Chat équipe'),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(
+                  'Chat équipe',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                ),
               ),
               Expanded(
                 child: AnimatedBuilder(
@@ -1066,7 +1078,10 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                                   isMe ? Colors.blue.shade100 : Colors.grey.shade200,
                               borderRadius: BorderRadius.circular(10),
                             ),
-                            child: Text('${m.playerName}: ${m.text}'),
+                            child: Text(
+                              '${m.playerName}: ${m.text}',
+                              style: _kTeamChatBubbleStyle,
+                            ),
                           ),
                         );
                       }).toList(),
@@ -1081,8 +1096,18 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                     Expanded(
                       child: TextField(
                         controller: _chatController,
-                        decoration:
-                            const InputDecoration(hintText: 'Votre message...'),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: 'Votre message...',
+                          hintStyle: TextStyle(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withOpacity(0.55),
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),

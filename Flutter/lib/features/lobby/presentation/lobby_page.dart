@@ -26,6 +26,19 @@ class LobbyPage extends StatefulWidget {
   State<LobbyPage> createState() => _LobbyPageState();
 }
 
+/// Texte sur bulles claires : le thème sombre impose une couleur de corps claire,
+/// illisible sur fond bleu/gris pâle sans override explicite.
+const TextStyle _kChatBubbleNameStyle = TextStyle(
+  fontSize: 11,
+  fontWeight: FontWeight.w600,
+  color: Color(0xFF334155),
+);
+const TextStyle _kChatBubbleBodyStyle = TextStyle(
+  fontSize: 14,
+  height: 1.35,
+  color: Color(0xFF0F172A),
+);
+
 class _LobbyPageState extends State<LobbyPage> {
   late final LobbyController _controller;
   late final TextEditingController _chatController;
@@ -463,11 +476,14 @@ class _LobbyPageState extends State<LobbyPage> {
           height: MediaQuery.of(context).size.height * 0.65,
           child: Column(
             children: [
-              const Padding(
-                padding: EdgeInsets.all(12),
+              Padding(
+                padding: const EdgeInsets.all(12),
                 child: Text(
                   'Chat du lobby',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
                 ),
               ),
               Expanded(
@@ -475,8 +491,13 @@ class _LobbyPageState extends State<LobbyPage> {
                   animation: _controller,
                   builder: (context, _) {
                     if (_controller.chatMessages.isEmpty) {
-                      return const Center(
-                        child: Text('Aucun message.'),
+                      return Center(
+                        child: Text(
+                          'Aucun message.',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
                       );
                     }
                     return ListView.builder(
@@ -504,12 +525,9 @@ class _LobbyPageState extends State<LobbyPage> {
                                   isMe
                                       ? '${m.playerName} (Vous)'
                                       : m.playerName,
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                                  style: _kChatBubbleNameStyle,
                                 ),
-                                Text(m.text),
+                                Text(m.text, style: _kChatBubbleBodyStyle),
                               ],
                             ),
                           ),
@@ -526,9 +544,18 @@ class _LobbyPageState extends State<LobbyPage> {
                     Expanded(
                       child: TextField(
                         controller: _chatController,
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                        decoration: InputDecoration(
+                          border: const OutlineInputBorder(),
                           hintText: 'Votre message...',
+                          hintStyle: TextStyle(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withOpacity(0.55),
+                          ),
                         ),
                       ),
                     ),
