@@ -1,17 +1,22 @@
 ---
-description: Après modifications Flutter, publier l'APK debug sur les émulateurs Android
+description: Après modifications Flutter, publier uniquement en APK debug sur les émulateurs
 globs: Flutter/**/*
 alwaysApply: false
 ---
 
-# Publication APK debug (émulateurs)
+# Publication APK **debug** sur émulateurs (obligatoire)
 
-À la **fin** d’une série de modifications sous `Flutter/`, exécuter (depuis `Flutter/`), après avoir vérifié que le SDK est dans le PATH si besoin :
+Les installations sur émulateurs doivent **toujours** être des builds **debug**, pas release ni profile.
 
-1. `flutter build apk --debug`
-2. Pour chaque émulateur listé par `adb devices` comme `emulator-*` + `device` :  
-   `flutter install -d <id> --debug`
+À la **fin** d’une série de modifications sous `Flutter/` (depuis le dossier `Flutter/`), exécuter dans l’ordre :
 
-Ne pas seulement indiquer la commande à l’utilisateur : **lancer** ces commandes dans le terminal du projet.
+1. **`flutter build apk --debug`**  
+   - Ne pas utiliser `flutter build apk` sans `--debug`, ni `--release`, ni `--profile` pour cette étape émulateurs.
 
-Si aucun émulateur n’est connecté, le signaler et ne pas échouer silencieusement.
+2. Pour chaque appareil `emulator-*` en état `device` dans `adb devices` :  
+   **`flutter install -d <id> --debug`**  
+   - Le flag **`--debug` est obligatoire** : sans lui, Flutter peut réinstaller une variante déjà présente (ex. release) et ce n’est pas le comportement voulu.
+
+Ne pas seulement indiquer les commandes : **les lancer** dans le terminal du projet.
+
+Si aucun émulateur n’est connecté, le signaler clairement.

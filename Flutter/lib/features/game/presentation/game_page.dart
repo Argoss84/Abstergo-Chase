@@ -95,7 +95,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
             ? 0
             : (_controller.roleChat.length - _lastReadCount).clamp(0, 999);
         final fallbackCenter = _resolveCenter();
-        final socketReady = _controller.connectionStatus == 'connected';
+        final connectionReady = _controller.connectionStatus == 'connected';
         final topInset = MediaQuery.of(context).padding.top + kToolbarHeight + 8;
         final objectiveZoneRadius = effectiveGameConfig?.objectiveZoneRadius ??
             widget.bootstrap.lobby.form?.objectiveZoneRadius ??
@@ -230,7 +230,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
           ),
           body: Stack(
             children: [
-              (_controller.isLoading || !socketReady)
+              (_controller.isLoading || !connectionReady)
                   ? Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -239,9 +239,9 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                       const SizedBox(height: 12),
                       Text(
                         _controller.connectionStatus == 'connecting'
-                            ? 'Connexion au socket en cours...'
+                            ? 'Connexion au serveur en cours...'
                             : _controller.connectionStatus == 'error'
-                                ? 'Erreur de connexion socket'
+                                ? 'Impossible de se connecter au serveur.'
                                 : 'Initialisation de la partie...',
                       ),
                     ],
@@ -478,7 +478,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                       ),
                   ],
                 ),
-              if (socketReady && !_controller.isLoading)
+              if (connectionReady && !_controller.isLoading)
                 Positioned(
                   left: 0,
                   right: 0,
@@ -567,27 +567,27 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     switch (status) {
       case 'connected':
         color = Colors.green;
-        label = 'Connecte';
+        label = 'En ligne';
         icon = Icons.check_circle;
         break;
       case 'connecting':
         color = Colors.orange;
-        label = 'Reconnexion';
+        label = 'Connexion';
         icon = Icons.sync;
         break;
       case 'error':
         color = Colors.red;
-        label = 'Erreur';
+        label = 'Hors ligne';
         icon = Icons.error_outline;
         break;
       case 'closed':
         color = Colors.grey;
-        label = 'Ferme';
+        label = 'Déconnecté';
         icon = Icons.cancel_outlined;
         break;
       default:
         color = Colors.blueGrey;
-        label = 'Initialisation';
+        label = 'Attente';
         icon = Icons.hourglass_bottom;
         break;
     }
@@ -1181,8 +1181,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                   padding: const EdgeInsets.all(14),
                   child: Column(
                     children: [
-                      _kvInfo('Role', role),
-                      _kvInfo('Etat socket', _controller.connectionStatus),
+                      _kvInfo('Rôle', role),
                       _kvInfo('Joueurs', '${_controller.players.length}'),
                       _kvInfo('Objectifs', '${_controller.objectives.length}'),
                       _kvInfo(
@@ -1200,8 +1199,6 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                   padding: const EdgeInsets.all(14),
                   child: Column(
                     children: [
-                      _kvInfo('Serveur', bootstrap.serverUrl),
-                      _kvInfo('Socket path', bootstrap.socketPath),
                       _kvInfo('Rayon map', '${config?.mapRadius ?? form?.mapRadius ?? 0} m'),
                       _kvInfo(
                         'Rayon zone objectif',

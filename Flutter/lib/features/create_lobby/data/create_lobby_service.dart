@@ -129,7 +129,7 @@ class CreateLobbyService {
     }
 
     void onError(dynamic error) {
-      completeWithError(Exception('Erreur socket: $error'));
+      completeWithError(Exception('Erreur de connexion: $error'));
     }
 
     socket.on('message', onMessage);

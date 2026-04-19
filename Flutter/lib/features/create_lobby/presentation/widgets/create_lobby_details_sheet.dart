@@ -5,13 +5,9 @@ class CreateLobbyDetailsSheet extends StatefulWidget {
   const CreateLobbyDetailsSheet({
     super.key,
     required this.initialData,
-    required this.initialServerUrl,
-    required this.initialSocketPath,
   });
 
   final CreateLobbyFormData initialData;
-  final String initialServerUrl;
-  final String initialSocketPath;
 
   @override
   State<CreateLobbyDetailsSheet> createState() =>
@@ -20,8 +16,6 @@ class CreateLobbyDetailsSheet extends StatefulWidget {
 
 class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
   late CreateLobbyFormData _form;
-  late final TextEditingController _serverController;
-  late final TextEditingController _socketPathController;
   late int _durationMinutes;
   late int _durationSeconds;
 
@@ -29,18 +23,8 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
   void initState() {
     super.initState();
     _form = widget.initialData;
-    _serverController = TextEditingController(text: widget.initialServerUrl);
-    _socketPathController =
-        TextEditingController(text: widget.initialSocketPath);
     _durationMinutes = _form.duration ~/ 60;
     _durationSeconds = _form.duration % 60;
-  }
-
-  @override
-  void dispose() {
-    _serverController.dispose();
-    _socketPathController.dispose();
-    super.dispose();
   }
 
   @override
@@ -92,22 +76,10 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
               value: _form.mapRadius,
               onChanged: (v) => _form = _form.copyWith(mapRadius: v),
             ),
-            _textField(
-              label: 'URL serveur',
-              controller: _serverController,
-            ),
-            _textField(
-              label: 'Socket path',
-              controller: _socketPathController,
-            ),
             const SizedBox(height: 12),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(
-                CreateLobbyDetailsResult(
-                  form: _form,
-                  serverUrl: _serverController.text.trim(),
-                  socketPath: _socketPathController.text.trim(),
-                ),
+                CreateLobbyDetailsResult(form: _form),
               ),
               child: const Text('Appliquer'),
             ),
@@ -203,32 +175,10 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
     final total = (_durationMinutes * 60) + _durationSeconds;
     _form = _form.copyWith(duration: total <= 0 ? 1 : total);
   }
-
-  Widget _textField({
-    required String label,
-    required TextEditingController controller,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: TextFormField(
-        controller: controller,
-        decoration: InputDecoration(
-          border: const OutlineInputBorder(),
-          labelText: label,
-        ),
-      ),
-    );
-  }
 }
 
 class CreateLobbyDetailsResult {
-  const CreateLobbyDetailsResult({
-    required this.form,
-    required this.serverUrl,
-    required this.socketPath,
-  });
+  const CreateLobbyDetailsResult({required this.form});
 
   final CreateLobbyFormData form;
-  final String serverUrl;
-  final String socketPath;
 }

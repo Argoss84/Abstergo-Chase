@@ -95,7 +95,7 @@ class LobbySocketService {
   }) async {
     final socket = _socket;
     if (socket == null || !socket.connected) {
-      throw Exception('Socket lobby non connectée.');
+      throw Exception('Connexion au lobby indisponible.');
     }
     final wait = Completer<JoinLobbyResult>();
     late final StreamSubscription<Map<String, dynamic>> sub;

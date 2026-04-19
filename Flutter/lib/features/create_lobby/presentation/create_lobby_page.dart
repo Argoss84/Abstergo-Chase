@@ -49,15 +49,11 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
       isScrollControlled: true,
       builder: (_) => CreateLobbyDetailsSheet(
         initialData: _controller.form,
-        initialServerUrl: _controller.serverUrl,
-        initialSocketPath: _controller.socketPath,
       ),
     );
 
     if (data is CreateLobbyDetailsResult) {
       _controller.updateForm(data.form);
-      _controller.setServerUrl(data.serverUrl);
-      _controller.setSocketPath(data.socketPath);
     }
   }
 
