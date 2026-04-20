@@ -13,6 +13,10 @@ container_port  = 5174
 socket_io_path  = "/socket.io"
 memory_only_mode = true
 empty_game_ttl_ms = 300000
+turn_urls         = ""
+turn_secret       = ""
+turn_realm        = ""
+turn_ttl_seconds  = 600
 
 desired_count      = 1
 assign_public_ip   = true

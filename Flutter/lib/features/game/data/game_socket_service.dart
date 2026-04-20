@@ -177,6 +177,63 @@ class GameSocketService {
     });
   }
 
+  Future<void> sendGameSignal({
+    required String targetId,
+    required Map<String, dynamic> signal,
+  }) async {
+    _emit(<String, dynamic>{
+      'type': 'game:signal',
+      'payload': <String, dynamic>{
+        'targetId': targetId,
+        'signal': signal,
+        'channel': 'voice',
+      },
+    });
+  }
+
+  Future<TurnCredentialsResult?> requestTurnCredentials({
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final wait = Completer<TurnCredentialsResult?>();
+    late final StreamSubscription<Map<String, dynamic>> sub;
+    final requestId = _requestId();
+    sub = messages.listen((event) {
+      final type = event['type']?.toString();
+      if (type != 'turn:credentials') return;
+      final payload = event['payload'];
+      if (payload is! Map) return;
+      if (payload['requestId']?.toString() != requestId) return;
+      final urlsRaw = payload['urls'];
+      final urls = urlsRaw is List
+          ? urlsRaw.map((e) => e.toString()).where((e) => e.isNotEmpty).toList()
+          : const <String>[];
+      final username = payload['username']?.toString();
+      final credential = payload['credential']?.toString();
+      if (!wait.isCompleted) {
+        wait.complete(
+          TurnCredentialsResult(
+            urls: urls,
+            username: username,
+            credential: credential,
+          ),
+        );
+      }
+    });
+    _emit(
+      <String, dynamic>{
+        'type': 'turn:credentials-request',
+        'payload': <String, dynamic>{'requestId': requestId},
+      },
+    );
+    try {
+      return await wait.future.timeout(timeout);
+    } catch (_) {
+      return null;
+    } finally {
+      await sub.cancel();
+    }
+  }
+
   void leaveGame({
     required String code,
     required String playerId,
@@ -210,4 +267,16 @@ class GameSocketService {
     _messages?.close();
     _messages = null;
   }
+}
+
+class TurnCredentialsResult {
+  const TurnCredentialsResult({
+    required this.urls,
+    required this.username,
+    required this.credential,
+  });
+
+  final List<String> urls;
+  final String? username;
+  final String? credential;
 }

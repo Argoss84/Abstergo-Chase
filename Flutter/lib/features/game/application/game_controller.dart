@@ -7,6 +7,8 @@ import 'package:abstergo_chase/features/game/data/game_socket_service.dart';
 import 'package:abstergo_chase/features/game/domain/game_models.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
 import 'package:abstergo_chase/features/lobby/data/player_session_store.dart';
+import 'package:abstergo_chase/shared/services/voice_chat_service.dart';
+import 'package:abstergo_chase/shared/services/voice_settings_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -26,14 +28,27 @@ class GameChatMessage {
 
 class GameController extends ChangeNotifier {
   GameController({GameSocketService? socketService})
-      : _socketService = socketService ?? GameSocketService();
+      : _socketService = socketService ?? GameSocketService() {
+    _voiceChatService = VoiceChatService(
+      signalSender: (targetId, signal) {
+        return _socketService.sendGameSignal(
+          targetId: targetId,
+          signal: signal,
+        );
+      },
+      onVoiceActivity: _handleVoiceActivitySignal,
+    );
+  }
 
   final GameSocketService _socketService;
+  late final VoiceChatService _voiceChatService;
   final PlayerSessionStore _playerSessionStore = PlayerSessionStore();
+  final VoiceSettingsService _voiceSettingsService = VoiceSettingsService();
   StreamSubscription<Map<String, dynamic>>? _messagesSub;
   StreamSubscription<Position>? _positionSub;
   Timer? _countdownTimer;
   Timer? _joinWatchdogTimer;
+  Timer? _voiceActivityTimer;
 
   bool isLoading = true;
   String? error;
@@ -44,6 +59,11 @@ class GameController extends ChangeNotifier {
   String? playerRole;
   bool isHost = false;
   bool gameStarted = false;
+  bool isVoiceChatEnabled = true;
+  bool canListenOtherRoles = false;
+  VoiceTransmissionMode voiceMode = VoiceTransmissionMode.voiceActivation;
+  double voiceActivationThreshold = 0.55;
+  bool _pushToTalkPressed = false;
   bool convergingPhase = true;
   int? remainingSeconds;
   String? winnerType;
@@ -68,8 +88,11 @@ class GameController extends ChangeNotifier {
   int _lastJoinAttemptMs = 0;
   final Map<String, int> _objectiveCaptureEndAtMs = <String, int>{};
   final Map<String, int> _objectiveCaptureSeenAtMs = <String, int>{};
+  final Map<String, int> _voiceActiveSeenAtMs = <String, int>{};
+  int _turnExpiresAtMs = 0;
 
-  LobbyGameConfig? get _effectiveGameConfig => liveGameConfig ?? bootstrap?.gameConfig;
+  LobbyGameConfig? get _effectiveGameConfig =>
+      liveGameConfig ?? bootstrap?.gameConfig;
 
   int _configuredDurationSeconds() {
     final fromForm = bootstrap?.lobby.form?.duration;
@@ -103,7 +126,8 @@ class GameController extends ChangeNotifier {
     winnerType = null;
     winnerReason = null;
     final required = data.lobby.form?.victoryConditionObjectives;
-    victoryObjectivesRequired = (required != null && required > 0) ? required : null;
+    victoryObjectivesRequired =
+        (required != null && required > 0) ? required : null;
     startCountdownEndAtMs = null;
     isOutOfGameZone = false;
     players
@@ -129,6 +153,9 @@ class GameController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final voiceSettings = await _voiceSettingsService.load();
+      voiceMode = voiceSettings.mode;
+      voiceActivationThreshold = voiceSettings.activationThreshold;
       await _socketService.connect(
         serverUrl: Uri.parse(data.lobby.serverUrl),
         socketPath: data.lobby.socketPath,
@@ -138,6 +165,8 @@ class GameController extends ChangeNotifier {
       _startJoinWatchdog();
       _sendJoinGame();
       await _startPositionTracking();
+      await _syncVoiceState();
+      _startVoiceActivityTimer();
       connectionStatus = _hasJoinedGame ? 'connected' : 'connecting';
       isLoading = false;
       notifyListeners();
@@ -268,7 +297,8 @@ class GameController extends ChangeNotifier {
     gameStarted = false;
     convergingPhase = false;
     _startCountdownTimer?.cancel();
-    _startCountdownTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+    _startCountdownTimer =
+        Timer.periodic(const Duration(milliseconds: 200), (_) {
       final endAt = startCountdownEndAtMs;
       if (endAt == null) return;
       final remainingMs = endAt - DateTime.now().millisecondsSinceEpoch;
@@ -356,6 +386,7 @@ class GameController extends ChangeNotifier {
       case 'game:created':
         if (payload is Map) {
           _applyJoinedPayload(payload);
+          _syncVoiceState();
           notifyListeners();
         }
         return;
@@ -391,9 +422,11 @@ class GameController extends ChangeNotifier {
           final newHost = payload['newHostId']?.toString();
           if (newHost != null) {
             for (var i = 0; i < players.length; i++) {
-              players[i] = players[i].copyWith(isHost: players[i].id == newHost);
+              players[i] =
+                  players[i].copyWith(isHost: players[i].id == newHost);
             }
             isHost = playerId == newHost;
+            _syncVoiceState();
             notifyListeners();
           }
         }
@@ -403,6 +436,7 @@ class GameController extends ChangeNotifier {
           final id = payload['playerId']?.toString();
           if (id != null) {
             players.removeWhere((p) => p.id == id);
+            _syncVoiceState();
             notifyListeners();
           }
         }
@@ -448,6 +482,7 @@ class GameController extends ChangeNotifier {
               );
             }
             _dedupePlayers();
+            _syncVoiceState();
             notifyListeners();
           }
         }
@@ -462,9 +497,22 @@ class GameController extends ChangeNotifier {
               players[idx] = players[idx].copyWith(
                 status: changes['status']?.toString() ?? players[idx].status,
               );
+              _syncVoiceState();
               _evaluateWinConditionsIfHost();
               notifyListeners();
             }
+          }
+        }
+        return;
+      case 'game:signal':
+        if (payload is Map) {
+          final fromId = payload['fromId']?.toString();
+          final signal = payload['signal'];
+          if (fromId != null && signal is Map) {
+            _voiceChatService.handleSignal(
+              fromId: fromId,
+              signal: Map<String, dynamic>.from(signal),
+            );
           }
         }
         return;
@@ -489,6 +537,7 @@ class GameController extends ChangeNotifier {
         if (payload is Map) {
           _applyStateSync(payload);
           _dedupePlayers();
+          _syncVoiceState();
           notifyListeners();
         }
         return;
@@ -505,8 +554,9 @@ class GameController extends ChangeNotifier {
               playerId: payload['playerId']?.toString() ?? '',
               playerName: payload['playerName']?.toString() ?? 'Joueur',
               text: payload['text']?.toString() ?? '',
-              timestampMs: int.tryParse(payload['timestamp']?.toString() ?? '') ??
-                  DateTime.now().millisecondsSinceEpoch,
+              timestampMs:
+                  int.tryParse(payload['timestamp']?.toString() ?? '') ??
+                      DateTime.now().millisecondsSinceEpoch,
             ),
           );
           if (roleChat.length > 150) {
@@ -602,7 +652,8 @@ class GameController extends ChangeNotifier {
   }
 
   void _applyStateSync(Map payload) {
-    gameStarted = payload['started'] == true || payload['countdown_started'] == true;
+    gameStarted =
+        payload['started'] == true || payload['countdown_started'] == true;
     convergingPhase = payload['is_converging_phase'] == true;
     final details = payload['gameDetails'];
     if (details is Map) {
@@ -610,12 +661,13 @@ class GameController extends ChangeNotifier {
       winnerType = (winner == null || winner.isEmpty) ? winnerType : winner;
       final reason = details['winner_reason']?.toString();
       winnerReason = (reason == null || reason.isEmpty) ? winnerReason : reason;
-      final required =
-          int.tryParse(details['victory_objectives_required']?.toString() ?? '');
+      final required = int.tryParse(
+          details['victory_objectives_required']?.toString() ?? '');
       if (required != null && required > 0) {
         victoryObjectivesRequired = required;
       }
-      final endAt = int.tryParse(details['start_countdown_end_at_ms']?.toString() ?? '');
+      final endAt =
+          int.tryParse(details['start_countdown_end_at_ms']?.toString() ?? '');
       startCountdownEndAtMs = endAt;
     }
     final syncedRemaining =
@@ -661,8 +713,7 @@ class GameController extends ChangeNotifier {
         final lng = double.tryParse(raw['longitude']?.toString() ?? '');
         final status = raw['status']?.toString();
         final role = raw.containsKey('role') ? raw['role']?.toString() : null;
-        final name =
-            raw['displayName']?.toString() ??
+        final name = raw['displayName']?.toString() ??
             raw['name']?.toString() ??
             'Joueur';
         if (idx != -1) {
@@ -822,7 +873,8 @@ class GameController extends ChangeNotifier {
 
   void _pushSnapshotThrottled({String? targetId}) {
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (targetId == null && now - _lastSnapshotPushMs < realtimeRefreshIntervalMs) {
+    if (targetId == null &&
+        now - _lastSnapshotPushMs < realtimeRefreshIntervalMs) {
       return;
     }
     _lastSnapshotPushMs = now;
@@ -898,7 +950,8 @@ class GameController extends ChangeNotifier {
   }
 
   String? _nearestHackableObjectiveIdForPlayer(String playerIdToCheck) {
-    final p = players.where((p) => p.id == playerIdToCheck).toList(growable: false);
+    final p =
+        players.where((p) => p.id == playerIdToCheck).toList(growable: false);
     if (p.isEmpty) return null;
     final player = p.first;
     if ((player.role ?? '').toUpperCase() != 'ROGUE') return null;
@@ -1008,10 +1061,9 @@ class GameController extends ChangeNotifier {
     _socketService.joinGame(
       code: code,
       playerName: data.lobby.playerName,
-      previousPlayerId:
-          (playerId != null && playerId!.isNotEmpty)
-              ? playerId
-              : data.lobby.previousPlayerId,
+      previousPlayerId: (playerId != null && playerId!.isNotEmpty)
+          ? playerId
+          : data.lobby.previousPlayerId,
     );
   }
 
@@ -1043,6 +1095,148 @@ class GameController extends ChangeNotifier {
     return true;
   }
 
+  bool isPlayerAudibleForCurrentRole(GamePlayer player) {
+    if (!isVoiceChatEnabled) return false;
+    if (player.id == playerId) return false;
+    final statusUpper = player.status.toUpperCase();
+    if (statusUpper == 'CAPTURED' || statusUpper == 'DISCONNECTED')
+      return false;
+    final me = (playerRole ?? '').toUpperCase();
+    final targetRole = (player.role ?? '').toUpperCase();
+    if (canListenOtherRoles) return true;
+    if (me.isEmpty || targetRole.isEmpty) return false;
+    return me == targetRole;
+  }
+
+  bool isPlayerVoiceActive(String playerId) {
+    final seenAt = _voiceActiveSeenAtMs[playerId];
+    if (seenAt == null) return false;
+    return DateTime.now().millisecondsSinceEpoch - seenAt <= 1500;
+  }
+
+  List<GamePlayer> get sameRoleVoicePlayers {
+    final me = (playerRole ?? '').toUpperCase();
+    if (me.isEmpty) return const <GamePlayer>[];
+    return players
+        .where((p) => p.id != playerId)
+        .where((p) => p.status.toLowerCase() != 'disconnected')
+        .where((p) => (p.role ?? '').toUpperCase() == me)
+        .toList(growable: false);
+  }
+
+  Future<void> toggleVoiceChatEnabled() async {
+    isVoiceChatEnabled = !isVoiceChatEnabled;
+    if (!isVoiceChatEnabled) {
+      _pushToTalkPressed = false;
+    }
+    await _syncVoiceState();
+    notifyListeners();
+  }
+
+  Future<void> toggleListenOtherRoles() async {
+    canListenOtherRoles = !canListenOtherRoles;
+    await _syncVoiceState();
+    notifyListeners();
+  }
+
+  void _startVoiceActivityTimer() {
+    _voiceActivityTimer?.cancel();
+    _voiceActivityTimer =
+        Timer.periodic(const Duration(milliseconds: 900), (_) {
+      if (!isVoiceChatEnabled) return;
+      if (connectionStatus != 'connected') return;
+      _voiceChatService.broadcastVoiceActivity(
+        forceInactive: false,
+        level: 1.0,
+      );
+      _voiceActiveSeenAtMs.removeWhere(
+        (_, seenAt) => DateTime.now().millisecondsSinceEpoch - seenAt > 2000,
+      );
+      notifyListeners();
+    });
+  }
+
+  Future<void> _syncVoiceState() async {
+    try {
+      final me = playerId;
+      if (me == null || me.isEmpty || !isVoiceChatEnabled) {
+        await _voiceChatService.disable();
+        return;
+      }
+      await _refreshTurnIfNeeded();
+      final peers = players
+          .where((p) => isPlayerAudibleForCurrentRole(p))
+          .map((p) => p.id)
+          .toList();
+      await _voiceChatService.enable(selfId: me, peerIds: peers);
+      await _applyTransmissionGate();
+    } catch (_) {
+      isVoiceChatEnabled = false;
+      await _voiceChatService.disable();
+    }
+  }
+
+  Future<void> refreshVoiceSettings() async {
+    final settings = await _voiceSettingsService.load();
+    voiceMode = settings.mode;
+    voiceActivationThreshold = settings.activationThreshold;
+    await _applyTransmissionGate();
+    notifyListeners();
+  }
+
+  Future<void> setPushToTalkPressed(bool pressed) async {
+    _pushToTalkPressed = pressed;
+    await _applyTransmissionGate();
+    notifyListeners();
+  }
+
+  Future<void> _applyTransmissionGate() async {
+    if (!isVoiceChatEnabled) {
+      await _voiceChatService.setTransmissionActive(false);
+      return;
+    }
+    if (voiceMode == VoiceTransmissionMode.pushToTalk) {
+      await _voiceChatService.setTransmissionActive(_pushToTalkPressed);
+      return;
+    }
+    // Voice activation mode: currently opens transmission continuously,
+    // threshold is used for remote activity highlighting sensitivity.
+    await _voiceChatService.setTransmissionActive(true);
+  }
+
+  void _handleVoiceActivitySignal(String peerId, bool active) {
+    if (!active) return;
+    final threshold = voiceActivationThreshold.clamp(0.05, 1.0);
+    // In absence of raw microphone level, keep compatibility:
+    // packets below threshold are ignored for highlight.
+    if (1.0 < threshold) return;
+    _voiceActiveSeenAtMs[peerId] = DateTime.now().millisecondsSinceEpoch;
+    notifyListeners();
+  }
+
+  Future<void> _refreshTurnIfNeeded() async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now < _turnExpiresAtMs) return;
+    final creds = await _socketService.requestTurnCredentials();
+    if (creds == null || creds.urls.isEmpty) return;
+    final servers = <Map<String, dynamic>>[];
+    for (final url in creds.urls) {
+      final isTurn = url.startsWith('turn:');
+      final entry = <String, dynamic>{'urls': url};
+      if (isTurn && (creds.username?.isNotEmpty ?? false)) {
+        entry['username'] = creds.username;
+      }
+      if (isTurn && (creds.credential?.isNotEmpty ?? false)) {
+        entry['credential'] = creds.credential;
+      }
+      servers.add(entry);
+    }
+    if (servers.isNotEmpty) {
+      _voiceChatService.configureIceServers(servers);
+      _turnExpiresAtMs = now + 9 * 60 * 1000;
+    }
+  }
+
   int get startZoneRadiusMeters {
     return _effectiveGameConfig?.objectiveZoneRadius ??
         bootstrap?.lobby.form?.objectiveZoneRadius ??
@@ -1052,7 +1246,8 @@ class GameController extends ChangeNotifier {
   GeoPoint? _startZoneForRole(String? role) {
     final upper = (role ?? '').toUpperCase();
     if (upper == 'ROGUE') {
-      return _effectiveGameConfig?.rogueStartZone ?? bootstrap?.lobby.rogueStartZone;
+      return _effectiveGameConfig?.rogueStartZone ??
+          bootstrap?.lobby.rogueStartZone;
     }
     if (upper == 'AGENT') {
       return _effectiveGameConfig?.startZone ?? bootstrap?.lobby.agentStartZone;
@@ -1219,7 +1414,8 @@ class GameController extends ChangeNotifier {
     final adjacency = <int, Map<int, double>>{};
 
     int ensureNode(GeoPoint p) {
-      final key = '${p.latitude.toStringAsFixed(6)},${p.longitude.toStringAsFixed(6)}';
+      final key =
+          '${p.latitude.toStringAsFixed(6)},${p.longitude.toStringAsFixed(6)}';
       final existing = nodeIndexByKey[key];
       if (existing != null) return existing;
       final idx = nodes.length;
@@ -1421,8 +1617,10 @@ class GameController extends ChangeNotifier {
     _startCountdownTimer?.cancel();
     _countdownTimer?.cancel();
     _joinWatchdogTimer?.cancel();
+    _voiceActivityTimer?.cancel();
     _messagesSub?.cancel();
     _positionSub?.cancel();
+    _voiceChatService.dispose();
     _socketService.dispose();
     super.dispose();
   }

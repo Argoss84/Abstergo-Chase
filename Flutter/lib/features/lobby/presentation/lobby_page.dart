@@ -149,6 +149,17 @@ class _LobbyPageState extends State<LobbyPage> {
               ],
             ),
             actions: [
+              IconButton(
+                tooltip: _controller.isVoiceChatEnabled
+                    ? 'Désactiver vocal'
+                    : 'Activer vocal',
+                onPressed: () {
+                  _controller.toggleVoiceChat();
+                },
+                icon: Icon(
+                  _controller.isVoiceChatEnabled ? Icons.mic : Icons.mic_off,
+                ),
+              ),
               TextButton(
                 onPressed: () {
                   _controller.leaveLobby();
@@ -273,44 +284,73 @@ class _LobbyPageState extends State<LobbyPage> {
                             ),
                             const SizedBox(height: 8),
                             ..._controller.players.map(
-                              (player) => ListTile(
-                                dense: true,
-                                contentPadding: EdgeInsets.zero,
-                                title: Text(
-                                  player.name +
-                                      (player.id == _controller.playerId
-                                          ? ' (Vous)'
-                                          : ''),
-                                ),
-                                subtitle: Text(player.isHost ? 'Host' : 'Joueur'),
-                                trailing: _controller.isHost
-                                    ? DropdownButton<String>(
-                                        value: player.role ?? '',
-                                        items: const [
-                                          DropdownMenuItem(
-                                            value: '',
-                                            child: Text('Aucun'),
-                                          ),
-                                          DropdownMenuItem(
-                                            value: 'AGENT',
-                                            child: Text('Agent'),
-                                          ),
-                                          DropdownMenuItem(
-                                            value: 'ROGUE',
-                                            child: Text('Rogue'),
-                                          ),
-                                        ],
-                                        onChanged: (value) {
-                                          _controller.updateRole(
-                                            targetPlayerId: player.id,
-                                            role: (value?.isEmpty ?? true)
-                                                ? null
-                                                : value,
-                                          );
-                                        },
-                                      )
-                                    : Text(player.role ?? 'Aucun'),
-                              ),
+                              (player) {
+                                final voiceActive =
+                                    _controller.isPlayerVoiceActive(player.id);
+                                return AnimatedContainer(
+                                  duration: const Duration(milliseconds: 180),
+                                  margin: const EdgeInsets.only(bottom: 4),
+                                  decoration: BoxDecoration(
+                                    color: voiceActive
+                                        ? Colors.cyanAccent.withOpacity(0.16)
+                                        : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: voiceActive
+                                          ? Colors.cyanAccent
+                                          : Colors.transparent,
+                                    ),
+                                  ),
+                                  child: ListTile(
+                                    dense: true,
+                                    contentPadding:
+                                        const EdgeInsets.symmetric(horizontal: 8),
+                                    leading: Icon(
+                                      voiceActive
+                                          ? Icons.graphic_eq
+                                          : Icons.volume_mute,
+                                      size: 18,
+                                      color: voiceActive
+                                          ? Colors.cyanAccent
+                                          : Colors.white70,
+                                    ),
+                                    title: Text(
+                                      player.name +
+                                          (player.id == _controller.playerId
+                                              ? ' (Vous)'
+                                              : ''),
+                                    ),
+                                    subtitle: Text(player.isHost ? 'Host' : 'Joueur'),
+                                    trailing: _controller.isHost
+                                        ? DropdownButton<String>(
+                                            value: player.role ?? '',
+                                            items: const [
+                                              DropdownMenuItem(
+                                                value: '',
+                                                child: Text('Aucun'),
+                                              ),
+                                              DropdownMenuItem(
+                                                value: 'AGENT',
+                                                child: Text('Agent'),
+                                              ),
+                                              DropdownMenuItem(
+                                                value: 'ROGUE',
+                                                child: Text('Rogue'),
+                                              ),
+                                            ],
+                                            onChanged: (value) {
+                                              _controller.updateRole(
+                                                targetPlayerId: player.id,
+                                                role: (value?.isEmpty ?? true)
+                                                    ? null
+                                                    : value,
+                                              );
+                                            },
+                                          )
+                                        : Text(player.role ?? 'Aucun'),
+                                  ),
+                                );
+                              },
                             ),
                           ],
                         ),

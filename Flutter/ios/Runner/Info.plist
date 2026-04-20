@@ -47,5 +47,7 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Le micro est requis pour le chat vocal en partie et en lobby.</string>
 </dict>
 </plist>

@@ -76,7 +76,11 @@ resource "aws_ecs_task_definition" "this" {
         { name = "SIGNALING_PORT", value = tostring(var.container_port) },
         { name = "SOCKET_IO_PATH", value = var.socket_io_path },
         { name = "MEMORY_ONLY_MODE", value = tostring(var.memory_only_mode) },
-        { name = "EMPTY_GAME_TTL_MS", value = tostring(var.empty_game_ttl_ms) }
+        { name = "EMPTY_GAME_TTL_MS", value = tostring(var.empty_game_ttl_ms) },
+        { name = "TURN_URLS", value = var.turn_urls },
+        { name = "TURN_SECRET", value = var.turn_secret },
+        { name = "TURN_REALM", value = var.turn_realm },
+        { name = "TURN_TTL_SECONDS", value = tostring(var.turn_ttl_seconds) }
       ]
     }
   ])

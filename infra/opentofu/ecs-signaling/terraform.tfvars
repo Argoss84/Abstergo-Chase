@@ -12,6 +12,10 @@ container_port         = 5174
 socket_io_path         = "/socket.io"
 memory_only_mode       = true
 empty_game_ttl_ms      = 300000
+turn_urls              = "stun:13.37.68.16:3478,turn:13.37.68.16:3478?transport=udp,turn:13.37.68.16:3478?transport=tcp"
+turn_secret            = "STfSxH3/J1y7JPiivIQWvmzUIkgEb80KksLLj1FvrC+K0lcBqe41uiPJa0c7//vK"
+turn_realm             = "voice.abstergochase"
+turn_ttl_seconds       = 600
 desired_count          = 1
 assign_public_ip       = true
 task_security_group_id = "sg-01b999f1951fb5bc3"

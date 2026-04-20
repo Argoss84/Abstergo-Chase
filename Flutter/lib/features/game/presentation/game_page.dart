@@ -8,6 +8,7 @@ import 'package:abstergo_chase/features/game/domain/game_models.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
 import 'package:abstergo_chase/features/lobby/presentation/widgets/lobby_map_preview.dart';
 import 'package:abstergo_chase/shared/services/vibration_service.dart';
+import 'package:abstergo_chase/shared/services/voice_settings_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_compass/flutter_compass.dart';
@@ -37,7 +38,8 @@ class GamePage extends StatefulWidget {
   State<GamePage> createState() => _GamePageState();
 }
 
-class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin {
+class _GamePageState extends State<GamePage>
+    with SingleTickerProviderStateMixin {
   late final GameController _controller;
   late final AnimationController _guidancePulseController;
   late final MapController _mapController;
@@ -96,7 +98,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
             : (_controller.roleChat.length - _lastReadCount).clamp(0, 999);
         final fallbackCenter = _resolveCenter();
         final connectionReady = _controller.connectionStatus == 'connected';
-        final topInset = MediaQuery.of(context).padding.top + kToolbarHeight + 8;
+        final topInset =
+            MediaQuery.of(context).padding.top + kToolbarHeight + 8;
         final objectiveZoneRadius = effectiveGameConfig?.objectiveZoneRadius ??
             widget.bootstrap.lobby.form?.objectiveZoneRadius ??
             50;
@@ -110,6 +113,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
         final outOfZone = _controller.isOutOfGameZone;
         final myPos = _controller.myPosition;
         final startCountdownSeconds = _startCountdownSeconds();
+        final sameRolePlayers = _controller.sameRoleVoicePlayers;
         _handleGameVibrationSignals(
           startCountdownSeconds: startCountdownSeconds,
           outOfZone: outOfZone,
@@ -170,6 +174,17 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
               (_controller.playerRole ?? 'N/A').toUpperCase(),
             ),
             actions: [
+              IconButton(
+                tooltip: _controller.isVoiceChatEnabled
+                    ? 'Désactiver vocal'
+                    : 'Activer vocal',
+                onPressed: () {
+                  _controller.toggleVoiceChatEnabled();
+                },
+                icon: Icon(
+                  _controller.isVoiceChatEnabled ? Icons.mic : Icons.mic_off,
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: Center(child: _buildConnectionBadge()),
@@ -226,258 +241,353 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 onPressed: _openGameInfo,
                 child: const Icon(Icons.info_outline),
               ),
+              if (_controller.voiceMode ==
+                  VoiceTransmissionMode.pushToTalk) ...[
+                const SizedBox(height: 10),
+                _buildPushToTalkFab(),
+              ],
             ],
           ),
           body: Stack(
             children: [
               (_controller.isLoading || !connectionReady)
                   ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const CircularProgressIndicator(),
-                      const SizedBox(height: 12),
-                      Text(
-                        _controller.connectionStatus == 'connecting'
-                            ? 'Connexion au serveur en cours...'
-                            : _controller.connectionStatus == 'error'
-                                ? 'Impossible de se connecter au serveur.'
-                                : 'Initialisation de la partie...',
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const CircularProgressIndicator(),
+                          const SizedBox(height: 12),
+                          Text(
+                            _controller.connectionStatus == 'connecting'
+                                ? 'Connexion au serveur en cours...'
+                                : _controller.connectionStatus == 'error'
+                                    ? 'Impossible de se connecter au serveur.'
+                                    : 'Initialisation de la partie...',
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                )
-              : Stack(
-                  children: [
-                    Positioned.fill(
-                      child: fallbackCenter == null
-                          ? const Center(child: Text('Carte indisponible'))
-                          : LobbyMapPreview(
-                              mapController: _mapController,
-                              height: null,
-                              center: _controller.myPosition ?? fallbackCenter,
-                              mapRadiusMeters:
-                                  effectiveGameConfig?.mapRadius ??
+                    )
+                  : Stack(
+                      children: [
+                        Positioned.fill(
+                          child: fallbackCenter == null
+                              ? const Center(child: Text('Carte indisponible'))
+                              : LobbyMapPreview(
+                                  mapController: _mapController,
+                                  height: null,
+                                  center:
+                                      _controller.myPosition ?? fallbackCenter,
+                                  mapRadiusMeters: effectiveGameConfig
+                                          ?.mapRadius ??
                                       widget.bootstrap.lobby.form?.mapRadius ??
                                       1000,
-                              outerStreetContour: effectiveGameConfig
-                                      ?.mapStreets
-                                      .isNotEmpty ==
-                                  true
-                                  ? effectiveGameConfig!.mapStreets
-                                  : widget.bootstrap.lobby.outerStreetContour,
-                              objectives: objectiveDisplayPoints,
-                              agentStartZone:
-                                  effectiveGameConfig?.startZone ??
-                                      widget.bootstrap.lobby.agentStartZone,
-                              rogueStartZone:
-                                  effectiveGameConfig?.rogueStartZone ??
-                                      widget.bootstrap.lobby.rogueStartZone,
-                              objectiveZoneRadiusMeters:
-                                  objectiveZoneRadius,
-                              showObjectives: true,
-                              showObjectiveMarkers: isRogue,
-                              showObjectiveZones: !isRogue,
-                              objectiveMarkerIcon: isRogue
-                                  ? Icons.location_on
-                                  : Icons.adjust,
-                              objectiveMarkerColor: isRogue
-                                  ? Colors.purpleAccent
-                                  : Colors.red,
-                              objectiveMarkerSize: isRogue ? 30 : 18,
-                              guidancePath: _controller.gameStarted
-                                  ? const <GeoPoint>[]
-                                  : _controller.buildPathToMyStartZone(),
-                              guidancePathColor: guidanceColor,
-                              guidancePathDotted: true,
-                              guidanceNeonPulse: _guidancePulseController.value,
-                              highlightObjectiveZones: capturingDisplayPoints,
-                              highlightObjectiveZoneRadiusMeters: objectiveZoneRadius,
-                              highlightObjectivePulse:
-                                  _guidancePulseController.value,
-                              playerPositions: _controller.players
-                                  .where(_controller.isPlayerVisibleForCurrentRole)
-                                  .where(
-                                    (p) => p.status.toLowerCase() != 'disconnected',
-                                  )
-                                  .where((p) =>
-                                      p.latitude != null && p.longitude != null)
-                                  .map((p) => GeoPoint(
-                                        latitude: p.latitude!,
-                                        longitude: p.longitude!,
-                                      ))
-                                  .toList(growable: false),
-                            ),
-                    ),
-                    if (winnerType == null)
-                      Positioned(
-                        top: MediaQuery.of(context).padding.top + kToolbarHeight,
-                        left: 0,
-                        right: 0,
-                        child: ValueListenableBuilder<double?>(
-                          valueListenable: _headingDeg,
-                          builder: (context, heading, _) {
-                            return _CompassBanner(
-                              roleUpper: roleUpper,
-                              headingDeg: heading,
-                              myPosition: myPos,
-                              players: _controller.players,
-                              objectives: _controller.objectives,
-                              selfPlayerId: _controller.playerId,
-                            );
-                          },
-                        ),
-                      ),
-                    if (_controller.error != null)
-                      Positioned(
-                        top: topInset,
-                        left: 12,
-                        right: 12,
-                        child: Container(
-                          color: Colors.red.shade100,
-                          padding: const EdgeInsets.all(8),
-                          child: Text(_controller.error!),
-                        ),
-                      ),
-                    if (winnerType == null && outOfZone)
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: Center(
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 12,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.65),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Text(
-                                'Retournez dans la zone de jeux',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (winnerType == null && startCountdownSeconds != null)
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: Container(
-                            color: Colors.black.withOpacity(0.55),
-                            child: Center(
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 18,
-                                  vertical: 16,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.95),
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Text(
-                                      'La partie commence dans…',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        fontSize: 22,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Text(
-                                      '$startCountdownSeconds',
-                                      style: const TextStyle(
-                                        fontSize: 56,
-                                        fontWeight: FontWeight.w900,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (isRogue && rogueCaptureRemaining != null)
-                      Positioned(
-                        top: topInset,
-                        left: 12,
-                        right: 12,
-                        child: _buildRogueCaptureFeedback(
-                          remainingSeconds: rogueCaptureRemaining,
-                          progress: rogueCaptureProgress,
-                        ),
-                      ),
-                    if (_controller.isHost && !_controller.gameStarted)
-                      Positioned(
-                        top: topInset,
-                        left: 12,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
-                            child: Container(
-                              width: 260,
-                              padding: const EdgeInsets.all(8),
-                              color: Colors.black.withOpacity(0.08),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  ..._controller.players
+                                  outerStreetContour: effectiveGameConfig
+                                              ?.mapStreets.isNotEmpty ==
+                                          true
+                                      ? effectiveGameConfig!.mapStreets
+                                      : widget
+                                          .bootstrap.lobby.outerStreetContour,
+                                  objectives: objectiveDisplayPoints,
+                                  agentStartZone:
+                                      effectiveGameConfig?.startZone ??
+                                          widget.bootstrap.lobby.agentStartZone,
+                                  rogueStartZone:
+                                      effectiveGameConfig?.rogueStartZone ??
+                                          widget.bootstrap.lobby.rogueStartZone,
+                                  objectiveZoneRadiusMeters:
+                                      objectiveZoneRadius,
+                                  showObjectives: true,
+                                  showObjectiveMarkers: isRogue,
+                                  showObjectiveZones: !isRogue,
+                                  objectiveMarkerIcon: isRogue
+                                      ? Icons.location_on
+                                      : Icons.adjust,
+                                  objectiveMarkerColor: isRogue
+                                      ? Colors.purpleAccent
+                                      : Colors.red,
+                                  objectiveMarkerSize: isRogue ? 30 : 18,
+                                  guidancePath: _controller.gameStarted
+                                      ? const <GeoPoint>[]
+                                      : _controller.buildPathToMyStartZone(),
+                                  guidancePathColor: guidanceColor,
+                                  guidancePathDotted: true,
+                                  guidanceNeonPulse:
+                                      _guidancePulseController.value,
+                                  highlightObjectiveZones:
+                                      capturingDisplayPoints,
+                                  highlightObjectiveZoneRadiusMeters:
+                                      objectiveZoneRadius,
+                                  highlightObjectivePulse:
+                                      _guidancePulseController.value,
+                                  playerPositions: _controller.players
+                                      .where(_controller
+                                          .isPlayerVisibleForCurrentRole)
                                       .where(
+                                        (p) =>
+                                            p.status.toLowerCase() !=
+                                            'disconnected',
+                                      )
+                                      .where((p) =>
+                                          p.latitude != null &&
+                                          p.longitude != null)
+                                      .map((p) => GeoPoint(
+                                            latitude: p.latitude!,
+                                            longitude: p.longitude!,
+                                          ))
+                                      .toList(growable: false),
+                                ),
+                        ),
+                        if (winnerType == null)
+                          Positioned(
+                            top: MediaQuery.of(context).padding.top +
+                                kToolbarHeight,
+                            left: 0,
+                            right: 0,
+                            child: ValueListenableBuilder<double?>(
+                              valueListenable: _headingDeg,
+                              builder: (context, heading, _) {
+                                return _CompassBanner(
+                                  roleUpper: roleUpper,
+                                  headingDeg: heading,
+                                  myPosition: myPos,
+                                  players: _controller.players,
+                                  objectives: _controller.objectives,
+                                  selfPlayerId: _controller.playerId,
+                                );
+                              },
+                            ),
+                          ),
+                        if (_controller.error != null)
+                          Positioned(
+                            top: topInset,
+                            left: 12,
+                            right: 12,
+                            child: Container(
+                              color: Colors.red.shade100,
+                              padding: const EdgeInsets.all(8),
+                              child: Text(_controller.error!),
+                            ),
+                          ),
+                        if (winnerType == null && outOfZone)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: Center(
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 12,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withOpacity(0.65),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Text(
+                                    'Retournez dans la zone de jeux',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (winnerType == null && startCountdownSeconds != null)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: Container(
+                                color: Colors.black.withOpacity(0.55),
+                                child: Center(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 18,
+                                      vertical: 16,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.95),
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Text(
+                                          'La partie commence dans…',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Text(
+                                          '$startCountdownSeconds',
+                                          style: const TextStyle(
+                                            fontSize: 56,
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (isRogue && rogueCaptureRemaining != null)
+                          Positioned(
+                            top: topInset,
+                            left: 12,
+                            right: 12,
+                            child: _buildRogueCaptureFeedback(
+                              remainingSeconds: rogueCaptureRemaining,
+                              progress: rogueCaptureProgress,
+                            ),
+                          ),
+                        if (_controller.isHost && !_controller.gameStarted)
+                          Positioned(
+                            top: topInset,
+                            left: 12,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: BackdropFilter(
+                                filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+                                child: Container(
+                                  width: 260,
+                                  padding: const EdgeInsets.all(8),
+                                  color: Colors.black.withOpacity(0.08),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      ..._controller.players
+                                          .where(
                                         (player) =>
                                             player.status.toLowerCase() !=
                                             'disconnected',
                                       )
-                                      .map((player) {
-                                    final inZone = _controller.isPlayerInStartZone(player);
-                                    final role = (player.role ?? '').toUpperCase();
-                                    final roleShort = role == 'ROGUE'
-                                        ? 'r'
-                                        : role == 'AGENT'
-                                            ? 'a'
-                                            : '-';
-                                    return Padding(
-                                      padding: const EdgeInsets.only(bottom: 4),
-                                      child: Text(
-                                        '${player.name} [$roleShort]',
-                                        style: TextStyle(
-                                          color: inZone
-                                              ? Colors.greenAccent
-                                              : Colors.redAccent,
-                                          fontWeight: FontWeight.w700,
+                                          .map((player) {
+                                        final inZone = _controller
+                                            .isPlayerInStartZone(player);
+                                        final role =
+                                            (player.role ?? '').toUpperCase();
+                                        final roleShort = role == 'ROGUE'
+                                            ? 'r'
+                                            : role == 'AGENT'
+                                                ? 'a'
+                                                : '-';
+                                        return Padding(
+                                          padding:
+                                              const EdgeInsets.only(bottom: 4),
+                                          child: Text(
+                                            '${player.name} [$roleShort]',
+                                            style: TextStyle(
+                                              color: inZone
+                                                  ? Colors.greenAccent
+                                                  : Colors.redAccent,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        );
+                                      }),
+                                      const SizedBox(height: 6),
+                                      FilledButton(
+                                        onPressed: _controller.canHostStartGame
+                                            ? _controller.startGameFromHost
+                                            : null,
+                                        child: Text(
+                                          _controller.canHostStartGame
+                                              ? 'Démarrer'
+                                              : 'En attente',
                                         ),
                                       ),
-                                    );
-                                  }),
-                                  const SizedBox(height: 6),
-                                  FilledButton(
-                                    onPressed: _controller.canHostStartGame
-                                        ? _controller.startGameFromHost
-                                        : null,
-                                    child: Text(
-                                      _controller.canHostStartGame
-                                          ? 'Démarrer'
-                                          : 'En attente',
-                                    ),
+                                    ],
                                   ),
-                                ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ),
-                  ],
-                ),
+                        if ((!_controller.isHost || _controller.gameStarted) &&
+                            winnerType == null &&
+                            sameRolePlayers.isNotEmpty)
+                          Positioned(
+                            top: topInset,
+                            left: 12,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: BackdropFilter(
+                                filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+                                child: Container(
+                                  width: 260,
+                                  padding: const EdgeInsets.all(8),
+                                  color: Colors.black.withOpacity(0.08),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      ...sameRolePlayers.map((player) {
+                                        final activeVoice = _controller
+                                            .isPlayerVoiceActive(player.id);
+                                        return Container(
+                                          margin:
+                                              const EdgeInsets.only(bottom: 4),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: activeVoice
+                                                ? Colors.cyanAccent
+                                                    .withOpacity(0.18)
+                                                : Colors.transparent,
+                                            borderRadius:
+                                                BorderRadius.circular(6),
+                                            border: Border.all(
+                                              color: activeVoice
+                                                  ? Colors.cyanAccent
+                                                  : Colors.white
+                                                      .withOpacity(0.1),
+                                              width: 1,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                activeVoice
+                                                    ? Icons.graphic_eq
+                                                    : Icons.volume_mute,
+                                                size: 16,
+                                                color: activeVoice
+                                                    ? Colors.cyanAccent
+                                                    : Colors.white70,
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Expanded(
+                                                child: Text(
+                                                  player.name,
+                                                  style: TextStyle(
+                                                    color: activeVoice
+                                                        ? Colors.cyanAccent
+                                                        : Colors.white,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
               if (connectionReady && !_controller.isLoading)
                 Positioned(
                   left: 0,
@@ -485,7 +595,9 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                   bottom: 16,
                   child: Align(
                     alignment: Alignment.bottomCenter,
-                    child: winnerType == null ? _buildActionFabMenu() : const SizedBox.shrink(),
+                    child: winnerType == null
+                        ? _buildActionFabMenu()
+                        : const SizedBox.shrink(),
                   ),
                 ),
               if (winnerType != null)
@@ -621,9 +733,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     required double progress,
   }) {
     final clamped = remainingSeconds < 0 ? 0 : remainingSeconds;
-    final clampedProgress = progress < 0
-        ? 0.0
-        : (progress > 1 ? 1.0 : progress);
+    final clampedProgress =
+        progress < 0 ? 0.0 : (progress > 1 ? 1.0 : progress);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
@@ -669,7 +780,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
               minHeight: 8,
               value: clampedProgress,
               backgroundColor: Colors.white.withOpacity(0.25),
-              valueColor: const AlwaysStoppedAnimation<Color>(Colors.orangeAccent),
+              valueColor:
+                  const AlwaysStoppedAnimation<Color>(Colors.orangeAccent),
             ),
           ),
         ],
@@ -683,7 +795,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
         role == 'ROGUE' ? Icons.terminal : Icons.center_focus_strong;
     final roleActionLabel =
         role == 'ROGUE' ? 'Hacker objectif' : 'Capturer rogue';
-    final rogueActionReady = role == 'ROGUE' && _controller.canTriggerRogueObjectiveCapture;
+    final rogueActionReady =
+        role == 'ROGUE' && _controller.canTriggerRogueObjectiveCapture;
     return SizedBox(
       width: 280,
       height: 220,
@@ -705,9 +818,16 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
               left: 78,
               bottom: 126,
               child: _miniActionFab(
-                icon: Icons.fitness_center,
-                tooltip: 'Contrôle santé',
-                onTap: () => _showFabPlaceholder('Contrôle santé'),
+                icon: _controller.isVoiceChatEnabled
+                    ? Icons.volume_up
+                    : Icons.volume_off,
+                tooltip: _controller.isVoiceChatEnabled
+                    ? 'Couper discussion vocale'
+                    : 'Activer discussion vocale',
+                onTap: () {
+                  _controller.toggleVoiceChatEnabled();
+                  setState(() => _isActionFabOpen = false);
+                },
               ),
             ),
           if (_isActionFabOpen)
@@ -747,12 +867,10 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                   }
                   _openAgentCaptureScanner();
                 },
-                backgroundColor: rogueActionReady
-                    ? Colors.red.shade700
-                    : Colors.white,
-                foregroundColor: rogueActionReady
-                    ? Colors.white
-                    : Colors.black87,
+                backgroundColor:
+                    rogueActionReady ? Colors.red.shade700 : Colors.white,
+                foregroundColor:
+                    rogueActionReady ? Colors.white : Colors.black87,
                 pulseAura: rogueActionReady,
                 pulseValue: _guidancePulseController.value,
               ),
@@ -772,6 +890,31 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPushToTalkFab() {
+    final enabled = _controller.isVoiceChatEnabled;
+    return Listener(
+      onPointerDown: (_) {
+        if (!enabled) return;
+        _controller.setPushToTalkPressed(true);
+      },
+      onPointerUp: (_) {
+        _controller.setPushToTalkPressed(false);
+      },
+      onPointerCancel: (_) {
+        _controller.setPushToTalkPressed(false);
+      },
+      child: FloatingActionButton(
+        heroTag: 'game-ptt-fab',
+        tooltip:
+            enabled ? 'Maintenir pour parler' : 'Activez le vocal pour parler',
+        onPressed: () {},
+        backgroundColor: enabled ? Colors.orangeAccent : Colors.grey,
+        foregroundColor: Colors.black87,
+        child: const Icon(Icons.record_voice_over),
       ),
     );
   }
@@ -805,7 +948,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
         boxShadow: pulseAura
             ? <BoxShadow>[
                 BoxShadow(
-                  color: Colors.redAccent.withOpacity(0.35 + (pulseValue * 0.45)),
+                  color:
+                      Colors.redAccent.withOpacity(0.35 + (pulseValue * 0.45)),
                   blurRadius: 8 + (pulseValue * 14),
                   spreadRadius: 1 + (pulseValue * 4),
                 ),
@@ -850,7 +994,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       context: context,
       builder: (dialogContext) {
         return Dialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -877,7 +1022,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  (_controller.gameCode ?? widget.bootstrap.lobby.code).toUpperCase(),
+                  (_controller.gameCode ?? widget.bootstrap.lobby.code)
+                      .toUpperCase(),
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 8),
@@ -899,7 +1045,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     final playerName = self.isNotEmpty ? self.first.name : 'Joueur';
     return jsonEncode(<String, dynamic>{
       'type': 'player-vitality-id',
-      'gameCode': (_controller.gameCode ?? widget.bootstrap.lobby.code).toUpperCase(),
+      'gameCode':
+          (_controller.gameCode ?? widget.bootstrap.lobby.code).toUpperCase(),
       'playerId': selfId,
       'playerName': playerName,
       'role': (_controller.playerRole ?? '').toUpperCase(),
@@ -936,7 +1083,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                   onQRViewCreated: (controller) {
                     scannerController = controller;
                     scanSubscription?.cancel();
-                    scanSubscription = controller.scannedDataStream.listen((scan) {
+                    scanSubscription =
+                        controller.scannedDataStream.listen((scan) {
                       if (handled) return;
                       final raw = scan.code?.trim() ?? '';
                       if (raw.isEmpty) return;
@@ -976,7 +1124,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
 
   void _handleScannedCaptureQr(String rawQr) {
     final feedback = _controller.triggerAgentCaptureFromQr(rawQr);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(feedback)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(feedback)));
   }
 
   GeoPoint? _resolveCenter() {
@@ -1021,9 +1170,11 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     final dx = distanceMeters * cos(angle);
     final dy = distanceMeters * sin(angle);
     const metersPerDegLat = 111320.0;
-    final metersPerDegLng = metersPerDegLat * cos(objective.latitude * pi / 180);
+    final metersPerDegLng =
+        metersPerDegLat * cos(objective.latitude * pi / 180);
     final lat = objective.latitude + (dy / metersPerDegLat);
-    final lng = objective.longitude + (dx / (metersPerDegLng.abs() < 1e-6 ? 1e-6 : metersPerDegLng));
+    final lng = objective.longitude +
+        (dx / (metersPerDegLng.abs() < 1e-6 ? 1e-6 : metersPerDegLng));
     return GeoPoint(latitude: lat, longitude: lng);
   }
 
@@ -1068,14 +1219,16 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                       children: _controller.roleChat.map((m) {
                         final isMe = m.playerId == _controller.playerId;
                         return Align(
-                          alignment:
-                              isMe ? Alignment.centerRight : Alignment.centerLeft,
+                          alignment: isMe
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
                           child: Container(
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color:
-                                  isMe ? Colors.blue.shade100 : Colors.grey.shade200,
+                              color: isMe
+                                  ? Colors.blue.shade100
+                                  : Colors.grey.shade200,
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(
@@ -1142,81 +1295,111 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (context) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.of(context).size.height * 0.9,
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              const Text(
-                'Informations de la partie',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 14),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Code de la partie',
-                        style: TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: 8),
-                      SelectableText(
-                        code,
-                        style: const TextStyle(
-                          fontSize: 30,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 4,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.9,
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                const Text(
+                  'Informations de la partie',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 14),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Code de la partie',
+                          style: TextStyle(fontWeight: FontWeight.w600),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 8),
+                        SelectableText(
+                          code,
+                          style: const TextStyle(
+                            fontSize: 30,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 4,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      children: [
+                        _kvInfo('Rôle', role),
+                        _kvInfo('Joueurs', '${_controller.players.length}'),
+                        _kvInfo(
+                            'Objectifs', '${_controller.objectives.length}'),
+                        _kvInfo(
+                          'Temps restant',
+                          _controller.remainingSeconds != null
+                              ? _formatDuration(_controller.remainingSeconds!)
+                              : 'n/a',
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      children: [
+                        _kvInfo('Rayon map',
+                            '${config?.mapRadius ?? form?.mapRadius ?? 0} m'),
+                        _kvInfo(
+                          'Rayon zone objectif',
+                          '${config?.objectiveZoneRadius ?? form?.objectiveZoneRadius ?? 0} m',
+                        ),
+                        _kvInfo(
+                          'Duree',
+                          '${form?.duration ?? _controller.remainingSeconds ?? 0} sec',
+                        ),
+                        _kvInfo(
+                          'Victoire objectifs',
+                          '${form?.victoryConditionObjectives ?? 'n/a'}',
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Card(
                   child: Column(
                     children: [
-                      _kvInfo('Rôle', role),
-                      _kvInfo('Joueurs', '${_controller.players.length}'),
-                      _kvInfo('Objectifs', '${_controller.objectives.length}'),
-                      _kvInfo(
-                        'Temps restant',
-                        _controller.remainingSeconds != null
-                            ? _formatDuration(_controller.remainingSeconds!)
-                            : 'n/a',
+                      SwitchListTile(
+                        value: _controller.isVoiceChatEnabled,
+                        title: const Text('Chat vocal actif'),
+                        subtitle: const Text(
+                            'Active ou coupe votre émission/réception vocale'),
+                        onChanged: (_) {
+                          _controller.toggleVoiceChatEnabled();
+                          setModalState(() {});
+                        },
+                      ),
+                      SwitchListTile(
+                        value: _controller.canListenOtherRoles,
+                        title: const Text('Écoute inter-rôles (option)'),
+                        subtitle:
+                            const Text('Permet d’écouter les rôles différents'),
+                        onChanged: (_) {
+                          _controller.toggleListenOtherRoles();
+                          setModalState(() {});
+                        },
                       ),
                     ],
                   ),
                 ),
-              ),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    children: [
-                      _kvInfo('Rayon map', '${config?.mapRadius ?? form?.mapRadius ?? 0} m'),
-                      _kvInfo(
-                        'Rayon zone objectif',
-                        '${config?.objectiveZoneRadius ?? form?.objectiveZoneRadius ?? 0} m',
-                      ),
-                      _kvInfo(
-                        'Duree',
-                        '${form?.duration ?? _controller.remainingSeconds ?? 0} sec',
-                      ),
-                      _kvInfo(
-                        'Victoire objectifs',
-                        '${form?.victoryConditionObjectives ?? 'n/a'}',
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -1401,7 +1584,8 @@ class _CompassBanner extends StatelessWidget {
     final mePos = myPosition!;
     final out = <_CompassTarget>[];
 
-    void addPlayer(GamePlayer p, {required IconData icon, required Color color}) {
+    void addPlayer(GamePlayer p,
+        {required IconData icon, required Color color}) {
       if (meId != null && p.id == meId) return;
       if ((p.status).toLowerCase() == 'disconnected') return;
       if ((p.status).toUpperCase() == 'CAPTURED') return;
@@ -1480,7 +1664,6 @@ class _CompassBanner extends StatelessWidget {
     out.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
     return out.take(12).toList(growable: false);
   }
-
 }
 
 class _TargetDelta {
@@ -1601,8 +1784,11 @@ class _FpsCompassBar extends StatelessWidget {
     final idx = (xBuckets[key] ?? 0);
     xBuckets[key] = idx + 1;
     final top = 16 + (idx * 12.0);
-    final meters = target.distanceMeters.isFinite ? target.distanceMeters.round() : 0;
-    final shortLabel = target.label.length > 10 ? '${target.label.substring(0, 10)}…' : target.label;
+    final meters =
+        target.distanceMeters.isFinite ? target.distanceMeters.round() : 0;
+    final shortLabel = target.label.length > 10
+        ? '${target.label.substring(0, 10)}…'
+        : target.label;
 
     return Positioned(
       left: x - 18,
@@ -1697,7 +1883,8 @@ class _FpsCompassPainter extends CustomPainter {
       final isMajor = (deg.round() % 15 == 0);
       const y0 = 0.0;
       final y1 = isMajor ? 14.0 : 8.0;
-      canvas.drawLine(Offset(x, y0), Offset(x, y1), isMajor ? tickPaint : minorPaint);
+      canvas.drawLine(
+          Offset(x, y0), Offset(x, y1), isMajor ? tickPaint : minorPaint);
 
       if (isMajor) {
         final label = _labelForDeg(deg.round());
@@ -1711,24 +1898,15 @@ class _FpsCompassPainter extends CustomPainter {
   static String _labelForDeg(int deg) {
     final d = _normalizeDeg(deg.toDouble()).round() % 360;
     switch (d) {
-      case 0:
-        return 'N';
-      case 45:
-        return 'NE';
-      case 90:
-        return 'E';
-      case 135:
-        return 'SE';
-      case 180:
-        return 'S';
-      case 225:
-        return 'SW';
-      case 270:
-        return 'W';
-      case 315:
-        return 'NW';
-      default:
-        return d.toString();
+      case 0: return 'N';
+      case 45: return 'NE';
+      case 90: return 'E';
+      case 135: return 'SE';
+      case 180: return 'S';
+      case 225: return 'SW';
+      case 270: return 'W';
+      case 315: return 'NW';
+      default: return d.toString();
     }
   }
 

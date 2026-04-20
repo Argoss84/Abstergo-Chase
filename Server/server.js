@@ -1,6 +1,6 @@
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHmac } from 'crypto';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -43,6 +43,16 @@ const ENABLE_COST_METRICS =
 const ENABLE_SERVER_LOGS =
   process.env.ENABLE_SERVER_LOGS === '1' ||
   /^true$/i.test(process.env.ENABLE_SERVER_LOGS || '');
+const TURN_URLS = (process.env.TURN_URLS || '')
+  .split(',')
+  .map((v) => v.trim())
+  .filter(Boolean);
+const TURN_SECRET = process.env.TURN_SECRET || '';
+const TURN_REALM = process.env.TURN_REALM || '';
+const TURN_TTL_SECONDS = Math.max(
+  60,
+  Number.parseInt(process.env.TURN_TTL_SECONDS || '600', 10) || 600
+);
 const COST_METRICS_INTERVAL_MS = Math.max(
   5_000,
   Number.parseInt(process.env.COST_METRICS_INTERVAL_MS || '60000', 10) || 60_000
@@ -814,6 +824,23 @@ const enrichMessageWithVersion = (message) => {
   };
 };
 
+const buildTurnCredentials = (clientId) => {
+  if (!TURN_URLS.length || !TURN_SECRET) return null;
+  const expiresAtSec = Math.floor(Date.now() / 1000) + TURN_TTL_SECONDS;
+  const username = `${expiresAtSec}:${clientId}`;
+  const credential = createHmac('sha1', TURN_SECRET)
+    .update(username)
+    .digest('base64');
+  return {
+    urls: TURN_URLS,
+    username,
+    credential,
+    ttlSeconds: TURN_TTL_SECONDS,
+    expiresAtMs: expiresAtSec * 1000,
+    realm: TURN_REALM || null
+  };
+};
+
 const send = (socket, message) => {
   if (socket && socket.connected) {
     incrementTotalSocketMessages();
@@ -1326,6 +1353,24 @@ io.on('connection', (socket) => {
           playerId: clientId,
           hostId: clientId,
           lobby: getLobbySnapshot(lobby)
+        }
+      });
+      return;
+    }
+
+    if (type === 'turn:credentials-request') {
+      const requestId = payload?.requestId || null;
+      const turn = buildTurnCredentials(clientId);
+      send(socket, {
+        type: 'turn:credentials',
+        payload: {
+          requestId,
+          urls: turn?.urls || [],
+          username: turn?.username || null,
+          credential: turn?.credential || null,
+          ttlSeconds: turn?.ttlSeconds || 0,
+          expiresAtMs: turn?.expiresAtMs || null,
+          realm: turn?.realm || null
         }
       });
       return;

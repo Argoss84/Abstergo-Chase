@@ -3,13 +3,25 @@ import 'dart:math';
 
 import 'package:abstergo_chase/features/lobby/data/lobby_socket_service.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
+import 'package:abstergo_chase/shared/services/voice_chat_service.dart';
 import 'package:flutter/foundation.dart';
 
 class LobbyController extends ChangeNotifier {
   LobbyController({LobbySocketService? socketService})
-      : _socketService = socketService ?? LobbySocketService();
+      : _socketService = socketService ?? LobbySocketService() {
+    _voiceChatService = VoiceChatService(
+      signalSender: (targetId, signal) {
+        return _socketService.sendWebRtcSignal(
+          targetId: targetId,
+          signal: signal,
+        );
+      },
+      onVoiceActivity: _handleVoiceActivitySignal,
+    );
+  }
 
   final LobbySocketService _socketService;
+  late final VoiceChatService _voiceChatService;
   StreamSubscription<Map<String, dynamic>>? _messagesSub;
 
   bool isLoading = true;
@@ -22,9 +34,13 @@ class LobbyController extends ChangeNotifier {
   final List<LobbyPlayer> players = <LobbyPlayer>[];
   final List<LobbyChatMessage> chatMessages = <LobbyChatMessage>[];
   String connectionStatus = 'idle';
+  bool isVoiceChatEnabled = true;
   LobbyBootstrapData? bootstrapData;
   final List<String> objectiveNames = <String>[];
   bool shouldOpenGameForCode = false;
+  int _turnExpiresAtMs = 0;
+  final Map<String, int> _voiceActiveSeenAtMs = <String, int>{};
+  Timer? _voiceActivityGcTimer;
 
   static const List<String> _objectiveNamePool = <String>[
     'Serveur de donnees',
@@ -80,6 +96,8 @@ class LobbyController extends ChangeNotifier {
       isHost = joined.playerId == joined.hostId;
       connectionStatus = 'connected';
       _regenerateObjectiveNames();
+      await _syncVoiceState();
+      _startVoiceActivityGcTimer();
       isLoading = false;
       notifyListeners();
     } catch (e) {
@@ -137,6 +155,7 @@ class LobbyController extends ChangeNotifier {
         }
         connectionStatus = 'connected';
         error = null;
+        _syncVoiceState();
         notifyListeners();
         return;
       case 'lobby:peer-joined':
@@ -150,6 +169,7 @@ class LobbyController extends ChangeNotifier {
                 isHost: false,
               ),
             );
+            _syncVoiceState();
             notifyListeners();
           }
         }
@@ -159,6 +179,7 @@ class LobbyController extends ChangeNotifier {
           final id = payload['playerId']?.toString();
           if (id != null) {
             players.removeWhere((p) => p.id == id);
+            _syncVoiceState();
             notifyListeners();
           }
         }
@@ -168,10 +189,24 @@ class LobbyController extends ChangeNotifier {
           final newHost = payload['newHostId']?.toString();
           if (newHost != null) {
             for (var i = 0; i < players.length; i++) {
-              players[i] = players[i].copyWith(isHost: players[i].id == newHost);
+              players[i] =
+                  players[i].copyWith(isHost: players[i].id == newHost);
             }
             isHost = playerId == newHost;
+            _syncVoiceState();
             notifyListeners();
+          }
+        }
+        return;
+      case 'webrtc:signal':
+        if (payload is Map) {
+          final fromId = payload['fromId']?.toString();
+          final signal = payload['signal'];
+          if (fromId != null && signal is Map) {
+            _voiceChatService.handleSignal(
+              fromId: fromId,
+              signal: Map<String, dynamic>.from(signal),
+            );
           }
         }
         return;
@@ -230,7 +265,8 @@ class LobbyController extends ChangeNotifier {
         return;
       case 'lobby:action-rejected':
         if (payload is Map) {
-          error = payload['reason']?.toString() ?? 'Action refusee par le serveur.';
+          error =
+              payload['reason']?.toString() ?? 'Action refusee par le serveur.';
         } else {
           error = 'Action refusee par le serveur.';
         }
@@ -238,7 +274,8 @@ class LobbyController extends ChangeNotifier {
         return;
       case 'game:error':
         if (payload is Map) {
-          error = payload['message']?.toString() ?? 'Erreur de creation de partie.';
+          error =
+              payload['message']?.toString() ?? 'Erreur de creation de partie.';
         } else {
           error = 'Erreur de creation de partie.';
         }
@@ -290,6 +327,86 @@ class LobbyController extends ChangeNotifier {
 
   void requestLatestState() => _socketService.requestLatestState();
 
+  Future<void> toggleVoiceChat() async {
+    isVoiceChatEnabled = !isVoiceChatEnabled;
+    await _syncVoiceState();
+    notifyListeners();
+  }
+
+  Future<void> _syncVoiceState() async {
+    try {
+      final me = playerId;
+      if (me == null || me.isEmpty || !isVoiceChatEnabled) {
+        await _voiceChatService.disable();
+        return;
+      }
+      await _refreshTurnIfNeeded();
+      final peerIds = players
+          .where((p) => p.id != me && p.status.toLowerCase() != 'disconnected')
+          .map((p) => p.id)
+          .toList(growable: false);
+      await _voiceChatService.enable(
+        selfId: me,
+        peerIds: peerIds,
+      );
+      await _voiceChatService.setTransmissionActive(true);
+    } catch (_) {
+      isVoiceChatEnabled = false;
+      await _voiceChatService.disable();
+    }
+  }
+
+  bool isPlayerVoiceActive(String playerId) {
+    final seenAt = _voiceActiveSeenAtMs[playerId];
+    if (seenAt == null) return false;
+    return DateTime.now().millisecondsSinceEpoch - seenAt <= 1500;
+  }
+
+  void _handleVoiceActivitySignal(String peerId, bool active) {
+    if (!active) return;
+    _voiceActiveSeenAtMs[peerId] = DateTime.now().millisecondsSinceEpoch;
+    notifyListeners();
+  }
+
+  void _startVoiceActivityGcTimer() {
+    _voiceActivityGcTimer?.cancel();
+    _voiceActivityGcTimer =
+        Timer.periodic(const Duration(milliseconds: 900), (_) {
+      if (!isVoiceChatEnabled) return;
+      _voiceChatService.broadcastVoiceActivity(
+        forceInactive: false,
+        level: 1.0,
+      );
+      _voiceActiveSeenAtMs.removeWhere(
+        (_, seenAt) => DateTime.now().millisecondsSinceEpoch - seenAt > 2000,
+      );
+      notifyListeners();
+    });
+  }
+
+  Future<void> _refreshTurnIfNeeded() async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now < _turnExpiresAtMs) return;
+    final creds = await _socketService.requestTurnCredentials();
+    if (creds == null || creds.urls.isEmpty) return;
+    final servers = <Map<String, dynamic>>[];
+    for (final url in creds.urls) {
+      final isTurn = url.startsWith('turn:');
+      final entry = <String, dynamic>{'urls': url};
+      if (isTurn && (creds.username?.isNotEmpty ?? false)) {
+        entry['username'] = creds.username;
+      }
+      if (isTurn && (creds.credential?.isNotEmpty ?? false)) {
+        entry['credential'] = creds.credential;
+      }
+      servers.add(entry);
+    }
+    if (servers.isNotEmpty) {
+      _voiceChatService.configureIceServers(servers);
+      _turnExpiresAtMs = now + 9 * 60 * 1000;
+    }
+  }
+
   void leaveLobby() {
     final code = lobbyCode;
     final player = playerId;
@@ -301,6 +418,8 @@ class LobbyController extends ChangeNotifier {
   @override
   void dispose() {
     _messagesSub?.cancel();
+    _voiceActivityGcTimer?.cancel();
+    _voiceChatService.dispose();
     _socketService.dispose();
     super.dispose();
   }
