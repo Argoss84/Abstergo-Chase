@@ -40,6 +40,9 @@ const ENABLE_COST_METRICS =
     ? true
     : process.env.ENABLE_COST_METRICS === '1' ||
       /^true$/i.test(process.env.ENABLE_COST_METRICS || '');
+const ENABLE_SERVER_LOGS =
+  process.env.ENABLE_SERVER_LOGS === '1' ||
+  /^true$/i.test(process.env.ENABLE_SERVER_LOGS || '');
 const COST_METRICS_INTERVAL_MS = Math.max(
   5_000,
   Number.parseInt(process.env.COST_METRICS_INTERVAL_MS || '60000', 10) || 60_000
@@ -504,6 +507,7 @@ const transferLobbyHost = ({
 
 // Helper pour les logs horodatés
 const log = (...args) => {
+  if (!ENABLE_SERVER_LOGS) return;
   const timestamp = new Date().toLocaleString('fr-FR', {
     year: 'numeric',
     month: '2-digit',
