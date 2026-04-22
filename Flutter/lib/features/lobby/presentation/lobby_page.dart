@@ -1,5 +1,6 @@
 import 'package:abstergo_chase/features/lobby/application/lobby_controller.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
+import 'package:abstergo_chase/features/lobby/data/player_name_store.dart';
 import 'package:abstergo_chase/features/game/domain/game_models.dart';
 import 'package:abstergo_chase/features/game/presentation/game_page.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
@@ -45,6 +46,7 @@ class _LobbyPageState extends State<LobbyPage> {
   final VibrationService _vibrationService = VibrationService();
   final SocketEnvironmentService _socketEnvironmentService =
       SocketEnvironmentService();
+  final PlayerNameStore _playerNameStore = PlayerNameStore();
   Set<String> _knownLobbyPlayerIds = <String>{};
   bool _knownLobbyPlayersInitialized = false;
 
@@ -66,13 +68,16 @@ class _LobbyPageState extends State<LobbyPage> {
 
   Future<void> _initializeFromCode(String code) async {
     final socketConfig = await _socketEnvironmentService.loadConfig();
+    final savedName = await _playerNameStore.load();
     if (!mounted) return;
     _controller.initialize(
       bootstrap: LobbyBootstrapData(
         code: code.trim().toUpperCase(),
         serverUrl: socketConfig.serverUrl,
         socketPath: socketConfig.socketPath,
-        playerName: 'Joueur',
+        playerName: (savedName == null || savedName.trim().isEmpty)
+            ? 'Joueur'
+            : savedName.trim(),
       ),
     );
   }

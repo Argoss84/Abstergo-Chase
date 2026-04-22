@@ -25,6 +25,7 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
   final PlayerNameStore _playerNameStore = PlayerNameStore();
   final SocketEnvironmentService _socketEnvironmentService =
       SocketEnvironmentService();
+  bool _isRestoringPlayerName = true;
 
   @override
   void initState() {
@@ -47,9 +48,7 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
     final data = await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (_) => CreateLobbyDetailsSheet(
-        initialData: _controller.form,
-      ),
+      builder: (_) => CreateLobbyDetailsSheet(initialData: _controller.form),
     );
 
     if (data is CreateLobbyDetailsResult) {
@@ -59,11 +58,16 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
 
   Future<void> _restorePlayerName() async {
     final saved = await _playerNameStore.load();
-    if (!mounted || saved == null) {
+    if (!mounted) {
       return;
     }
-    _nameController.text = saved;
-    _controller.setDisplayName(saved);
+    if (saved != null) {
+      _nameController.text = saved;
+      _controller.setDisplayName(saved);
+    }
+    setState(() {
+      _isRestoringPlayerName = false;
+    });
   }
 
   Future<void> _restoreSocketEnvironment() async {
@@ -79,9 +83,7 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
       animation: _controller,
       builder: (context, _) {
         return Scaffold(
-          appBar: AppBar(
-            title: const Text('Créer une partie'),
-          ),
+          appBar: AppBar(title: const Text('Créer une partie')),
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -99,16 +101,22 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      TextField(
-                        controller: _nameController,
-                        maxLength: CreateLobbyDefaults.maxPlayerNameLength,
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                          labelText: 'Votre nom',
-                          hintText: 'Entrez votre nom',
+                      if (_isRestoringPlayerName)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 10),
+                          child: LinearProgressIndicator(minHeight: 2),
+                        )
+                      else
+                        TextField(
+                          controller: _nameController,
+                          maxLength: CreateLobbyDefaults.maxPlayerNameLength,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            labelText: 'Votre nom',
+                            hintText: 'Entrez votre nom',
+                          ),
+                          onChanged: _controller.setDisplayName,
                         ),
-                        onChanged: _controller.setDisplayName,
-                      ),
                       const SizedBox(height: 12),
                       FilledButton.tonal(
                         onPressed: _openDetailsSheet,
@@ -161,8 +169,10 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                       if (_controller.streetsLoadError != null) ...[
                         Text(
                           _controller.streetsLoadError!,
-                          style:
-                              const TextStyle(color: Colors.red, fontSize: 13),
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontSize: 13,
+                          ),
                         ),
                         const SizedBox(height: 6),
                         Align(
@@ -196,12 +206,14 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                                   return;
                                 }
                                 if (_controller.createdLobbyCode != null) {
-                                  await _playerNameStore
-                                      .save(_controller.displayName);
+                                  await _playerNameStore.save(
+                                    _controller.displayName,
+                                  );
                                   if (!mounted) {
                                     return;
                                   }
-                                  final session = _controller.createdLobbySession;
+                                  final session =
+                                      _controller.createdLobbySession;
                                   final bootstrap = LobbyBootstrapData(
                                     code: _controller.createdLobbyCode!,
                                     serverUrl: _controller.serverUrl,
@@ -213,7 +225,8 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                                     objectives: _controller.objectives,
                                     agentStartZone: _controller.agentStartZone,
                                     rogueStartZone: _controller.rogueStartZone,
-                                    outerStreetContour: _controller.outerStreetContour,
+                                    outerStreetContour:
+                                        _controller.outerStreetContour,
                                   );
                                   context.go(
                                     '${LobbyPage.routePath}?code=${_controller.createdLobbyCode}',

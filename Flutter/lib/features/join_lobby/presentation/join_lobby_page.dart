@@ -26,6 +26,7 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
   final PlayerSessionStore _playerSessionStore = PlayerSessionStore();
   final SocketEnvironmentService _socketEnvironmentService =
       SocketEnvironmentService();
+  bool _isRestoringPlayerName = true;
 
   @override
   void initState() {
@@ -46,11 +47,15 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
 
   Future<void> _restorePlayerName() async {
     final saved = await _playerNameStore.load();
-    if (!mounted || saved == null) {
+    if (!mounted) {
       return;
     }
-    _nameController.text = saved;
-    setState(() {});
+    if (saved != null) {
+      _nameController.text = saved;
+    }
+    setState(() {
+      _isRestoringPlayerName = false;
+    });
   }
 
   Future<void> _joinLobby() async {
@@ -70,7 +75,9 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
     }
 
     await _playerNameStore.save(displayName);
-    final previousPlayerId = await _playerSessionStore.loadPlayerIdForCode(code);
+    final previousPlayerId = await _playerSessionStore.loadPlayerIdForCode(
+      code,
+    );
     final socketConfig = await _socketEnvironmentService.loadConfig();
     final bootstrap = LobbyBootstrapData(
       code: code,
@@ -84,9 +91,7 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
   }
 
   void _showError(String text) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(text)),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
   @override
@@ -110,16 +115,22 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
                     style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 16),
-                  TextField(
-                    controller: _nameController,
-                    maxLength: CreateLobbyDefaults.maxPlayerNameLength,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      labelText: 'Votre nom',
-                      hintText: 'Entrez votre nom',
+                  if (_isRestoringPlayerName)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 10),
+                      child: LinearProgressIndicator(minHeight: 2),
+                    )
+                  else
+                    TextField(
+                      controller: _nameController,
+                      maxLength: CreateLobbyDefaults.maxPlayerNameLength,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        labelText: 'Votre nom',
+                        hintText: 'Entrez votre nom',
+                      ),
+                      onChanged: (_) => setState(() {}),
                     ),
-                    onChanged: (_) => setState(() {}),
-                  ),
                   const SizedBox(height: 10),
                   TextField(
                     controller: _codeController,
@@ -135,8 +146,7 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
                       if (up != value) {
                         _codeController.value = _codeController.value.copyWith(
                           text: up,
-                          selection:
-                              TextSelection.collapsed(offset: up.length),
+                          selection: TextSelection.collapsed(offset: up.length),
                         );
                       }
                       setState(() {});
