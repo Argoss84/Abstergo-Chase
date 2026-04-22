@@ -10,11 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 class LobbyPage extends StatefulWidget {
-  const LobbyPage({
-    super.key,
-    this.initialCode,
-    this.bootstrapData,
-  });
+  const LobbyPage({super.key, this.initialCode, this.bootstrapData});
 
   static const String routePath = '/lobby';
   static const String routeName = 'lobby';
@@ -99,8 +95,8 @@ class _LobbyPageState extends State<LobbyPage> {
         final int unreadCount = _isChatOpen
             ? 0
             : rawUnread < 0
-                ? 0
-                : (rawUnread > 999 ? 999 : rawUnread);
+            ? 0
+            : (rawUnread > 999 ? 999 : rawUnread);
         _handleLobbyJoinVibration();
         if (_controller.gameStarted &&
             !_didRouteToGame &&
@@ -248,22 +244,26 @@ class _LobbyPageState extends State<LobbyPage> {
                         child: Padding(
                           padding: const EdgeInsets.all(12),
                           child: LobbyMapPreview(
-                            center: config?.mapCenter ??
+                            center:
+                                config?.mapCenter ??
                                 (bootstrap!.form!.mapCenterLatitude.isEmpty
                                     ? bootstrap.objectives.first
                                     : _pointFromForm(bootstrap)),
                             mapRadiusMeters:
                                 config?.mapRadius ?? bootstrap!.form!.mapRadius,
                             outerStreetContour:
-                                config?.mapStreets ?? bootstrap!.outerStreetContour,
+                                config?.mapStreets ??
+                                bootstrap!.outerStreetContour,
                             objectives: _controller.isHost
                                 ? bootstrap?.objectives ?? const <GeoPoint>[]
                                 : const <GeoPoint>[],
                             agentStartZone:
                                 config?.startZone ?? bootstrap?.agentStartZone,
                             rogueStartZone:
-                                config?.rogueStartZone ?? bootstrap?.rogueStartZone,
-                            objectiveZoneRadiusMeters: config?.objectiveZoneRadius ??
+                                config?.rogueStartZone ??
+                                bootstrap?.rogueStartZone,
+                            objectiveZoneRadiusMeters:
+                                config?.objectiveZoneRadius ??
                                 bootstrap!.form!.objectiveZoneRadius,
                             showObjectives: _controller.isHost,
                           ),
@@ -283,75 +283,76 @@ class _LobbyPageState extends State<LobbyPage> {
                               ),
                             ),
                             const SizedBox(height: 8),
-                            ..._controller.players.map(
-                              (player) {
-                                final voiceActive =
-                                    _controller.isPlayerVoiceActive(player.id);
-                                return AnimatedContainer(
-                                  duration: const Duration(milliseconds: 180),
-                                  margin: const EdgeInsets.only(bottom: 4),
-                                  decoration: BoxDecoration(
+                            ..._controller.players.map((player) {
+                              final voiceActive = _controller
+                                  .isPlayerVoiceActive(player.id);
+                              return AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                margin: const EdgeInsets.only(bottom: 4),
+                                decoration: BoxDecoration(
+                                  color: voiceActive
+                                      ? Colors.cyanAccent.withOpacity(0.16)
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
                                     color: voiceActive
-                                        ? Colors.cyanAccent.withOpacity(0.16)
+                                        ? Colors.cyanAccent
                                         : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: voiceActive
-                                          ? Colors.cyanAccent
-                                          : Colors.transparent,
-                                    ),
                                   ),
-                                  child: ListTile(
-                                    dense: true,
-                                    contentPadding:
-                                        const EdgeInsets.symmetric(horizontal: 8),
-                                    leading: Icon(
-                                      voiceActive
-                                          ? Icons.graphic_eq
-                                          : Icons.volume_mute,
-                                      size: 18,
-                                      color: voiceActive
-                                          ? Colors.cyanAccent
-                                          : Colors.white70,
-                                    ),
-                                    title: Text(
-                                      player.name +
-                                          (player.id == _controller.playerId
-                                              ? ' (Vous)'
-                                              : ''),
-                                    ),
-                                    subtitle: Text(player.isHost ? 'Host' : 'Joueur'),
-                                    trailing: _controller.isHost
-                                        ? DropdownButton<String>(
-                                            value: player.role ?? '',
-                                            items: const [
-                                              DropdownMenuItem(
-                                                value: '',
-                                                child: Text('Aucun'),
-                                              ),
-                                              DropdownMenuItem(
-                                                value: 'AGENT',
-                                                child: Text('Agent'),
-                                              ),
-                                              DropdownMenuItem(
-                                                value: 'ROGUE',
-                                                child: Text('Rogue'),
-                                              ),
-                                            ],
-                                            onChanged: (value) {
-                                              _controller.updateRole(
-                                                targetPlayerId: player.id,
-                                                role: (value?.isEmpty ?? true)
-                                                    ? null
-                                                    : value,
-                                              );
-                                            },
-                                          )
-                                        : Text(player.role ?? 'Aucun'),
+                                ),
+                                child: ListTile(
+                                  dense: true,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
                                   ),
-                                );
-                              },
-                            ),
+                                  leading: Icon(
+                                    voiceActive
+                                        ? Icons.graphic_eq
+                                        : Icons.volume_mute,
+                                    size: 18,
+                                    color: voiceActive
+                                        ? Colors.cyanAccent
+                                        : Colors.white70,
+                                  ),
+                                  title: Text(
+                                    player.name +
+                                        (player.id == _controller.playerId
+                                            ? ' (Vous)'
+                                            : ''),
+                                  ),
+                                  subtitle: Text(
+                                    player.isHost ? 'Host' : 'Joueur',
+                                  ),
+                                  trailing: _controller.isHost
+                                      ? DropdownButton<String>(
+                                          value: player.role ?? '',
+                                          items: const [
+                                            DropdownMenuItem(
+                                              value: '',
+                                              child: Text('Aucun'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: 'AGENT',
+                                              child: Text('Agent'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: 'ROGUE',
+                                              child: Text('Rogue'),
+                                            ),
+                                          ],
+                                          onChanged: (value) {
+                                            _controller.updateRole(
+                                              targetPlayerId: player.id,
+                                              role: (value?.isEmpty ?? true)
+                                                  ? null
+                                                  : value,
+                                            );
+                                          },
+                                        )
+                                      : Text(player.role ?? 'Aucun'),
+                                ),
+                              );
+                            }),
                           ],
                         ),
                       ),
@@ -368,9 +369,11 @@ class _LobbyPageState extends State<LobbyPage> {
                                 style: TextStyle(fontWeight: FontWeight.w600),
                               ),
                               const SizedBox(height: 8),
-                              Text(_controller.canStartGame
-                                  ? 'OK: au moins 1 Agent et 1 Rogue'
-                                  : 'Attribuez au moins 1 Agent et 1 Rogue'),
+                              Text(
+                                _controller.canStartGame
+                                    ? 'OK: au moins 1 Agent et 1 Rogue'
+                                    : 'Attribuez au moins 1 Agent et 1 Rogue',
+                              ),
                               const SizedBox(height: 10),
                               FilledButton(
                                 onPressed: _controller.canStartGame
@@ -396,26 +399,32 @@ class _LobbyPageState extends State<LobbyPage> {
                         childrenPadding: const EdgeInsets.all(12),
                         children: [
                           if (bootstrap?.form != null) ...[
-                            _kv('Objectifs', '${bootstrap!.form!.objectiveNumber}'),
-                            _kv('Duree', '${bootstrap.form!.duration} secondes'),
+                            _kv(
+                              'Objectifs',
+                              '${bootstrap!.form!.objectiveNumber}',
+                            ),
+                            _kv(
+                              'Duree',
+                              '${bootstrap.form!.duration} secondes',
+                            ),
                             _kv(
                               'Objectifs victoire',
                               '${bootstrap.form!.victoryConditionObjectives}',
                             ),
-                            _kv(
-                              'Rayon map',
-                              '${bootstrap.form!.mapRadius} m',
-                            ),
+                            _kv('Rayon map', '${bootstrap.form!.mapRadius} m'),
                           ] else
-                            const Text('Details non disponibles sur ce client.'),
+                            const Text(
+                              'Details non disponibles sur ce client.',
+                            ),
                           if (_controller.objectiveNames.isNotEmpty) ...[
                             const SizedBox(height: 8),
                             const Text(
                               'Noms des objectifs',
                               style: TextStyle(fontWeight: FontWeight.w600),
                             ),
-                            ..._controller.objectiveNames
-                                .map((name) => Text('- $name')),
+                            ..._controller.objectiveNames.map(
+                              (name) => Text('- $name'),
+                            ),
                           ],
                         ],
                       ),
@@ -479,10 +488,7 @@ class _LobbyPageState extends State<LobbyPage> {
         color: color.withOpacity(0.2),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Text(
-        status,
-        style: TextStyle(color: color, fontSize: 12),
-      ),
+      child: Text(status, style: TextStyle(color: color, fontSize: 12)),
     );
   }
 
@@ -511,106 +517,113 @@ class _LobbyPageState extends State<LobbyPage> {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (context) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.of(context).size.height * 0.65,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text(
-                  'Chat du lobby',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
+      builder: (context) => AnimatedPadding(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.65,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(
+                    'Chat du lobby',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
                 ),
-              ),
-              Expanded(
-                child: AnimatedBuilder(
-                  animation: _controller,
-                  builder: (context, _) {
-                    if (_controller.chatMessages.isEmpty) {
-                      return Center(
-                        child: Text(
-                          'Aucun message.',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                        ),
-                      );
-                    }
-                    return ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      itemCount: _controller.chatMessages.length,
-                      itemBuilder: (context, index) {
-                        final m = _controller.chatMessages[index];
-                        final isMe = m.playerId == _controller.playerId;
-                        return Align(
-                          alignment:
-                              isMe ? Alignment.centerRight : Alignment.centerLeft,
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: isMe
-                                  ? Colors.blue.shade100
-                                  : Colors.grey.shade200,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  isMe
-                                      ? '${m.playerName} (Vous)'
-                                      : m.playerName,
-                                  style: _kChatBubbleNameStyle,
-                                ),
-                                Text(m.text, style: _kChatBubbleBodyStyle),
-                              ],
+                Expanded(
+                  child: AnimatedBuilder(
+                    animation: _controller,
+                    builder: (context, _) {
+                      if (_controller.chatMessages.isEmpty) {
+                        return Center(
+                          child: Text(
+                            'Aucun message.',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface,
                             ),
                           ),
                         );
-                      },
-                    );
-                  },
+                      }
+                      return ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        itemCount: _controller.chatMessages.length,
+                        itemBuilder: (context, index) {
+                          final m = _controller.chatMessages[index];
+                          final isMe = m.playerId == _controller.playerId;
+                          return Align(
+                            alignment: isMe
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: isMe
+                                    ? Colors.blue.shade100
+                                    : Colors.grey.shade200,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    isMe
+                                        ? '${m.playerName} (Vous)'
+                                        : m.playerName,
+                                    style: _kChatBubbleNameStyle,
+                                  ),
+                                  Text(m.text, style: _kChatBubbleBodyStyle),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _chatController,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                        decoration: InputDecoration(
-                          border: const OutlineInputBorder(),
-                          hintText: 'Votre message...',
-                          hintStyle: TextStyle(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurface
-                                .withOpacity(0.55),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _chatController,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                          decoration: InputDecoration(
+                            border: const OutlineInputBorder(),
+                            hintText: 'Votre message...',
+                            hintStyle: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurface.withOpacity(0.55),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: () {
-                        _controller.sendChat(_chatController.text);
-                        _chatController.clear();
-                      },
-                      child: const Text('Envoyer'),
-                    ),
-                  ],
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: () {
+                          _controller.sendChat(_chatController.text);
+                          _chatController.clear();
+                        },
+                        child: const Text('Envoyer'),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

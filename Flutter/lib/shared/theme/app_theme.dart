@@ -61,15 +61,17 @@ class AppTheme {
         ),
       ),
       textTheme: ThemeData(brightness: brightness).textTheme.apply(
-            bodyColor: colorScheme.onBackground,
-            displayColor: colorScheme.onBackground,
-          ),
+        bodyColor: colorScheme.onBackground,
+        displayColor: colorScheme.onBackground,
+      ),
       iconTheme: IconThemeData(color: colorScheme.primary),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: colorScheme.primary,
           foregroundColor: colorScheme.onPrimary,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
           elevation: 0,
           shadowColor: colorScheme.secondary.withOpacity(0.55),
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
@@ -79,7 +81,9 @@ class AppTheme {
         style: FilledButton.styleFrom(
           backgroundColor: colorScheme.primary,
           foregroundColor: colorScheme.onPrimary,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
           shadowColor: colorScheme.secondary.withOpacity(0.55),
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
         ),
@@ -87,16 +91,24 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: colorScheme.primary,
-          side: BorderSide(color: colorScheme.primary.withOpacity(0.85), width: 1.2),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          side: BorderSide(
+            color: colorScheme.primary.withOpacity(0.85),
+            width: 1.2,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: colorScheme.surface.withOpacity(isDark ? 0.9 : 0.98),
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: colorScheme.primary.withOpacity(0.28), width: 1),
+          side: BorderSide(
+            color: colorScheme.primary.withOpacity(0.28),
+            width: 1,
+          ),
         ),
         shadowColor: colorScheme.secondary.withOpacity(0.28),
       ),
@@ -143,8 +155,6 @@ class AppTheme {
       ),
     );
 
-    return base.copyWith(
-      shadowColor: colorScheme.secondary.withOpacity(0.32),
-    );
+    return base.copyWith(shadowColor: colorScheme.secondary.withOpacity(0.32));
   }
 }

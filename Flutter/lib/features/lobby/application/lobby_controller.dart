@@ -96,10 +96,11 @@ class LobbyController extends ChangeNotifier {
       isHost = joined.playerId == joined.hostId;
       connectionStatus = 'connected';
       _regenerateObjectiveNames();
-      await _syncVoiceState();
-      _startVoiceActivityGcTimer();
       isLoading = false;
       notifyListeners();
+      // Keep lobby join UX responsive even if microphone permission stalls.
+      _syncVoiceState();
+      _startVoiceActivityGcTimer();
     } catch (e) {
       error = e.toString();
       connectionStatus = 'error';

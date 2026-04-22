@@ -22,8 +22,10 @@ class VoiceChatService {
   final Map<String, RTCDataChannel> _metaChannels = <String, RTCDataChannel>{};
   final Set<String> _wantedPeers = <String>{};
   MediaStream? _localStream;
+  Future<MediaStream>? _localStreamInitFuture;
   bool _enabled = false;
   bool _transmissionActive = true;
+  DateTime? _lastLocalStreamFailureAt;
   List<Map<String, dynamic>> _iceServers = <Map<String, dynamic>>[
     <String, dynamic>{'urls': 'stun:13.37.68.16:3478'},
   ];
@@ -39,20 +41,11 @@ class VoiceChatService {
   }) async {
     try {
       _selfId = selfId;
-      _enabled = true;
       _wantedPeers
         ..clear()
         ..addAll(peerIds.where((id) => id.isNotEmpty && id != selfId));
-      _localStream ??= await navigator.mediaDevices.getUserMedia(
-        <String, dynamic>{
-          'audio': <String, dynamic>{
-            'echoCancellation': true,
-            'noiseSuppression': true,
-            'autoGainControl': true,
-          },
-          'video': false,
-        },
-      );
+      _localStream = await _ensureLocalStream();
+      _enabled = true;
       await _syncPeers();
       await _setLocalAudioEnabled(true);
     } catch (_) {
@@ -60,6 +53,42 @@ class VoiceChatService {
       _enabled = false;
       await _disposeAllPeers();
       await _setLocalAudioEnabled(false);
+    }
+  }
+
+  Future<MediaStream> _ensureLocalStream() async {
+    final current = _localStream;
+    if (current != null) return current;
+    final lastFailureAt = _lastLocalStreamFailureAt;
+    if (lastFailureAt != null &&
+        DateTime.now().difference(lastFailureAt) < const Duration(seconds: 3)) {
+      throw StateError('Microphone initialization in cooldown.');
+    }
+    final inFlight = _localStreamInitFuture;
+    if (inFlight != null) {
+      return inFlight;
+    }
+    final future = navigator.mediaDevices.getUserMedia(
+      <String, dynamic>{
+        'audio': <String, dynamic>{
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
+        'video': false,
+      },
+    ).then((stream) {
+      _lastLocalStreamFailureAt = null;
+      return stream;
+    });
+    _localStreamInitFuture = future;
+    try {
+      return await future;
+    } catch (_) {
+      _lastLocalStreamFailureAt = DateTime.now();
+      rethrow;
+    } finally {
+      _localStreamInitFuture = null;
     }
   }
 

@@ -14,7 +14,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:qr_code_scanner/qr_code_scanner.dart';
+import 'package:qr_code_scanner_plus/qr_code_scanner_plus.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -25,10 +25,7 @@ const TextStyle _kTeamChatBubbleStyle = TextStyle(
 );
 
 class GamePage extends StatefulWidget {
-  const GamePage({
-    super.key,
-    required this.bootstrap,
-  });
+  const GamePage({super.key, required this.bootstrap});
 
   static const String routePath = '/game';
   static const String routeName = 'game';
@@ -100,7 +97,8 @@ class _GamePageState extends State<GamePage>
         final connectionReady = _controller.connectionStatus == 'connected';
         final topInset =
             MediaQuery.of(context).padding.top + kToolbarHeight + 8;
-        final objectiveZoneRadius = effectiveGameConfig?.objectiveZoneRadius ??
+        final objectiveZoneRadius =
+            effectiveGameConfig?.objectiveZoneRadius ??
             widget.bootstrap.lobby.form?.objectiveZoneRadius ??
             50;
         final roleUpper = (_controller.playerRole ?? '').toUpperCase();
@@ -121,31 +119,31 @@ class _GamePageState extends State<GamePage>
         );
         final objectiveDisplayPoints = isRogue
             ? _controller.objectives
-                .where((o) => !o.captured)
-                .map((o) => o.point)
-                .toList(growable: false)
+                  .where((o) => !o.captured)
+                  .map((o) => o.point)
+                  .toList(growable: false)
             : _controller.objectives
-                .where((o) => !o.captured)
-                .map(
-                  (o) => _shiftedZoneCenter(
-                    objective: o.point,
-                    objectiveId: o.id,
-                    zoneRadiusMeters: objectiveZoneRadius.toDouble(),
-                  ),
-                )
-                .toList(growable: false);
+                  .where((o) => !o.captured)
+                  .map(
+                    (o) => _shiftedZoneCenter(
+                      objective: o.point,
+                      objectiveId: o.id,
+                      zoneRadiusMeters: objectiveZoneRadius.toDouble(),
+                    ),
+                  )
+                  .toList(growable: false);
         final capturingDisplayPoints = !isRogue
             ? _controller.objectives
-                .where((o) => !o.captured)
-                .where((o) => o.state.toUpperCase() == 'CAPTURING')
-                .map(
-                  (o) => _shiftedZoneCenter(
-                    objective: o.point,
-                    objectiveId: o.id,
-                    zoneRadiusMeters: objectiveZoneRadius.toDouble(),
-                  ),
-                )
-                .toList(growable: false)
+                  .where((o) => !o.captured)
+                  .where((o) => o.state.toUpperCase() == 'CAPTURING')
+                  .map(
+                    (o) => _shiftedZoneCenter(
+                      objective: o.point,
+                      objectiveId: o.id,
+                      zoneRadiusMeters: objectiveZoneRadius.toDouble(),
+                    ),
+                  )
+                  .toList(growable: false)
             : const <GeoPoint>[];
 
         return Scaffold(
@@ -170,9 +168,7 @@ class _GamePageState extends State<GamePage>
                 ),
               ),
             ),
-            title: Text(
-              (_controller.playerRole ?? 'N/A').toUpperCase(),
-            ),
+            title: Text((_controller.playerRole ?? 'N/A').toUpperCase()),
             actions: [
               IconButton(
                 tooltip: _controller.isVoiceChatEnabled
@@ -261,8 +257,8 @@ class _GamePageState extends State<GamePage>
                             _controller.connectionStatus == 'connecting'
                                 ? 'Connexion au serveur en cours...'
                                 : _controller.connectionStatus == 'error'
-                                    ? 'Impossible de se connecter au serveur.'
-                                    : 'Initialisation de la partie...',
+                                ? 'Impossible de se connecter au serveur.'
+                                : 'Initialisation de la partie...',
                           ),
                         ],
                       ),
@@ -277,23 +273,27 @@ class _GamePageState extends State<GamePage>
                                   height: null,
                                   center:
                                       _controller.myPosition ?? fallbackCenter,
-                                  mapRadiusMeters: effectiveGameConfig
-                                          ?.mapRadius ??
+                                  mapRadiusMeters:
+                                      effectiveGameConfig?.mapRadius ??
                                       widget.bootstrap.lobby.form?.mapRadius ??
                                       1000,
-                                  outerStreetContour: effectiveGameConfig
-                                              ?.mapStreets.isNotEmpty ==
+                                  outerStreetContour:
+                                      effectiveGameConfig
+                                              ?.mapStreets
+                                              .isNotEmpty ==
                                           true
                                       ? effectiveGameConfig!.mapStreets
                                       : widget
-                                          .bootstrap.lobby.outerStreetContour,
+                                            .bootstrap
+                                            .lobby
+                                            .outerStreetContour,
                                   objectives: objectiveDisplayPoints,
                                   agentStartZone:
                                       effectiveGameConfig?.startZone ??
-                                          widget.bootstrap.lobby.agentStartZone,
+                                      widget.bootstrap.lobby.agentStartZone,
                                   rogueStartZone:
                                       effectiveGameConfig?.rogueStartZone ??
-                                          widget.bootstrap.lobby.rogueStartZone,
+                                      widget.bootstrap.lobby.rogueStartZone,
                                   objectiveZoneRadiusMeters:
                                       objectiveZoneRadius,
                                   showObjectives: true,
@@ -320,26 +320,33 @@ class _GamePageState extends State<GamePage>
                                   highlightObjectivePulse:
                                       _guidancePulseController.value,
                                   playerPositions: _controller.players
-                                      .where(_controller
-                                          .isPlayerVisibleForCurrentRole)
+                                      .where(
+                                        _controller
+                                            .isPlayerVisibleForCurrentRole,
+                                      )
                                       .where(
                                         (p) =>
                                             p.status.toLowerCase() !=
                                             'disconnected',
                                       )
-                                      .where((p) =>
-                                          p.latitude != null &&
-                                          p.longitude != null)
-                                      .map((p) => GeoPoint(
-                                            latitude: p.latitude!,
-                                            longitude: p.longitude!,
-                                          ))
+                                      .where(
+                                        (p) =>
+                                            p.latitude != null &&
+                                            p.longitude != null,
+                                      )
+                                      .map(
+                                        (p) => GeoPoint(
+                                          latitude: p.latitude!,
+                                          longitude: p.longitude!,
+                                        ),
+                                      )
                                       .toList(growable: false),
                                 ),
                         ),
                         if (winnerType == null)
                           Positioned(
-                            top: MediaQuery.of(context).padding.top +
+                            top:
+                                MediaQuery.of(context).padding.top +
                                 kToolbarHeight,
                             left: 0,
                             right: 0,
@@ -464,34 +471,35 @@ class _GamePageState extends State<GamePage>
                                     children: [
                                       ..._controller.players
                                           .where(
-                                        (player) =>
-                                            player.status.toLowerCase() !=
-                                            'disconnected',
-                                      )
+                                            (player) =>
+                                                player.status.toLowerCase() !=
+                                                'disconnected',
+                                          )
                                           .map((player) {
-                                        final inZone = _controller
-                                            .isPlayerInStartZone(player);
-                                        final role =
-                                            (player.role ?? '').toUpperCase();
-                                        final roleShort = role == 'ROGUE'
-                                            ? 'r'
-                                            : role == 'AGENT'
+                                            final inZone = _controller
+                                                .isPlayerInStartZone(player);
+                                            final role = (player.role ?? '')
+                                                .toUpperCase();
+                                            final roleShort = role == 'ROGUE'
+                                                ? 'r'
+                                                : role == 'AGENT'
                                                 ? 'a'
                                                 : '-';
-                                        return Padding(
-                                          padding:
-                                              const EdgeInsets.only(bottom: 4),
-                                          child: Text(
-                                            '${player.name} [$roleShort]',
-                                            style: TextStyle(
-                                              color: inZone
-                                                  ? Colors.greenAccent
-                                                  : Colors.redAccent,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                        );
-                                      }),
+                                            return Padding(
+                                              padding: const EdgeInsets.only(
+                                                bottom: 4,
+                                              ),
+                                              child: Text(
+                                                '${player.name} [$roleShort]',
+                                                style: TextStyle(
+                                                  color: inZone
+                                                      ? Colors.greenAccent
+                                                      : Colors.redAccent,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                            );
+                                          }),
                                       const SizedBox(height: 6),
                                       FilledButton(
                                         onPressed: _controller.canHostStartGame
@@ -532,24 +540,28 @@ class _GamePageState extends State<GamePage>
                                         final activeVoice = _controller
                                             .isPlayerVoiceActive(player.id);
                                         return Container(
-                                          margin:
-                                              const EdgeInsets.only(bottom: 4),
+                                          margin: const EdgeInsets.only(
+                                            bottom: 4,
+                                          ),
                                           padding: const EdgeInsets.symmetric(
                                             horizontal: 6,
                                             vertical: 4,
                                           ),
                                           decoration: BoxDecoration(
                                             color: activeVoice
-                                                ? Colors.cyanAccent
-                                                    .withOpacity(0.18)
+                                                ? Colors.cyanAccent.withOpacity(
+                                                    0.18,
+                                                  )
                                                 : Colors.transparent,
-                                            borderRadius:
-                                                BorderRadius.circular(6),
+                                            borderRadius: BorderRadius.circular(
+                                              6,
+                                            ),
                                             border: Border.all(
                                               color: activeVoice
                                                   ? Colors.cyanAccent
-                                                  : Colors.white
-                                                      .withOpacity(0.1),
+                                                  : Colors.white.withOpacity(
+                                                      0.1,
+                                                    ),
                                               width: 1,
                                             ),
                                           ),
@@ -733,8 +745,9 @@ class _GamePageState extends State<GamePage>
     required double progress,
   }) {
     final clamped = remainingSeconds < 0 ? 0 : remainingSeconds;
-    final clampedProgress =
-        progress < 0 ? 0.0 : (progress > 1 ? 1.0 : progress);
+    final clampedProgress = progress < 0
+        ? 0.0
+        : (progress > 1 ? 1.0 : progress);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
@@ -780,8 +793,9 @@ class _GamePageState extends State<GamePage>
               minHeight: 8,
               value: clampedProgress,
               backgroundColor: Colors.white.withOpacity(0.25),
-              valueColor:
-                  const AlwaysStoppedAnimation<Color>(Colors.orangeAccent),
+              valueColor: const AlwaysStoppedAnimation<Color>(
+                Colors.orangeAccent,
+              ),
             ),
           ),
         ],
@@ -791,10 +805,12 @@ class _GamePageState extends State<GamePage>
 
   Widget _buildActionFabMenu() {
     final role = (_controller.playerRole ?? '').toUpperCase();
-    final roleActionIcon =
-        role == 'ROGUE' ? Icons.terminal : Icons.center_focus_strong;
-    final roleActionLabel =
-        role == 'ROGUE' ? 'Hacker objectif' : 'Capturer rogue';
+    final roleActionIcon = role == 'ROGUE'
+        ? Icons.terminal
+        : Icons.center_focus_strong;
+    final roleActionLabel = role == 'ROGUE'
+        ? 'Hacker objectif'
+        : 'Capturer rogue';
     final rogueActionReady =
         role == 'ROGUE' && _controller.canTriggerRogueObjectiveCapture;
     return SizedBox(
@@ -867,10 +883,12 @@ class _GamePageState extends State<GamePage>
                   }
                   _openAgentCaptureScanner();
                 },
-                backgroundColor:
-                    rogueActionReady ? Colors.red.shade700 : Colors.white,
-                foregroundColor:
-                    rogueActionReady ? Colors.white : Colors.black87,
+                backgroundColor: rogueActionReady
+                    ? Colors.red.shade700
+                    : Colors.white,
+                foregroundColor: rogueActionReady
+                    ? Colors.white
+                    : Colors.black87,
                 pulseAura: rogueActionReady,
                 pulseValue: _guidancePulseController.value,
               ),
@@ -909,8 +927,9 @@ class _GamePageState extends State<GamePage>
       },
       child: FloatingActionButton(
         heroTag: 'game-ptt-fab',
-        tooltip:
-            enabled ? 'Maintenir pour parler' : 'Activez le vocal pour parler',
+        tooltip: enabled
+            ? 'Maintenir pour parler'
+            : 'Activez le vocal pour parler',
         onPressed: () {},
         backgroundColor: enabled ? Colors.orangeAccent : Colors.grey,
         foregroundColor: Colors.black87,
@@ -925,12 +944,7 @@ class _GamePageState extends State<GamePage>
     required double bottom,
     required Widget child,
   }) {
-    return Positioned(
-      left: left,
-      right: right,
-      bottom: bottom,
-      child: child,
-    );
+    return Positioned(left: left, right: right, bottom: bottom, child: child);
   }
 
   Widget _miniActionFab({
@@ -948,8 +962,9 @@ class _GamePageState extends State<GamePage>
         boxShadow: pulseAura
             ? <BoxShadow>[
                 BoxShadow(
-                  color:
-                      Colors.redAccent.withOpacity(0.35 + (pulseValue * 0.45)),
+                  color: Colors.redAccent.withOpacity(
+                    0.35 + (pulseValue * 0.45),
+                  ),
                   blurRadius: 8 + (pulseValue * 14),
                   spreadRadius: 1 + (pulseValue * 4),
                 ),
@@ -994,8 +1009,10 @@ class _GamePageState extends State<GamePage>
       context: context,
       builder: (dialogContext) {
         return Dialog(
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -1045,8 +1062,8 @@ class _GamePageState extends State<GamePage>
     final playerName = self.isNotEmpty ? self.first.name : 'Joueur';
     return jsonEncode(<String, dynamic>{
       'type': 'player-vitality-id',
-      'gameCode':
-          (_controller.gameCode ?? widget.bootstrap.lobby.code).toUpperCase(),
+      'gameCode': (_controller.gameCode ?? widget.bootstrap.lobby.code)
+          .toUpperCase(),
       'playerId': selfId,
       'playerName': playerName,
       'role': (_controller.playerRole ?? '').toUpperCase(),
@@ -1083,8 +1100,9 @@ class _GamePageState extends State<GamePage>
                   onQRViewCreated: (controller) {
                     scannerController = controller;
                     scanSubscription?.cancel();
-                    scanSubscription =
-                        controller.scannedDataStream.listen((scan) {
+                    scanSubscription = controller.scannedDataStream.listen((
+                      scan,
+                    ) {
                       if (handled) return;
                       final raw = scan.code?.trim() ?? '';
                       if (raw.isEmpty) return;
@@ -1124,8 +1142,9 @@ class _GamePageState extends State<GamePage>
 
   void _handleScannedCaptureQr(String rawQr) {
     final feedback = _controller.triggerAgentCaptureFromQr(rawQr);
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(feedback)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(feedback)));
   }
 
   GeoPoint? _resolveCenter() {
@@ -1173,7 +1192,8 @@ class _GamePageState extends State<GamePage>
     final metersPerDegLng =
         metersPerDegLat * cos(objective.latitude * pi / 180);
     final lat = objective.latitude + (dy / metersPerDegLat);
-    final lng = objective.longitude +
+    final lng =
+        objective.longitude +
         (dx / (metersPerDegLng.abs() < 1e-6 ? 1e-6 : metersPerDegLng));
     return GeoPoint(latitude: lat, longitude: lng);
   }
@@ -1195,86 +1215,92 @@ class _GamePageState extends State<GamePage>
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (context) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.of(context).size.height * 0.65,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text(
-                  'Chat équipe',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
+      builder: (context) => AnimatedPadding(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.65,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(
+                    'Chat équipe',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
                 ),
-              ),
-              Expanded(
-                child: AnimatedBuilder(
-                  animation: _controller,
-                  builder: (context, _) {
-                    return ListView(
-                      padding: const EdgeInsets.all(12),
-                      children: _controller.roleChat.map((m) {
-                        final isMe = m.playerId == _controller.playerId;
-                        return Align(
-                          alignment: isMe
-                              ? Alignment.centerRight
-                              : Alignment.centerLeft,
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: isMe
-                                  ? Colors.blue.shade100
-                                  : Colors.grey.shade200,
-                              borderRadius: BorderRadius.circular(10),
+                Expanded(
+                  child: AnimatedBuilder(
+                    animation: _controller,
+                    builder: (context, _) {
+                      return ListView(
+                        padding: const EdgeInsets.all(12),
+                        children: _controller.roleChat.map((m) {
+                          final isMe = m.playerId == _controller.playerId;
+                          return Align(
+                            alignment: isMe
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: isMe
+                                    ? Colors.blue.shade100
+                                    : Colors.grey.shade200,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                '${m.playerName}: ${m.text}',
+                                style: _kTeamChatBubbleStyle,
+                              ),
                             ),
-                            child: Text(
-                              '${m.playerName}: ${m.text}',
-                              style: _kTeamChatBubbleStyle,
+                          );
+                        }).toList(),
+                      );
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _chatController,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: 'Votre message...',
+                            hintStyle: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurface.withOpacity(0.55),
                             ),
                           ),
-                        );
-                      }).toList(),
-                    );
-                  },
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _chatController,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                        decoration: InputDecoration(
-                          hintText: 'Votre message...',
-                          hintStyle: TextStyle(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurface
-                                .withOpacity(0.55),
-                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: () {
-                        _controller.sendRoleChat(_chatController.text);
-                        _chatController.clear();
-                      },
-                      child: const Text('Envoyer'),
-                    ),
-                  ],
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: () {
+                          _controller.sendRoleChat(_chatController.text);
+                          _chatController.clear();
+                        },
+                        child: const Text('Envoyer'),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -1338,7 +1364,9 @@ class _GamePageState extends State<GamePage>
                         _kvInfo('Rôle', role),
                         _kvInfo('Joueurs', '${_controller.players.length}'),
                         _kvInfo(
-                            'Objectifs', '${_controller.objectives.length}'),
+                          'Objectifs',
+                          '${_controller.objectives.length}',
+                        ),
                         _kvInfo(
                           'Temps restant',
                           _controller.remainingSeconds != null
@@ -1354,8 +1382,10 @@ class _GamePageState extends State<GamePage>
                     padding: const EdgeInsets.all(14),
                     child: Column(
                       children: [
-                        _kvInfo('Rayon map',
-                            '${config?.mapRadius ?? form?.mapRadius ?? 0} m'),
+                        _kvInfo(
+                          'Rayon map',
+                          '${config?.mapRadius ?? form?.mapRadius ?? 0} m',
+                        ),
                         _kvInfo(
                           'Rayon zone objectif',
                           '${config?.objectiveZoneRadius ?? form?.objectiveZoneRadius ?? 0} m',
@@ -1379,7 +1409,8 @@ class _GamePageState extends State<GamePage>
                         value: _controller.isVoiceChatEnabled,
                         title: const Text('Chat vocal actif'),
                         subtitle: const Text(
-                            'Active ou coupe votre émission/réception vocale'),
+                          'Active ou coupe votre émission/réception vocale',
+                        ),
                         onChanged: (_) {
                           _controller.toggleVoiceChatEnabled();
                           setModalState(() {});
@@ -1388,8 +1419,9 @@ class _GamePageState extends State<GamePage>
                       SwitchListTile(
                         value: _controller.canListenOtherRoles,
                         title: const Text('Écoute inter-rôles (option)'),
-                        subtitle:
-                            const Text('Permet d’écouter les rôles différents'),
+                        subtitle: const Text(
+                          'Permet d’écouter les rôles différents',
+                        ),
                         onChanged: (_) {
                           _controller.toggleListenOtherRoles();
                           setModalState(() {});
@@ -1513,7 +1545,8 @@ class _GamePageState extends State<GamePage>
     final type = winnerType.toUpperCase();
     if (type == 'ROGUE') {
       final captured = _controller.objectives.where((o) => o.captured).length;
-      final required = _controller.victoryObjectivesRequired ??
+      final required =
+          _controller.victoryObjectivesRequired ??
           widget.bootstrap.lobby.form?.victoryConditionObjectives ??
           _controller.objectives.length;
       if (winnerReason == 'OBJECTIVES_CAPTURED') {
@@ -1573,10 +1606,7 @@ class _CompassBanner extends StatelessWidget {
     final targets = _buildTargets();
     if (targets.isEmpty) return const SizedBox.shrink();
 
-    return _FpsCompassBar(
-      headingDeg: heading,
-      targets: targets,
-    );
+    return _FpsCompassBar(headingDeg: heading, targets: targets);
   }
 
   List<_CompassTarget> _buildTargets() {
@@ -1584,8 +1614,11 @@ class _CompassBanner extends StatelessWidget {
     final mePos = myPosition!;
     final out = <_CompassTarget>[];
 
-    void addPlayer(GamePlayer p,
-        {required IconData icon, required Color color}) {
+    void addPlayer(
+      GamePlayer p, {
+      required IconData icon,
+      required Color color,
+    }) {
       if (meId != null && p.id == meId) return;
       if ((p.status).toLowerCase() == 'disconnected') return;
       if ((p.status).toUpperCase() == 'CAPTURED') return;
@@ -1673,10 +1706,7 @@ class _TargetDelta {
 }
 
 class _FpsCompassBar extends StatelessWidget {
-  const _FpsCompassBar({
-    required this.headingDeg,
-    required this.targets,
-  });
+  const _FpsCompassBar({required this.headingDeg, required this.targets});
 
   final double? headingDeg;
   final List<_CompassTarget> targets;
@@ -1784,8 +1814,9 @@ class _FpsCompassBar extends StatelessWidget {
     final idx = (xBuckets[key] ?? 0);
     xBuckets[key] = idx + 1;
     final top = 16 + (idx * 12.0);
-    final meters =
-        target.distanceMeters.isFinite ? target.distanceMeters.round() : 0;
+    final meters = target.distanceMeters.isFinite
+        ? target.distanceMeters.round()
+        : 0;
     final shortLabel = target.label.length > 10
         ? '${target.label.substring(0, 10)}…'
         : target.label;
@@ -1875,16 +1906,21 @@ class _FpsCompassPainter extends CustomPainter {
     final endDeg = headingDeg + (windowDeg / 2);
 
     // draw ticks every 5°, labels every 15°
-    for (var deg = (startDeg / tickStep).floor() * tickStep;
-        deg <= endDeg;
-        deg += tickStep) {
+    for (
+      var deg = (startDeg / tickStep).floor() * tickStep;
+      deg <= endDeg;
+      deg += tickStep
+    ) {
       final delta = _shortestAngleDeltaDeg(headingDeg, _normalizeDeg(deg));
       final x = centerX + (delta * pxPerDeg);
       final isMajor = (deg.round() % 15 == 0);
       const y0 = 0.0;
       final y1 = isMajor ? 14.0 : 8.0;
       canvas.drawLine(
-          Offset(x, y0), Offset(x, y1), isMajor ? tickPaint : minorPaint);
+        Offset(x, y0),
+        Offset(x, y1),
+        isMajor ? tickPaint : minorPaint,
+      );
 
       if (isMajor) {
         final label = _labelForDeg(deg.round());
@@ -1898,15 +1934,24 @@ class _FpsCompassPainter extends CustomPainter {
   static String _labelForDeg(int deg) {
     final d = _normalizeDeg(deg.toDouble()).round() % 360;
     switch (d) {
-      case 0: return 'N';
-      case 45: return 'NE';
-      case 90: return 'E';
-      case 135: return 'SE';
-      case 180: return 'S';
-      case 225: return 'SW';
-      case 270: return 'W';
-      case 315: return 'NW';
-      default: return d.toString();
+      case 0:
+        return 'N';
+      case 45:
+        return 'NE';
+      case 90:
+        return 'E';
+      case 135:
+        return 'SE';
+      case 180:
+        return 'S';
+      case 225:
+        return 'SW';
+      case 270:
+        return 'W';
+      case 315:
+        return 'NW';
+      default:
+        return d.toString();
     }
   }
 
