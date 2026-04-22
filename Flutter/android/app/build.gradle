@@ -34,7 +34,18 @@ android {
 
     buildTypes {
         release {
+            // Keep debug signing for local release tests; replace with production
+            // signing config in CI/release pipeline.
             signingConfig signingConfigs.debug
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    bundle {
+        abi {
+            enableSplit = true
         }
     }
 }

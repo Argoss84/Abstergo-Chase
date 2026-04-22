@@ -1,4 +1,5 @@
 import 'package:abstergo_chase/shared/services/vibration_service.dart';
+import 'package:abstergo_chase/shared/services/socket_environment_service.dart';
 import 'package:abstergo_chase/shared/services/voice_settings_service.dart';
 import 'package:flutter/material.dart';
 
@@ -15,10 +16,13 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   final VibrationService _vibrationService = VibrationService();
   final VoiceSettingsService _voiceSettingsService = VoiceSettingsService();
+  final SocketEnvironmentService _socketEnvironmentService =
+      SocketEnvironmentService();
   Map<VibrationEvent, bool>? _settings;
   VoiceTransmissionMode _voiceMode = VoiceTransmissionMode.voiceActivation;
   double _voiceThreshold = 0.55;
   double _testVoiceLevel = 0;
+  bool _useProductionSignaling = true;
 
   @override
   void initState() {
@@ -29,20 +33,19 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _load() async {
     final settings = await _vibrationService.loadSettings();
     final voiceSettings = await _voiceSettingsService.load();
+    final useProd = await _socketEnvironmentService.useProduction();
     if (!mounted) return;
     setState(() {
       _settings = settings;
       _voiceMode = voiceSettings.mode;
       _voiceThreshold = voiceSettings.activationThreshold;
+      _useProductionSignaling = useProd;
     });
   }
 
   Future<void> _set(VibrationEvent event, bool value) async {
     setState(() {
-      _settings = <VibrationEvent, bool>{
-        ...?_settings,
-        event: value,
-      };
+      _settings = <VibrationEvent, bool>{...?_settings, event: value};
     });
     await _vibrationService.setEnabled(event, value);
     if (value) {
@@ -64,18 +67,80 @@ class _SettingsPageState extends State<SettingsPage> {
     await _voiceSettingsService.setActivationThreshold(value);
   }
 
+  Future<void> _setSignalingEnvironment(bool useProduction) async {
+    setState(() {
+      _useProductionSignaling = useProduction;
+    });
+    await _socketEnvironmentService.setUseProduction(useProduction);
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = _settings;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Paramètres'),
-      ),
+      appBar: AppBar(title: const Text('Paramètres')),
       body: settings == null
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Signaling',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Choisissez le serveur signaling à utiliser.',
+                          style: TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Text(
+                              'Dev',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: !_useProductionSignaling
+                                    ? Colors.cyan
+                                    : Colors.white70,
+                              ),
+                            ),
+                            Expanded(
+                              child: Slider(
+                                min: 0,
+                                max: 1,
+                                divisions: 1,
+                                value: _useProductionSignaling ? 1 : 0,
+                                onChanged: (value) {
+                                  _setSignalingEnvironment(value >= 0.5);
+                                },
+                              ),
+                            ),
+                            Text(
+                              'Prod',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: _useProductionSignaling
+                                    ? Colors.cyan
+                                    : Colors.white70,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(12),
@@ -96,19 +161,19 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                         const SizedBox(height: 8),
                         SegmentedButton<VoiceTransmissionMode>(
-                          segments: const <ButtonSegment<
-                              VoiceTransmissionMode>>[
-                            ButtonSegment<VoiceTransmissionMode>(
-                              value: VoiceTransmissionMode.voiceActivation,
-                              label: Text('Voice activation'),
-                              icon: Icon(Icons.mic),
-                            ),
-                            ButtonSegment<VoiceTransmissionMode>(
-                              value: VoiceTransmissionMode.pushToTalk,
-                              label: Text('Push to Talk'),
-                              icon: Icon(Icons.record_voice_over),
-                            ),
-                          ],
+                          segments:
+                              const <ButtonSegment<VoiceTransmissionMode>>[
+                                ButtonSegment<VoiceTransmissionMode>(
+                                  value: VoiceTransmissionMode.voiceActivation,
+                                  label: Text('Voice activation'),
+                                  icon: Icon(Icons.mic),
+                                ),
+                                ButtonSegment<VoiceTransmissionMode>(
+                                  value: VoiceTransmissionMode.pushToTalk,
+                                  label: Text('Push to Talk'),
+                                  icon: Icon(Icons.record_voice_over),
+                                ),
+                              ],
                           selected: <VoiceTransmissionMode>{_voiceMode},
                           onSelectionChanged: (values) {
                             final selected = values.isEmpty
@@ -128,7 +193,8 @@ class _SettingsPageState extends State<SettingsPage> {
                           max: 1.0,
                           divisions: 19,
                           label: '${(_voiceThreshold * 100).round()}%',
-                          onChanged: _voiceMode ==
+                          onChanged:
+                              _voiceMode ==
                                   VoiceTransmissionMode.voiceActivation
                               ? (v) => _setVoiceThreshold(v)
                               : null,

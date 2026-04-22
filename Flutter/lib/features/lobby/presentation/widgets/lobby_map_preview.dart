@@ -58,6 +58,29 @@ class LobbyMapPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final centerLatLng = LatLng(center.latitude, center.longitude);
+    final objectiveLatLng = objectives
+        .map((p) => LatLng(p.latitude, p.longitude))
+        .toList(growable: false);
+    final playerLatLng = playerPositions
+        .map((p) => LatLng(p.latitude, p.longitude))
+        .toList(growable: false);
+    final guidanceLatLng = guidancePath
+        .map((p) => LatLng(p.latitude, p.longitude))
+        .toList(growable: false);
+    final contourLatLng = outerStreetContour
+        .map((p) => LatLng(p.latitude, p.longitude))
+        .toList(growable: false);
+    final highlightLatLng = highlightObjectiveZones
+        .map((p) => LatLng(p.latitude, p.longitude))
+        .toList(growable: false);
+    final agentLatLng = agentStartZone == null
+        ? null
+        : LatLng(agentStartZone!.latitude, agentStartZone!.longitude);
+    final rogueLatLng = rogueStartZone == null
+        ? null
+        : LatLng(rogueStartZone!.latitude, rogueStartZone!.longitude);
+
     return SizedBox(
       height: height,
       child: ClipRRect(
@@ -65,7 +88,7 @@ class LobbyMapPreview extends StatelessWidget {
         child: FlutterMap(
           mapController: mapController,
           options: MapOptions(
-            center: LatLng(center.latitude, center.longitude),
+            center: centerLatLng,
             zoom: 15.5,
             interactiveFlags: InteractiveFlag.drag | InteractiveFlag.pinchZoom,
           ),
@@ -78,7 +101,7 @@ class LobbyMapPreview extends StatelessWidget {
               circles: [
                 if (outerStreetContour.length < 3)
                   CircleMarker(
-                    point: LatLng(center.latitude, center.longitude),
+                    point: centerLatLng,
                     radius: mapRadiusMeters.toDouble(),
                     useRadiusInMeter: true,
                     color: Colors.blue.withOpacity(0.1),
@@ -86,9 +109,9 @@ class LobbyMapPreview extends StatelessWidget {
                     borderColor: Colors.blue,
                   ),
                 if (showObjectives && showObjectiveZones)
-                  ...objectives.map(
-                    (p) => CircleMarker(
-                      point: LatLng(p.latitude, p.longitude),
+                  ...objectiveLatLng.map(
+                    (point) => CircleMarker(
+                      point: point,
                       radius: objectiveZoneRadiusMeters.toDouble(),
                       useRadiusInMeter: true,
                       color: Colors.red.withOpacity(0.08),
@@ -99,9 +122,9 @@ class LobbyMapPreview extends StatelessWidget {
                 if (showObjectives &&
                     showObjectiveZones &&
                     highlightObjectiveZoneRadiusMeters > 0)
-                  ...highlightObjectiveZones.map(
-                    (p) => CircleMarker(
-                      point: LatLng(p.latitude, p.longitude),
+                  ...highlightLatLng.map(
+                    (point) => CircleMarker(
+                      point: point,
                       radius: highlightObjectiveZoneRadiusMeters.toDouble(),
                       useRadiusInMeter: true,
                       color: Colors.orange.withOpacity(
@@ -116,9 +139,9 @@ class LobbyMapPreview extends StatelessWidget {
                 if (showObjectives &&
                     showObjectiveZones &&
                     highlightObjectiveZoneRadiusMeters > 0)
-                  ...highlightObjectiveZones.map(
-                    (p) => CircleMarker(
-                      point: LatLng(p.latitude, p.longitude),
+                  ...highlightLatLng.map(
+                    (point) => CircleMarker(
+                      point: point,
                       radius:
                           highlightObjectiveZoneRadiusMeters.toDouble() +
                           (18 + (highlightObjectivePulse * 55)),
@@ -130,24 +153,18 @@ class LobbyMapPreview extends StatelessWidget {
                       ),
                     ),
                   ),
-                if (agentStartZone != null)
+                if (agentLatLng != null)
                   CircleMarker(
-                    point: LatLng(
-                      agentStartZone!.latitude,
-                      agentStartZone!.longitude,
-                    ),
+                    point: agentLatLng,
                     radius: CreateLobbyDefaults.startZoneRadius.toDouble(),
                     useRadiusInMeter: true,
                     color: Colors.blue.withOpacity(0.1),
                     borderStrokeWidth: 1.5,
                     borderColor: Colors.blue,
                   ),
-                if (rogueStartZone != null)
+                if (rogueLatLng != null)
                   CircleMarker(
-                    point: LatLng(
-                      rogueStartZone!.latitude,
-                      rogueStartZone!.longitude,
-                    ),
+                    point: rogueLatLng,
                     radius: CreateLobbyDefaults.startZoneRadius.toDouble(),
                     useRadiusInMeter: true,
                     color: Colors.green.withOpacity(0.1),
@@ -156,13 +173,11 @@ class LobbyMapPreview extends StatelessWidget {
                   ),
               ],
             ),
-            if (outerStreetContour.length >= 3)
+            if (contourLatLng.length >= 3)
               PolygonLayer(
                 polygons: [
                   Polygon(
-                    points: outerStreetContour
-                        .map((p) => LatLng(p.latitude, p.longitude))
-                        .toList(growable: false),
+                    points: contourLatLng,
                     color: Colors.blue.withOpacity(0.12),
                     borderColor: Colors.blue,
                     borderStrokeWidth: 2.5,
@@ -170,13 +185,11 @@ class LobbyMapPreview extends StatelessWidget {
                   ),
                 ],
               ),
-            if (guidancePath.length >= 2)
+            if (guidanceLatLng.length >= 2)
               PolylineLayer(
                 polylines: [
                   Polyline(
-                    points: guidancePath
-                        .map((p) => LatLng(p.latitude, p.longitude))
-                        .toList(growable: false),
+                    points: guidanceLatLng,
                     strokeWidth: 9 + (guidanceNeonPulse * 3),
                     color: guidancePathColor.withOpacity(
                       0.20 + (guidanceNeonPulse * 0.35),
@@ -184,9 +197,7 @@ class LobbyMapPreview extends StatelessWidget {
                     isDotted: false,
                   ),
                   Polyline(
-                    points: guidancePath
-                        .map((p) => LatLng(p.latitude, p.longitude))
-                        .toList(growable: false),
+                    points: guidanceLatLng,
                     strokeWidth: 4,
                     color: guidancePathColor.withOpacity(
                       0.80 + (guidanceNeonPulse * 0.20),
@@ -198,7 +209,7 @@ class LobbyMapPreview extends StatelessWidget {
             MarkerLayer(
               markers: [
                 Marker(
-                  point: LatLng(center.latitude, center.longitude),
+                  point: centerLatLng,
                   builder: (_) => const Icon(
                     Icons.location_on,
                     color: Colors.red,
@@ -206,9 +217,9 @@ class LobbyMapPreview extends StatelessWidget {
                   ),
                 ),
                 if (showObjectives && showObjectiveMarkers)
-                  ...objectives.map(
-                    (p) => Marker(
-                      point: LatLng(p.latitude, p.longitude),
+                  ...objectiveLatLng.map(
+                    (point) => Marker(
+                      point: point,
                       builder: (_) => Icon(
                         objectiveMarkerIcon,
                         color: objectiveMarkerColor,
@@ -216,35 +227,29 @@ class LobbyMapPreview extends StatelessWidget {
                       ),
                     ),
                   ),
-                if (agentStartZone != null)
+                if (agentLatLng != null)
                   Marker(
-                    point: LatLng(
-                      agentStartZone!.latitude,
-                      agentStartZone!.longitude,
-                    ),
+                    point: agentLatLng,
                     builder: (_) => const Icon(
                       Icons.trip_origin,
                       color: Colors.blue,
                       size: 20,
                     ),
                   ),
-                if (rogueStartZone != null)
+                if (rogueLatLng != null)
                   Marker(
-                    point: LatLng(
-                      rogueStartZone!.latitude,
-                      rogueStartZone!.longitude,
-                    ),
+                    point: rogueLatLng,
                     builder: (_) => const Icon(
                       Icons.trip_origin,
                       color: Colors.green,
                       size: 20,
                     ),
                   ),
-                ...playerPositions.map(
-                  (p) => Marker(
+                ...playerLatLng.map(
+                  (point) => Marker(
                     width: 40,
                     height: 44,
-                    point: LatLng(p.latitude, p.longitude),
+                    point: point,
                     anchorPos: AnchorPos.align(AnchorAlign.bottom),
                     builder: (_) => const _PlayerGpsPin(),
                   ),
@@ -275,21 +280,13 @@ class _PlayerGpsPin extends StatelessWidget {
             left: 0,
             right: 0,
             bottom: -4,
-            child: Icon(
-              Icons.location_on,
-              color: Colors.white,
-              size: 38,
-            ),
+            child: Icon(Icons.location_on, color: Colors.white, size: 38),
           ),
           Positioned(
             left: 0,
             right: 0,
             bottom: -4,
-            child: Icon(
-              Icons.location_on,
-              color: Colors.orange,
-              size: 34,
-            ),
+            child: Icon(Icons.location_on, color: Colors.orange, size: 34),
           ),
         ],
       ),

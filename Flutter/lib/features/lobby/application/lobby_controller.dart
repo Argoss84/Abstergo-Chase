@@ -8,7 +8,7 @@ import 'package:flutter/foundation.dart';
 
 class LobbyController extends ChangeNotifier {
   LobbyController({LobbySocketService? socketService})
-      : _socketService = socketService ?? LobbySocketService() {
+    : _socketService = socketService ?? LobbySocketService() {
     _voiceChatService = VoiceChatService(
       signalSender: (targetId, signal) {
         return _socketService.sendWebRtcSignal(
@@ -65,9 +65,7 @@ class LobbyController extends ChangeNotifier {
     'Point de chute',
   ];
 
-  Future<void> initialize({
-    required LobbyBootstrapData bootstrap,
-  }) async {
+  Future<void> initialize({required LobbyBootstrapData bootstrap}) async {
     bootstrapData = bootstrap;
     lobbyCode = bootstrap.code.toUpperCase();
     isLoading = true;
@@ -112,9 +110,9 @@ class LobbyController extends ChangeNotifier {
   void _regenerateObjectiveNames() {
     objectiveNames
       ..clear()
-      ..addAll(_pickRandomObjectives(
-        bootstrapData?.form?.objectiveNumber ?? 0,
-      ));
+      ..addAll(
+        _pickRandomObjectives(bootstrapData?.form?.objectiveNumber ?? 0),
+      );
   }
 
   List<String> _pickRandomObjectives(int count) {
@@ -140,15 +138,17 @@ class LobbyController extends ChangeNotifier {
             if (playersRaw is List) {
               players
                 ..clear()
-                ..addAll(playersRaw.whereType<Map>().map((raw) {
-                  return LobbyPlayer(
-                    id: raw['id']?.toString() ?? '',
-                    name: raw['name']?.toString() ?? 'Joueur',
-                    isHost: raw['isHost'] == true,
-                    role: raw['role']?.toString(),
-                    status: raw['status']?.toString() ?? 'active',
-                  );
-                }));
+                ..addAll(
+                  playersRaw.whereType<Map>().map((raw) {
+                    return LobbyPlayer(
+                      id: raw['id']?.toString() ?? '',
+                      name: raw['name']?.toString() ?? 'Joueur',
+                      isHost: raw['isHost'] == true,
+                      role: raw['role']?.toString(),
+                      status: raw['status']?.toString() ?? 'active',
+                    );
+                  }),
+                );
             }
           }
           playerId = payload['playerId']?.toString() ?? playerId;
@@ -190,8 +190,9 @@ class LobbyController extends ChangeNotifier {
           final newHost = payload['newHostId']?.toString();
           if (newHost != null) {
             for (var i = 0; i < players.length; i++) {
-              players[i] =
-                  players[i].copyWith(isHost: players[i].id == newHost);
+              players[i] = players[i].copyWith(
+                isHost: players[i].id == newHost,
+              );
             }
             isHost = playerId == newHost;
             _syncVoiceState();
@@ -304,14 +305,8 @@ class LobbyController extends ChangeNotifier {
     _socketService.sendLobbyChat(trimmed);
   }
 
-  void updateRole({
-    required String targetPlayerId,
-    required String? role,
-  }) {
-    _socketService.sendRoleUpdate(
-      playerId: targetPlayerId,
-      role: role,
-    );
+  void updateRole({required String targetPlayerId, required String? role}) {
+    _socketService.sendRoleUpdate(playerId: targetPlayerId, role: role);
   }
 
   bool get canStartGame {
@@ -346,10 +341,7 @@ class LobbyController extends ChangeNotifier {
           .where((p) => p.id != me && p.status.toLowerCase() != 'disconnected')
           .map((p) => p.id)
           .toList(growable: false);
-      await _voiceChatService.enable(
-        selfId: me,
-        peerIds: peerIds,
-      );
+      await _voiceChatService.enable(selfId: me, peerIds: peerIds);
       await _voiceChatService.setTransmissionActive(true);
     } catch (_) {
       isVoiceChatEnabled = false;
@@ -365,23 +357,31 @@ class LobbyController extends ChangeNotifier {
 
   void _handleVoiceActivitySignal(String peerId, bool active) {
     if (!active) return;
-    _voiceActiveSeenAtMs[peerId] = DateTime.now().millisecondsSinceEpoch;
-    notifyListeners();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final previous = _voiceActiveSeenAtMs[peerId];
+    _voiceActiveSeenAtMs[peerId] = now;
+    if (previous == null || now - previous >= 300) {
+      notifyListeners();
+    }
   }
 
   void _startVoiceActivityGcTimer() {
     _voiceActivityGcTimer?.cancel();
-    _voiceActivityGcTimer =
-        Timer.periodic(const Duration(milliseconds: 900), (_) {
+    _voiceActivityGcTimer = Timer.periodic(const Duration(milliseconds: 900), (
+      _,
+    ) {
       if (!isVoiceChatEnabled) return;
       _voiceChatService.broadcastVoiceActivity(
         forceInactive: false,
         level: 1.0,
       );
+      final before = _voiceActiveSeenAtMs.length;
       _voiceActiveSeenAtMs.removeWhere(
         (_, seenAt) => DateTime.now().millisecondsSinceEpoch - seenAt > 2000,
       );
-      notifyListeners();
+      if (_voiceActiveSeenAtMs.length != before) {
+        notifyListeners();
+      }
     });
   }
 

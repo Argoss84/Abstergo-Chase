@@ -43,6 +43,20 @@ const ENABLE_COST_METRICS =
 const ENABLE_SERVER_LOGS =
   process.env.ENABLE_SERVER_LOGS === '1' ||
   /^true$/i.test(process.env.ENABLE_SERVER_LOGS || '');
+const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
+const LOG_LEVEL_ORDER = {
+  error: 0,
+  warn: 1,
+  info: 2,
+  debug: 3
+};
+const MESSAGE_DEBUG_SAMPLE_RATE = Math.min(
+  1,
+  Math.max(
+    0,
+    Number.parseFloat(process.env.MESSAGE_DEBUG_SAMPLE_RATE || '0.05') || 0.05
+  )
+);
 const TURN_URLS = (process.env.TURN_URLS || '')
   .split(',')
   .map((v) => v.trim())
@@ -66,6 +80,11 @@ const __dirname = path.dirname(__filename);
 const RUNTIME_DATA_DIR = path.join(__dirname, 'data');
 const SNAPSHOT_FILE = path.join(RUNTIME_DATA_DIR, 'runtime-state.json');
 const EVENT_LOG_FILE = path.join(RUNTIME_DATA_DIR, 'runtime-events.log');
+const DISCONNECTED_GAME_PLAYER_TTL_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.DISCONNECTED_GAME_PLAYER_TTL_MS || '300000', 10) ||
+    300_000
+);
 const bddDisabled =
   process.env.DISABLE_BDD === '1' || /^true$/i.test(process.env.DISABLE_BDD || '');
 const BDD_URL = bddDisabled ? null : (process.env.BDD_URL || 'http://localhost:5175');
@@ -324,9 +343,39 @@ const touchGame = (code) => {
 
 const hasPresentPlayersInGame = (game) => {
   if (!game?.players || game.players.size === 0) return false;
-  return Array.from(game.players.values()).some(
-    (player) => (player?.status || 'active').toLowerCase() !== 'disconnected'
-  );
+  for (const player of game.players.values()) {
+    if ((player?.status || 'active').toLowerCase() !== 'disconnected') {
+      return true;
+    }
+  }
+  return false;
+};
+
+const forEachConnectedGameRecipient = (game, callback, { exceptId = null } = {}) => {
+  if (!game?.players) return;
+  for (const player of game.players.values()) {
+    if (!player?.id) continue;
+    if (exceptId && player.id === exceptId) continue;
+    if ((player.status || 'active').toLowerCase() === 'disconnected') continue;
+    const playerSocket = socketsById.get(player.id);
+    if (!playerSocket || !playerSocket.connected) continue;
+    callback(playerSocket, player);
+  }
+};
+
+const pruneDisconnectedGamePlayers = (game, now = Date.now()) => {
+  if (!game?.players || game.players.size === 0) return 0;
+  let removed = 0;
+  for (const [id, player] of game.players.entries()) {
+    if (!player) continue;
+    if ((player.status || '').toLowerCase() !== 'disconnected') continue;
+    const disconnectedAt =
+      typeof player.disconnectedAt === 'number' ? player.disconnectedAt : now;
+    if (now - disconnectedAt < DISCONNECTED_GAME_PLAYER_TTL_MS) continue;
+    game.players.delete(id);
+    removed += 1;
+  }
+  return removed;
 };
 
 const closeLobby = (code, reason = 'Lobby expiré', notify = true) => {
@@ -515,9 +564,27 @@ const transferLobbyHost = ({
   return true;
 };
 
+const shouldLogLevel = (level) => {
+  if (!ENABLE_SERVER_LOGS) return false;
+  const requested = LOG_LEVEL_ORDER[level] ?? LOG_LEVEL_ORDER.info;
+  const configured = LOG_LEVEL_ORDER[LOG_LEVEL] ?? LOG_LEVEL_ORDER.info;
+  return requested <= configured;
+};
+
+const formatLogArg = (arg) => {
+  if (typeof arg === 'object') {
+    try {
+      return JSON.stringify(arg);
+    } catch (_) {
+      return '[unserializable-object]';
+    }
+  }
+  return String(arg);
+};
+
 // Helper pour les logs horodatés
-const log = (...args) => {
-  if (!ENABLE_SERVER_LOGS) return;
+const logAt = (level, ...args) => {
+  if (!shouldLogLevel(level)) return;
   const timestamp = new Date().toLocaleString('fr-FR', {
     year: 'numeric',
     month: '2-digit',
@@ -527,11 +594,11 @@ const log = (...args) => {
     second: '2-digit',
     hour12: false
   });
-  const logMessage = `[${timestamp}] ${args.map(arg => 
-    typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
-  ).join(' ')}`;
+  const logMessage = `[${timestamp}] [${level.toUpperCase()}] ${args
+    .map(formatLogArg)
+    .join(' ')}`;
   
-  console.log(`[${timestamp}]`, ...args);
+  console.log(`[${timestamp}] [${level.toUpperCase()}]`, ...args);
   
   // Stocker le log
   logs.push({
@@ -545,9 +612,17 @@ const log = (...args) => {
   }
 };
 
+const log = (...args) => logAt('info', ...args);
+const logWarn = (...args) => logAt('warn', ...args);
+const logError = (...args) => logAt('error', ...args);
+const logDebug = (...args) => logAt('debug', ...args);
+
 let persistTimer = null;
 let persistInFlight = false;
 let persistQueued = false;
+let eventLogFlushTimer = null;
+let eventLogFlushInFlight = false;
+const pendingEventLogLines = [];
 
 const serializeLobby = (lobby) => ({
   code: lobby.code,
@@ -612,10 +687,10 @@ const persistRuntimeStateNow = async (reason = 'unspecified') => {
       }
     };
     const tempPath = `${SNAPSHOT_FILE}.tmp`;
-    await fs.writeFile(tempPath, JSON.stringify(snapshot, null, 2), 'utf8');
+    await fs.writeFile(tempPath, JSON.stringify(snapshot), 'utf8');
     await fs.rename(tempPath, SNAPSHOT_FILE);
   } catch (error) {
-    log('[PERSIST] Erreur snapshot runtime:', error?.message || error);
+    logError('[PERSIST] Erreur snapshot runtime:', error?.message || error);
   } finally {
     persistInFlight = false;
     if (persistQueued) {
@@ -633,26 +708,52 @@ const schedulePersist = (reason = 'state-change') => {
   persistTimer = setTimeout(() => {
     persistTimer = null;
     void persistRuntimeStateNow(reason);
-  }, 350);
+  }, 500);
 };
 
-const appendRuntimeEvent = async (type, payload = {}) => {
-  if (MEMORY_ONLY_MODE) return;
+const flushRuntimeEvents = async () => {
+  if (MEMORY_ONLY_MODE || pendingEventLogLines.length === 0 || eventLogFlushInFlight) {
+    return;
+  }
+  eventLogFlushInFlight = true;
+  const lines = pendingEventLogLines.splice(0, pendingEventLogLines.length);
   try {
     await fs.mkdir(RUNTIME_DATA_DIR, { recursive: true });
-    const line = JSON.stringify({
+    await fs.appendFile(EVENT_LOG_FILE, `${lines.join('\n')}\n`, 'utf8');
+  } catch (error) {
+    logError('[PERSIST] Erreur event log:', error?.message || error);
+    // Requeue to avoid losing events when temporary I/O issues happen.
+    pendingEventLogLines.unshift(...lines);
+  } finally {
+    eventLogFlushInFlight = false;
+    if (pendingEventLogLines.length > 0 && !eventLogFlushTimer) {
+      eventLogFlushTimer = setTimeout(() => {
+        eventLogFlushTimer = null;
+        void flushRuntimeEvents();
+      }, 250);
+    }
+  }
+};
+
+const appendRuntimeEvent = (type, payload = {}) => {
+  if (MEMORY_ONLY_MODE) return;
+  pendingEventLogLines.push(
+    JSON.stringify({
       ts: Date.now(),
       type,
       payload
-    });
-    await fs.appendFile(EVENT_LOG_FILE, `${line}\n`, 'utf8');
-  } catch (error) {
-    log('[PERSIST] Erreur event log:', error?.message || error);
+    })
+  );
+  if (!eventLogFlushTimer) {
+    eventLogFlushTimer = setTimeout(() => {
+      eventLogFlushTimer = null;
+      void flushRuntimeEvents();
+    }, 250);
   }
 };
 
 const markStateChanged = (type, payload = {}) => {
-  void appendRuntimeEvent(type, payload);
+  appendRuntimeEvent(type, payload);
   schedulePersist(type);
 };
 
@@ -841,6 +942,17 @@ const buildTurnCredentials = (clientId) => {
   };
 };
 
+const getRawMessagePreview = (raw) => {
+  if (typeof raw === 'string') {
+    return raw.substring(0, 200);
+  }
+  if (raw && typeof raw === 'object') {
+    const type = raw.type || 'unknown';
+    return `[object type=${type}]`;
+  }
+  return String(raw).substring(0, 200);
+};
+
 const send = (socket, message) => {
   if (socket && socket.connected) {
     incrementTotalSocketMessages();
@@ -848,9 +960,11 @@ const send = (socket, message) => {
     incrementLobbySocketMessages(clientInfo?.lobbyCode || null);
     const recipientId = clientInfo?.clientId || 'unknown';
     const finalMessage = enrichMessageWithVersion(message);
-    log(
-      `[MESSAGE ENVOYÉ] À: ${recipientId}, Type: ${finalMessage.type}, Version: ${SIGNALING_VERSION}`
-    );
+    if (Math.random() < MESSAGE_DEBUG_SAMPLE_RATE) {
+      logDebug(
+        `[MESSAGE ENVOYE] to=${recipientId} type=${finalMessage.type} version=${SIGNALING_VERSION}`
+      );
+    }
     socket.emit('message', finalMessage);
   }
 };
@@ -1274,15 +1388,19 @@ io.on('connection', (socket) => {
 
   socket.on('message', (raw) => {
     incrementTotalSocketMessages();
-    const rawPreview = typeof raw === 'string' ? raw.substring(0, 200) : JSON.stringify(raw).substring(0, 200);
-    log(`[MESSAGE BRUT REÇU] ClientId: ${clientId}, Taille: ${rawPreview.length} caractères, Contenu: ${rawPreview}`);
+    if (Math.random() < MESSAGE_DEBUG_SAMPLE_RATE) {
+      const rawPreview = getRawMessagePreview(raw);
+      logDebug(
+        `[MESSAGE BRUT RECU] client=${clientId} size=${rawPreview.length} preview=${rawPreview}`
+      );
+    }
     
     let message = raw;
     if (typeof raw === 'string') {
       try {
         message = JSON.parse(raw);
       } catch (error) {
-        log(`[ERREUR PARSING] ClientId: ${clientId}, Erreur: ${error.message}`);
+        logWarn(`[ERREUR PARSING] client=${clientId} err=${error.message}`);
         send(socket, { type: 'error', payload: { message: 'Message JSON invalide.' } });
         return;
       }
@@ -1302,12 +1420,17 @@ io.on('connection', (socket) => {
       log(`[VERSION CLIENT] ${clientId}: ${clientVersion}`);
     }
     if (!type) {
-      log(`[ERREUR] ClientId: ${clientId}, Message sans type`, message);
+      logWarn(`[ERREUR MESSAGE] client=${clientId} missing-type`);
       send(socket, { type: 'error', payload: { message: 'Type de message manquant.' } });
       return;
     }
-
-    log(`[MESSAGE REÇU] ClientId: ${clientId}, Type: ${type}, Payload:`, payload);
+    if (Math.random() < MESSAGE_DEBUG_SAMPLE_RATE) {
+      const payloadSize =
+        payload && typeof payload === 'object' ? Object.keys(payload).length : 0;
+      logDebug(
+        `[MESSAGE RECU] client=${clientId} type=${type} payloadKeys=${payloadSize}`
+      );
+    }
     const clientInfo = clients.get(socket.id);
     const lobbyCodeForMessage = getLobbyCodeFromMessage(type, payload, clientInfo);
     const gameCodeForMessage = getGameCodeFromMessage(type, payload, clientInfo);
@@ -2308,6 +2431,7 @@ io.on('connection', (socket) => {
         const leavingHost = game.players.get(playerId);
         if (leavingHost) {
           leavingHost.status = 'disconnected';
+          leavingHost.disconnectedAt = Date.now();
           leavingHost.isHost = false;
         }
         const transferred = transferGameHost({
@@ -2322,17 +2446,18 @@ io.on('connection', (socket) => {
         const leavingPlayer = game.players.get(playerId);
         if (leavingPlayer) {
           leavingPlayer.status = 'disconnected';
+          leavingPlayer.disconnectedAt = Date.now();
         }
-        game.players.forEach((p) => {
-          if (p.id === playerId) return;
-          const s = socketsById.get(p.id);
-          if (s) {
+        forEachConnectedGameRecipient(
+          game,
+          (s) => {
             send(s, {
               type: 'game:peer-left',
               payload: { playerId }
             });
-          }
-        });
+          },
+          { exceptId: playerId }
+        );
       }
 
       const clientInfo = clients.get(socket.id);
@@ -2350,6 +2475,11 @@ io.on('connection', (socket) => {
         const player = game.players.get(clientId);
         if (player) {
           player.status = payload?.status || 'active';
+          if ((player.status || '').toLowerCase() === 'disconnected') {
+            player.disconnectedAt = Date.now();
+          } else {
+            player.disconnectedAt = null;
+          }
           markStateChanged('game:player-status-update', {
             code: gameCode,
             playerId: clientId,
@@ -2455,6 +2585,11 @@ io.on('connection', (socket) => {
         return;
       }
       player.status = status;
+      if ((status || '').toLowerCase() === 'disconnected') {
+        player.disconnectedAt = Date.now();
+      } else {
+        player.disconnectedAt = null;
+      }
       const stateVersion = bumpGameStateVersion(game);
       game.players.forEach((p) => {
         const s = socketsById.get(p.id);
@@ -2639,6 +2774,7 @@ io.on('connection', (socket) => {
               const hostPlayer = currentGame.players.get(clientInfo.clientId);
               if (hostPlayer) {
                 hostPlayer.status = 'disconnected';
+                hostPlayer.disconnectedAt = Date.now();
                 hostPlayer.isHost = false;
               }
               const transferred = transferGameHost({
@@ -2662,17 +2798,18 @@ io.on('connection', (socket) => {
         const player = game.players.get(clientInfo.clientId);
         if (player) {
           player.status = 'disconnected';
+          player.disconnectedAt = Date.now();
         }
-        game.players.forEach((p) => {
-          if (p.id === clientInfo.clientId) return;
-          const s = socketsById.get(p.id);
-          if (s) {
+        forEachConnectedGameRecipient(
+          game,
+          (s) => {
             send(s, {
               type: 'game:peer-left',
               payload: { playerId: clientInfo.clientId }
             });
-          }
-        });
+          },
+          { exceptId: clientInfo.clientId }
+        );
       }
     }
 
@@ -2742,6 +2879,15 @@ setInterval(() => {
     }
   }
   for (const [code, game] of games.entries()) {
+    const prunedPlayers = pruneDisconnectedGamePlayers(game, now);
+    if (prunedPlayers > 0) {
+      logDebug(`[TTL] Nettoyage joueurs disconnected: game=${code} removed=${prunedPlayers}`);
+      markStateChanged('game:disconnected-player-pruned', {
+        code,
+        removed: prunedPlayers
+      });
+    }
+
     if (game.finishedAt) {
       log(`[TTL] Fermeture immédiate partie terminée: ${code}`);
       closeGame(code, 'Partie terminée', false);
@@ -2775,6 +2921,13 @@ if (!MEMORY_ONLY_MODE) {
 }
 
 const gracefulPersistAndExit = async (signal) => {
+  if (!MEMORY_ONLY_MODE) {
+    if (eventLogFlushTimer) {
+      clearTimeout(eventLogFlushTimer);
+      eventLogFlushTimer = null;
+    }
+    await flushRuntimeEvents();
+  }
   if (!MEMORY_ONLY_MODE) {
     log(`[PERSIST] Signal ${signal} reçu, sauvegarde de l'état runtime...`);
     await persistRuntimeStateNow(`signal:${signal}`);

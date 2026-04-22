@@ -28,7 +28,7 @@ class GameChatMessage {
 
 class GameController extends ChangeNotifier {
   GameController({GameSocketService? socketService})
-      : _socketService = socketService ?? GameSocketService() {
+    : _socketService = socketService ?? GameSocketService() {
     _voiceChatService = VoiceChatService(
       signalSender: (targetId, signal) {
         return _socketService.sendGameSignal(
@@ -91,6 +91,13 @@ class GameController extends ChangeNotifier {
   final Map<String, int> _voiceActiveSeenAtMs = <String, int>{};
   int _turnExpiresAtMs = 0;
 
+  bool _samePoint(GeoPoint? a, GeoPoint? b, {double eps = 0.000001}) {
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    return (a.latitude - b.latitude).abs() < eps &&
+        (a.longitude - b.longitude).abs() < eps;
+  }
+
   LobbyGameConfig? get _effectiveGameConfig =>
       liveGameConfig ?? bootstrap?.gameConfig;
 
@@ -126,21 +133,24 @@ class GameController extends ChangeNotifier {
     winnerType = null;
     winnerReason = null;
     final required = data.lobby.form?.victoryConditionObjectives;
-    victoryObjectivesRequired =
-        (required != null && required > 0) ? required : null;
+    victoryObjectivesRequired = (required != null && required > 0)
+        ? required
+        : null;
     startCountdownEndAtMs = null;
     isOutOfGameZone = false;
     players
       ..clear()
-      ..addAll(data.players.map((p) {
-        return GamePlayer(
-          id: p.id,
-          name: p.name,
-          isHost: p.isHost,
-          role: p.role,
-          status: p.status,
-        );
-      }));
+      ..addAll(
+        data.players.map((p) {
+          return GamePlayer(
+            id: p.id,
+            name: p.name,
+            isHost: p.isHost,
+            role: p.role,
+            status: p.status,
+          );
+        }),
+      );
     playerRole = players.where((p) => p.id == playerId).isNotEmpty
         ? players.firstWhere((p) => p.id == playerId).role
         : null;
@@ -204,27 +214,39 @@ class GameController extends ChangeNotifier {
       return;
     }
     _positionSub?.cancel();
-    _positionSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 5,
-      ),
-    ).listen((position) {
-      myPosition = GeoPoint(
-        latitude: position.latitude,
-        longitude: position.longitude,
-      );
-      isOutOfGameZone = !_isMyPositionInsideGameZone();
-      final idx = players.indexWhere((p) => p.id == playerId);
-      if (idx != -1) {
-        players[idx] = players[idx].copyWith(
-          latitude: position.latitude,
-          longitude: position.longitude,
-        );
-      }
-      _publishPositionIfDue(position.latitude, position.longitude);
-      notifyListeners();
-    });
+    _positionSub =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 5,
+          ),
+        ).listen((position) {
+          final previousPosition = myPosition;
+          final previousOutOfZone = isOutOfGameZone;
+          final nextPosition = GeoPoint(
+            latitude: position.latitude,
+            longitude: position.longitude,
+          );
+          myPosition = nextPosition;
+          isOutOfGameZone = !_isMyPositionInsideGameZone();
+          var playerPositionChanged = false;
+          final idx = players.indexWhere((p) => p.id == playerId);
+          if (idx != -1) {
+            playerPositionChanged =
+                players[idx].latitude != position.latitude ||
+                players[idx].longitude != position.longitude;
+            players[idx] = players[idx].copyWith(
+              latitude: position.latitude,
+              longitude: position.longitude,
+            );
+          }
+          _publishPositionIfDue(position.latitude, position.longitude);
+          if (!_samePoint(previousPosition, nextPosition) ||
+              previousOutOfZone != isOutOfGameZone ||
+              playerPositionChanged) {
+            notifyListeners();
+          }
+        });
   }
 
   bool _isMyPositionInsideGameZone() {
@@ -261,7 +283,8 @@ class GameController extends ChangeNotifier {
       final yi = polygon[i].latitude;
       final xj = polygon[j].longitude;
       final yj = polygon[j].latitude;
-      final intersects = ((yi > point.latitude) != (yj > point.latitude)) &&
+      final intersects =
+          ((yi > point.latitude) != (yj > point.latitude)) &&
           (point.longitude <
               (xj - xi) *
                       (point.latitude - yi) /
@@ -297,8 +320,9 @@ class GameController extends ChangeNotifier {
     gameStarted = false;
     convergingPhase = false;
     _startCountdownTimer?.cancel();
-    _startCountdownTimer =
-        Timer.periodic(const Duration(milliseconds: 200), (_) {
+    _startCountdownTimer = Timer.periodic(const Duration(milliseconds: 200), (
+      _,
+    ) {
       final endAt = startCountdownEndAtMs;
       if (endAt == null) return;
       final remainingMs = endAt - DateTime.now().millisecondsSinceEpoch;
@@ -422,8 +446,9 @@ class GameController extends ChangeNotifier {
           final newHost = payload['newHostId']?.toString();
           if (newHost != null) {
             for (var i = 0; i < players.length; i++) {
-              players[i] =
-                  players[i].copyWith(isHost: players[i].id == newHost);
+              players[i] = players[i].copyWith(
+                isHost: players[i].id == newHost,
+              );
             }
             isHost = playerId == newHost;
             _syncVoiceState();
@@ -556,7 +581,7 @@ class GameController extends ChangeNotifier {
               text: payload['text']?.toString() ?? '',
               timestampMs:
                   int.tryParse(payload['timestamp']?.toString() ?? '') ??
-                      DateTime.now().millisecondsSinceEpoch,
+                  DateTime.now().millisecondsSinceEpoch,
             ),
           );
           if (roleChat.length > 150) {
@@ -599,15 +624,17 @@ class GameController extends ChangeNotifier {
     if (game is Map && game['players'] is List) {
       players
         ..clear()
-        ..addAll((game['players'] as List).whereType<Map>().map((raw) {
-          return GamePlayer(
-            id: raw['id']?.toString() ?? '',
-            name: raw['name']?.toString() ?? 'Joueur',
-            isHost: raw['isHost'] == true,
-            role: raw['role']?.toString(),
-            status: raw['status']?.toString() ?? 'active',
-          );
-        }));
+        ..addAll(
+          (game['players'] as List).whereType<Map>().map((raw) {
+            return GamePlayer(
+              id: raw['id']?.toString() ?? '',
+              name: raw['name']?.toString() ?? 'Joueur',
+              isHost: raw['isHost'] == true,
+              role: raw['role']?.toString(),
+              status: raw['status']?.toString() ?? 'active',
+            );
+          }),
+        );
     }
     if (game is Map) {
       final serverRemaining = int.tryParse(
@@ -662,16 +689,19 @@ class GameController extends ChangeNotifier {
       final reason = details['winner_reason']?.toString();
       winnerReason = (reason == null || reason.isEmpty) ? winnerReason : reason;
       final required = int.tryParse(
-          details['victory_objectives_required']?.toString() ?? '');
+        details['victory_objectives_required']?.toString() ?? '',
+      );
       if (required != null && required > 0) {
         victoryObjectivesRequired = required;
       }
-      final endAt =
-          int.tryParse(details['start_countdown_end_at_ms']?.toString() ?? '');
+      final endAt = int.tryParse(
+        details['start_countdown_end_at_ms']?.toString() ?? '',
+      );
       startCountdownEndAtMs = endAt;
     }
-    final syncedRemaining =
-        int.tryParse(payload['remaining_time']?.toString() ?? '');
+    final syncedRemaining = int.tryParse(
+      payload['remaining_time']?.toString() ?? '',
+    );
     if (syncedRemaining != null) {
       // Avoid clobbering host duration with pre-start zero snapshots.
       if (gameStarted || syncedRemaining > 0) {
@@ -713,7 +743,8 @@ class GameController extends ChangeNotifier {
         final lng = double.tryParse(raw['longitude']?.toString() ?? '');
         final status = raw['status']?.toString();
         final role = raw.containsKey('role') ? raw['role']?.toString() : null;
-        final name = raw['displayName']?.toString() ??
+        final name =
+            raw['displayName']?.toString() ??
             raw['name']?.toString() ??
             'Joueur';
         if (idx != -1) {
@@ -824,7 +855,8 @@ class GameController extends ChangeNotifier {
       'gameDetails': <String, dynamic>{
         'winner_type': winnerType,
         'winner_reason': winnerReason,
-        'victory_objectives_required': victoryObjectivesRequired ??
+        'victory_objectives_required':
+            victoryObjectivesRequired ??
             bootstrap?.lobby.form?.victoryConditionObjectives,
         'start_countdown_end_at_ms': startCountdownEndAtMs,
       },
@@ -846,21 +878,16 @@ class GameController extends ChangeNotifier {
     final required =
         bootstrap?.lobby.form?.victoryConditionObjectives ?? objectives.length;
     if (required > 0 && captured >= required) {
-      return const _WinnerOutcome(
-        type: 'ROGUE',
-        reason: 'OBJECTIVES_CAPTURED',
-      );
+      return const _WinnerOutcome(type: 'ROGUE', reason: 'OBJECTIVES_CAPTURED');
     }
 
     // Agents win if all rogues are captured.
-    final roguePlayers =
-        players.where((p) => (p.role ?? '').toUpperCase() == 'ROGUE');
+    final roguePlayers = players.where(
+      (p) => (p.role ?? '').toUpperCase() == 'ROGUE',
+    );
     if (roguePlayers.isNotEmpty &&
         roguePlayers.every((p) => p.status.toUpperCase() == 'CAPTURED')) {
-      return const _WinnerOutcome(
-        type: 'AGENT',
-        reason: 'ALL_ROGUES_CAPTURED',
-      );
+      return const _WinnerOutcome(type: 'AGENT', reason: 'ALL_ROGUES_CAPTURED');
     }
 
     // Agents win if time is over.
@@ -902,10 +929,7 @@ class GameController extends ChangeNotifier {
     if (lat == null || lng == null) return;
     final idx = players.indexWhere((p) => p.id == fromId);
     if (idx == -1) return;
-    players[idx] = players[idx].copyWith(
-      latitude: lat,
-      longitude: lng,
-    );
+    players[idx] = players[idx].copyWith(latitude: lat, longitude: lng);
     _pushSnapshotThrottled();
     _tickObjectiveCapturesIfHost();
     notifyListeners();
@@ -950,8 +974,9 @@ class GameController extends ChangeNotifier {
   }
 
   String? _nearestHackableObjectiveIdForPlayer(String playerIdToCheck) {
-    final p =
-        players.where((p) => p.id == playerIdToCheck).toList(growable: false);
+    final p = players
+        .where((p) => p.id == playerIdToCheck)
+        .toList(growable: false);
     if (p.isEmpty) return null;
     final player = p.first;
     if ((player.role ?? '').toUpperCase() != 'ROGUE') return null;
@@ -1028,10 +1053,7 @@ class GameController extends ChangeNotifier {
       gameStarted = false;
       convergingPhase = false;
       _countdownTimer?.cancel();
-      _socketService.updateRemainingTime(
-        remaining: 0,
-        countdownStarted: false,
-      );
+      _socketService.updateRemainingTime(remaining: 0, countdownStarted: false);
       _pushSnapshot();
       notifyListeners();
     }
@@ -1141,18 +1163,22 @@ class GameController extends ChangeNotifier {
 
   void _startVoiceActivityTimer() {
     _voiceActivityTimer?.cancel();
-    _voiceActivityTimer =
-        Timer.periodic(const Duration(milliseconds: 900), (_) {
+    _voiceActivityTimer = Timer.periodic(const Duration(milliseconds: 900), (
+      _,
+    ) {
       if (!isVoiceChatEnabled) return;
       if (connectionStatus != 'connected') return;
       _voiceChatService.broadcastVoiceActivity(
         forceInactive: false,
         level: 1.0,
       );
+      final before = _voiceActiveSeenAtMs.length;
       _voiceActiveSeenAtMs.removeWhere(
         (_, seenAt) => DateTime.now().millisecondsSinceEpoch - seenAt > 2000,
       );
-      notifyListeners();
+      if (_voiceActiveSeenAtMs.length != before) {
+        notifyListeners();
+      }
     });
   }
 
@@ -1185,6 +1211,7 @@ class GameController extends ChangeNotifier {
   }
 
   Future<void> setPushToTalkPressed(bool pressed) async {
+    if (_pushToTalkPressed == pressed) return;
     _pushToTalkPressed = pressed;
     await _applyTransmissionGate();
     notifyListeners();
@@ -1210,8 +1237,12 @@ class GameController extends ChangeNotifier {
     // In absence of raw microphone level, keep compatibility:
     // packets below threshold are ignored for highlight.
     if (1.0 < threshold) return;
-    _voiceActiveSeenAtMs[peerId] = DateTime.now().millisecondsSinceEpoch;
-    notifyListeners();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final previous = _voiceActiveSeenAtMs[peerId];
+    _voiceActiveSeenAtMs[peerId] = now;
+    if (previous == null || now - previous >= 300) {
+      notifyListeners();
+    }
   }
 
   Future<void> _refreshTurnIfNeeded() async {
@@ -1380,7 +1411,8 @@ class GameController extends ChangeNotifier {
       }
     }
 
-    final network = _effectiveGameConfig?.mapStreets ??
+    final network =
+        _effectiveGameConfig?.mapStreets ??
         bootstrap?.lobby.outerStreetContour ??
         const <GeoPoint>[];
     if (network.length < 2) return <GeoPoint>[start, target];
@@ -1397,11 +1429,7 @@ class GameController extends ChangeNotifier {
         ? forward
         : backward;
 
-    return <GeoPoint>[
-      start,
-      if (best.isNotEmpty) ...best,
-      target,
-    ];
+    return <GeoPoint>[start, if (best.isNotEmpty) ...best, target];
   }
 
   List<GeoPoint> _shortestPathOnStreetNetwork({
@@ -1508,11 +1536,7 @@ class GameController extends ChangeNotifier {
       reversePath.add(nodes[cursor]);
     }
     final pathOnStreets = reversePath.reversed.toList(growable: false);
-    return <GeoPoint>[
-      start,
-      ...pathOnStreets,
-      target,
-    ];
+    return <GeoPoint>[start, ...pathOnStreets, target];
   }
 
   int _nearestNodeIndex(List<GeoPoint> nodes, GeoPoint target) {
@@ -1603,11 +1627,13 @@ class GameController extends ChangeNotifier {
 
   bool get canHostStartGame {
     if (!isHost || gameStarted) return false;
-    final relevant = players.where((p) {
-      if ((p.status).toLowerCase() == 'disconnected') return false;
-      final role = (p.role ?? '').toUpperCase();
-      return role == 'AGENT' || role == 'ROGUE';
-    }).toList(growable: false);
+    final relevant = players
+        .where((p) {
+          if ((p.status).toLowerCase() == 'disconnected') return false;
+          final role = (p.role ?? '').toUpperCase();
+          return role == 'AGENT' || role == 'ROGUE';
+        })
+        .toList(growable: false);
     if (relevant.isEmpty) return false;
     return relevant.every(isPlayerInStartZone);
   }
@@ -1627,10 +1653,7 @@ class GameController extends ChangeNotifier {
 }
 
 class _WinnerOutcome {
-  const _WinnerOutcome({
-    required this.type,
-    required this.reason,
-  });
+  const _WinnerOutcome({required this.type, required this.reason});
 
   final String type;
   final String reason;
