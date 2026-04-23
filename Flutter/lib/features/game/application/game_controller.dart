@@ -164,6 +164,7 @@ class GameController extends ChangeNotifier {
 
     try {
       final voiceSettings = await _voiceSettingsService.load();
+      isVoiceChatEnabled = voiceSettings.enabled;
       voiceMode = voiceSettings.mode;
       voiceActivationThreshold = voiceSettings.activationThreshold;
       await _socketService.connect(
@@ -1147,6 +1148,14 @@ class GameController extends ChangeNotifier {
   }
 
   Future<void> toggleVoiceChatEnabled() async {
+    final settings = await _voiceSettingsService.load();
+    if (!settings.enabled) {
+      isVoiceChatEnabled = false;
+      _pushToTalkPressed = false;
+      await _voiceChatService.disable();
+      notifyListeners();
+      return;
+    }
     isVoiceChatEnabled = !isVoiceChatEnabled;
     if (!isVoiceChatEnabled) {
       _pushToTalkPressed = false;
@@ -1204,8 +1213,15 @@ class GameController extends ChangeNotifier {
 
   Future<void> refreshVoiceSettings() async {
     final settings = await _voiceSettingsService.load();
+    isVoiceChatEnabled = settings.enabled;
     voiceMode = settings.mode;
     voiceActivationThreshold = settings.activationThreshold;
+    if (!isVoiceChatEnabled) {
+      _pushToTalkPressed = false;
+      await _voiceChatService.disable();
+      notifyListeners();
+      return;
+    }
     await _applyTransmissionGate();
     notifyListeners();
   }

@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:abstergo_chase/features/lobby/data/lobby_socket_service.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
 import 'package:abstergo_chase/shared/services/voice_chat_service.dart';
+import 'package:abstergo_chase/shared/services/voice_settings_service.dart';
 import 'package:flutter/foundation.dart';
 
 class LobbyController extends ChangeNotifier {
@@ -22,6 +23,7 @@ class LobbyController extends ChangeNotifier {
 
   final LobbySocketService _socketService;
   late final VoiceChatService _voiceChatService;
+  final VoiceSettingsService _voiceSettingsService = VoiceSettingsService();
   StreamSubscription<Map<String, dynamic>>? _messagesSub;
 
   bool isLoading = true;
@@ -95,6 +97,8 @@ class LobbyController extends ChangeNotifier {
       isHost = joined.playerId == joined.hostId;
       connectionStatus = 'connected';
       _regenerateObjectiveNames();
+      final voiceSettings = await _voiceSettingsService.load();
+      isVoiceChatEnabled = voiceSettings.enabled;
       isLoading = false;
       notifyListeners();
       // Keep lobby join UX responsive even if microphone permission stalls.
@@ -377,6 +381,13 @@ class LobbyController extends ChangeNotifier {
   }
 
   Future<void> toggleVoiceChat() async {
+    final voiceSettings = await _voiceSettingsService.load();
+    if (!voiceSettings.enabled) {
+      isVoiceChatEnabled = false;
+      await _voiceChatService.disable();
+      notifyListeners();
+      return;
+    }
     isVoiceChatEnabled = !isVoiceChatEnabled;
     await _syncVoiceState();
     notifyListeners();

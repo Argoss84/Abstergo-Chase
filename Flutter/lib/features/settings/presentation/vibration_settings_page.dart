@@ -26,6 +26,7 @@ class _SettingsPageState extends State<SettingsPage> {
     text: 'Test de la synthèse vocale',
   );
   Map<VibrationEvent, bool>? _settings;
+  bool _voiceEnabled = false;
   VoiceTransmissionMode _voiceMode = VoiceTransmissionMode.voiceActivation;
   double _voiceThreshold = 0.55;
   double _testVoiceLevel = 0;
@@ -48,6 +49,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (!mounted) return;
     setState(() {
       _settings = settings;
+      _voiceEnabled = voiceSettings.enabled;
       _voiceMode = voiceSettings.mode;
       _voiceThreshold = voiceSettings.activationThreshold;
       _useProductionSignaling = useProd;
@@ -71,6 +73,13 @@ class _SettingsPageState extends State<SettingsPage> {
       _voiceMode = mode;
     });
     await _voiceSettingsService.setMode(mode);
+  }
+
+  Future<void> _setVoiceEnabled(bool enabled) async {
+    setState(() {
+      _voiceEnabled = enabled;
+    });
+    await _voiceSettingsService.setEnabled(enabled);
   }
 
   Future<void> _setVoiceThreshold(double value) async {
@@ -276,6 +285,16 @@ class _SettingsPageState extends State<SettingsPage> {
                           style: TextStyle(fontWeight: FontWeight.w500),
                         ),
                         const SizedBox(height: 8),
+                        SwitchListTile(
+                          value: _voiceEnabled,
+                          onChanged: _setVoiceEnabled,
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Activer le vocal'),
+                          subtitle: const Text(
+                            'Désactivé: aucune connexion au serveur vocal.',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
                         SegmentedButton<VoiceTransmissionMode>(
                           segments:
                               const <ButtonSegment<VoiceTransmissionMode>>[
@@ -291,12 +310,14 @@ class _SettingsPageState extends State<SettingsPage> {
                                 ),
                               ],
                           selected: <VoiceTransmissionMode>{_voiceMode},
-                          onSelectionChanged: (values) {
-                            final selected = values.isEmpty
-                                ? VoiceTransmissionMode.voiceActivation
-                                : values.first;
-                            _setVoiceMode(selected);
-                          },
+                          onSelectionChanged: _voiceEnabled
+                              ? (values) {
+                                  final selected = values.isEmpty
+                                      ? VoiceTransmissionMode.voiceActivation
+                                      : values.first;
+                                  _setVoiceMode(selected);
+                                }
+                              : null,
                         ),
                         const SizedBox(height: 12),
                         const Text(
@@ -310,8 +331,9 @@ class _SettingsPageState extends State<SettingsPage> {
                           divisions: 19,
                           label: '${(_voiceThreshold * 100).round()}%',
                           onChanged:
-                              _voiceMode ==
-                                  VoiceTransmissionMode.voiceActivation
+                              _voiceEnabled &&
+                                  _voiceMode ==
+                                      VoiceTransmissionMode.voiceActivation
                               ? (v) => _setVoiceThreshold(v)
                               : null,
                         ),
@@ -321,23 +343,29 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                         const SizedBox(height: 8),
                         Listener(
-                          onPointerDown: (_) {
-                            setState(() {
-                              _testVoiceLevel = 1.0;
-                            });
-                          },
-                          onPointerUp: (_) {
-                            setState(() {
-                              _testVoiceLevel = 0.0;
-                            });
-                          },
-                          onPointerCancel: (_) {
-                            setState(() {
-                              _testVoiceLevel = 0.0;
-                            });
-                          },
+                          onPointerDown: _voiceEnabled
+                              ? (_) {
+                                  setState(() {
+                                    _testVoiceLevel = 1.0;
+                                  });
+                                }
+                              : null,
+                          onPointerUp: _voiceEnabled
+                              ? (_) {
+                                  setState(() {
+                                    _testVoiceLevel = 0.0;
+                                  });
+                                }
+                              : null,
+                          onPointerCancel: _voiceEnabled
+                              ? (_) {
+                                  setState(() {
+                                    _testVoiceLevel = 0.0;
+                                  });
+                                }
+                              : null,
                           child: FilledButton.icon(
-                            onPressed: () {},
+                            onPressed: _voiceEnabled ? () {} : null,
                             icon: const Icon(Icons.mic),
                             label: const Text('Maintenir pour tester'),
                           ),
