@@ -1,19 +1,30 @@
+import 'package:abstergo_chase/app/providers.dart';
 import 'package:abstergo_chase/features/create_lobby/presentation/create_lobby_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:abstergo_chase/features/home/presentation/home_menu_page.dart';
 
-class BootstrapPage extends StatelessWidget {
+class BootstrapPage extends ConsumerWidget {
   const BootstrapPage({super.key});
 
   static const String routeName = 'bootstrap';
   static const String routePath = '/';
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('AbstergoChase'),
+        actions: [
+          IconButton(
+            tooltip: 'Déconnexion',
+            onPressed: () {
+              ref.read(authControllerProvider).signOut();
+            },
+            icon: const Icon(Icons.logout),
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),

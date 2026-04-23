@@ -1,3 +1,5 @@
+import 'package:abstergo_chase/features/auth/application/cognito_auth_controller.dart';
+import 'package:abstergo_chase/features/auth/presentation/login_page.dart';
 import 'package:abstergo_chase/features/bootstrap/presentation/bootstrap_page.dart';
 import 'package:abstergo_chase/features/create_lobby/presentation/create_lobby_page.dart';
 import 'package:abstergo_chase/features/game/domain/game_models.dart';
@@ -9,10 +11,29 @@ import 'package:abstergo_chase/features/lobby/presentation/lobby_page.dart';
 import 'package:abstergo_chase/features/settings/presentation/vibration_settings_page.dart';
 import 'package:go_router/go_router.dart';
 
-GoRouter buildAppRouter() {
+GoRouter buildAppRouter(CognitoAuthController authController) {
   return GoRouter(
     initialLocation: BootstrapPage.routePath,
+    refreshListenable: authController,
+    redirect: (context, state) {
+      final isLoggingIn = state.uri.path == LoginPage.routePath;
+      if (authController.isInitializing) {
+        return null;
+      }
+      if (!authController.isAuthenticated) {
+        return isLoggingIn ? null : LoginPage.routePath;
+      }
+      if (isLoggingIn) {
+        return BootstrapPage.routePath;
+      }
+      return null;
+    },
     routes: <RouteBase>[
+      GoRoute(
+        path: LoginPage.routePath,
+        name: LoginPage.routeName,
+        builder: (context, state) => const LoginPage(),
+      ),
       GoRoute(
         path: BootstrapPage.routePath,
         name: BootstrapPage.routeName,
@@ -26,9 +47,8 @@ GoRouter buildAppRouter() {
       GoRoute(
         path: HomeMenuPage.joinLobbyPath,
         name: JoinLobbyPage.routeName,
-        builder: (context, state) => JoinLobbyPage(
-          initialCode: state.uri.queryParameters['code'],
-        ),
+        builder: (context, state) =>
+            JoinLobbyPage(initialCode: state.uri.queryParameters['code']),
       ),
       GoRoute(
         path: LobbyPage.routePath,
@@ -43,9 +63,8 @@ GoRouter buildAppRouter() {
       GoRoute(
         path: GamePage.routePath,
         name: GamePage.routeName,
-        builder: (context, state) => GamePage(
-          bootstrap: state.extra! as GameBootstrapData,
-        ),
+        builder: (context, state) =>
+            GamePage(bootstrap: state.extra! as GameBootstrapData),
       ),
       GoRoute(
         path: SettingsPage.routePath,

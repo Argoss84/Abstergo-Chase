@@ -28,6 +28,9 @@ android {
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         multiDexEnabled true
+        manifestPlaceholders += [
+            appAuthRedirectScheme: "com.abstergo.chase"
+        ]
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

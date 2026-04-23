@@ -51,6 +51,8 @@ dependencies:
   flutter_webrtc: ^1.4.1
   flutter_tts: ^4.2.5
   wakelock_plus: ^1.5.2
+  amazon_cognito_identity_dart_2: ^3.8.1
+  flutter_appauth: ^8.0.3
 
 dev_dependencies:
   flutter_test:
