@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+const double _kOsmMaxZoom = 19;
+const int _kOsmMaxNativeZoom = 19;
+
 class LobbyMapPreview extends StatelessWidget {
   const LobbyMapPreview({
     super.key,
@@ -90,12 +93,15 @@ class LobbyMapPreview extends StatelessWidget {
           options: MapOptions(
             center: centerLatLng,
             zoom: 15.5,
+            maxZoom: _kOsmMaxZoom,
             interactiveFlags: InteractiveFlag.drag | InteractiveFlag.pinchZoom,
           ),
           children: [
             TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.abstergo.chase',
+              maxNativeZoom: _kOsmMaxNativeZoom,
+              maxZoom: _kOsmMaxZoom,
             ),
             CircleLayer(
               circles: [

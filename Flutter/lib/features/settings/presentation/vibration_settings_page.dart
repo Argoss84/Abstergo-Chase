@@ -1,5 +1,7 @@
 import 'package:abstergo_chase/shared/services/vibration_service.dart';
 import 'package:abstergo_chase/shared/services/socket_environment_service.dart';
+import 'package:abstergo_chase/shared/services/screen_awake_service.dart';
+import 'package:abstergo_chase/shared/services/tts_service.dart';
 import 'package:abstergo_chase/shared/services/voice_settings_service.dart';
 import 'package:flutter/material.dart';
 
@@ -18,11 +20,18 @@ class _SettingsPageState extends State<SettingsPage> {
   final VoiceSettingsService _voiceSettingsService = VoiceSettingsService();
   final SocketEnvironmentService _socketEnvironmentService =
       SocketEnvironmentService();
+  final TtsService _ttsService = TtsService.instance;
+  final ScreenAwakeService _screenAwakeService = ScreenAwakeService.instance;
+  final TextEditingController _ttsTestController = TextEditingController(
+    text: 'Test de la synthèse vocale',
+  );
   Map<VibrationEvent, bool>? _settings;
   VoiceTransmissionMode _voiceMode = VoiceTransmissionMode.voiceActivation;
   double _voiceThreshold = 0.55;
   double _testVoiceLevel = 0;
   bool _useProductionSignaling = true;
+  bool _ttsEnabled = true;
+  bool _preventScreenLock = false;
 
   @override
   void initState() {
@@ -34,12 +43,16 @@ class _SettingsPageState extends State<SettingsPage> {
     final settings = await _vibrationService.loadSettings();
     final voiceSettings = await _voiceSettingsService.load();
     final useProd = await _socketEnvironmentService.useProduction();
+    final ttsEnabled = await _ttsService.isEnabled();
+    final preventScreenLock = await _screenAwakeService.isPreventLockEnabled();
     if (!mounted) return;
     setState(() {
       _settings = settings;
       _voiceMode = voiceSettings.mode;
       _voiceThreshold = voiceSettings.activationThreshold;
       _useProductionSignaling = useProd;
+      _ttsEnabled = ttsEnabled;
+      _preventScreenLock = preventScreenLock;
     });
   }
 
@@ -72,6 +85,30 @@ class _SettingsPageState extends State<SettingsPage> {
       _useProductionSignaling = useProduction;
     });
     await _socketEnvironmentService.setUseProduction(useProduction);
+  }
+
+  Future<void> _setTtsEnabled(bool enabled) async {
+    setState(() {
+      _ttsEnabled = enabled;
+    });
+    await _ttsService.setEnabled(enabled);
+  }
+
+  Future<void> _testTts() async {
+    await _ttsService.speakPreview(_ttsTestController.text);
+  }
+
+  Future<void> _setPreventScreenLock(bool enabled) async {
+    setState(() {
+      _preventScreenLock = enabled;
+    });
+    await _screenAwakeService.setPreventLockEnabled(enabled);
+  }
+
+  @override
+  void dispose() {
+    _ttsTestController.dispose();
+    super.dispose();
   }
 
   @override
@@ -135,6 +172,85 @@ class _SettingsPageState extends State<SettingsPage> {
                               ),
                             ),
                           ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Ecran',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Empêche la mise en veille de l’écran pendant le jeu.',
+                          style: TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          value: _preventScreenLock,
+                          onChanged: _setPreventScreenLock,
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Empêcher le verrouillage écran'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'TTS',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Active ou désactive la voix de synthèse.',
+                          style: TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          value: _ttsEnabled,
+                          onChanged: _setTtsEnabled,
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Activer le TTS'),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _ttsTestController,
+                          minLines: 1,
+                          maxLines: 3,
+                          decoration: const InputDecoration(
+                            labelText: 'Texte de test',
+                            hintText: 'Saisissez un texte à lire',
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: FilledButton.icon(
+                            onPressed: _testTts,
+                            icon: const Icon(Icons.volume_up),
+                            label: const Text('Tester le TTS'),
+                          ),
                         ),
                       ],
                     ),

@@ -7,6 +7,7 @@ import 'package:abstergo_chase/features/game/application/game_controller.dart';
 import 'package:abstergo_chase/features/game/domain/game_models.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
 import 'package:abstergo_chase/features/lobby/presentation/widgets/lobby_map_preview.dart';
+import 'package:abstergo_chase/shared/services/tts_service.dart';
 import 'package:abstergo_chase/shared/services/vibration_service.dart';
 import 'package:abstergo_chase/shared/services/voice_settings_service.dart';
 import 'package:flutter/material.dart';
@@ -47,11 +48,13 @@ class _GamePageState extends State<GamePage>
   int _lastReadCount = 0;
   bool _isActionFabOpen = false;
   final VibrationService _vibrationService = VibrationService();
+  final TtsService _ttsService = TtsService.instance;
   bool _prevRogueObjectiveInRange = false;
   bool _prevSelfInStartZone = false;
   final Map<String, bool> _hostPlayerInStartZone = <String, bool>{};
   int? _lastCountdownSecondVibrated;
   int _lastOutOfZoneVibrationMs = 0;
+  bool _hasSpokenJoinTts = false;
 
   @override
   void initState() {
@@ -95,6 +98,16 @@ class _GamePageState extends State<GamePage>
             : (_controller.roleChat.length - _lastReadCount).clamp(0, 999);
         final fallbackCenter = _resolveCenter();
         final connectionReady = _controller.connectionStatus == 'connected';
+        final roleForTts = (_controller.playerRole ?? '').trim();
+        if (connectionReady && roleForTts.isNotEmpty && !_hasSpokenJoinTts) {
+          _hasSpokenJoinTts = true;
+          final spokenRole = roleForTts.toLowerCase();
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _ttsService.speakIfEnabled(
+              "Bienvenue $spokenRole, dirigez vous vers votre zone de départ",
+            );
+          });
+        }
         final topInset =
             MediaQuery.of(context).padding.top + kToolbarHeight + 8;
         final objectiveZoneRadius =

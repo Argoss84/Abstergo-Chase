@@ -36,7 +36,7 @@ const TextStyle _kChatBubbleBodyStyle = TextStyle(
   color: Color(0xFF0F172A),
 );
 
-class _LobbyPageState extends State<LobbyPage> {
+class _LobbyPageState extends State<LobbyPage> with WidgetsBindingObserver {
   late final LobbyController _controller;
   late final TextEditingController _chatController;
   int _lastReadCount = 0;
@@ -53,6 +53,7 @@ class _LobbyPageState extends State<LobbyPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller = LobbyController();
     _chatController = TextEditingController();
     final bootstrap = widget.bootstrapData;
@@ -84,9 +85,17 @@ class _LobbyPageState extends State<LobbyPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _chatController.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _controller.recoverAfterResume();
+    }
   }
 
   @override

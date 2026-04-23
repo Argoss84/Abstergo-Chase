@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+const double _kOsmMaxZoom = 19;
+const int _kOsmMaxNativeZoom = 19;
+
 class CreateLobbyMap extends StatelessWidget {
   const CreateLobbyMap({
     super.key,
@@ -40,6 +43,7 @@ class CreateLobbyMap extends StatelessWidget {
           options: MapOptions(
             center: LatLng(currentPosition.latitude, currentPosition.longitude),
             zoom: 16,
+            maxZoom: _kOsmMaxZoom,
             onTap: (_, point) {
               onTap(
                 GeoPoint(latitude: point.latitude, longitude: point.longitude),
@@ -50,12 +54,16 @@ class CreateLobbyMap extends StatelessWidget {
             TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.abstergo.chase',
+              maxNativeZoom: _kOsmMaxNativeZoom,
+              maxZoom: _kOsmMaxZoom,
             ),
             MarkerLayer(
               markers: [
                 Marker(
                   point: LatLng(
-                      currentPosition.latitude, currentPosition.longitude),
+                    currentPosition.latitude,
+                    currentPosition.longitude,
+                  ),
                   builder: (_) => const Icon(
                     Icons.my_location,
                     color: Colors.blue,
@@ -77,17 +85,16 @@ class CreateLobbyMap extends StatelessWidget {
                 ...objectives.map(
                   (point) => Marker(
                     point: LatLng(point.latitude, point.longitude),
-                    builder: (_) => const Icon(
-                      Icons.adjust,
-                      color: Colors.red,
-                      size: 20,
-                    ),
+                    builder: (_) =>
+                        const Icon(Icons.adjust, color: Colors.red, size: 20),
                   ),
                 ),
                 if (agentStartZone != null)
                   Marker(
                     point: LatLng(
-                        agentStartZone!.latitude, agentStartZone!.longitude),
+                      agentStartZone!.latitude,
+                      agentStartZone!.longitude,
+                    ),
                     builder: (_) => const Icon(
                       Icons.trip_origin,
                       color: Colors.blue,
@@ -97,7 +104,9 @@ class CreateLobbyMap extends StatelessWidget {
                 if (rogueStartZone != null)
                   Marker(
                     point: LatLng(
-                        rogueStartZone!.latitude, rogueStartZone!.longitude),
+                      rogueStartZone!.latitude,
+                      rogueStartZone!.longitude,
+                    ),
                     builder: (_) => const Icon(
                       Icons.trip_origin,
                       color: Colors.green,
@@ -125,8 +134,10 @@ class CreateLobbyMap extends StatelessWidget {
                 if (outerStreetContour.length < 3)
                   if (selectedPosition != null)
                     CircleMarker(
-                      point: LatLng(selectedPosition!.latitude,
-                          selectedPosition!.longitude),
+                      point: LatLng(
+                        selectedPosition!.latitude,
+                        selectedPosition!.longitude,
+                      ),
                       radius: mapRadiusMeters.toDouble(),
                       color: Colors.blue.withOpacity(0.12),
                       borderStrokeWidth: 2,
@@ -146,7 +157,9 @@ class CreateLobbyMap extends StatelessWidget {
                 if (agentStartZone != null)
                   CircleMarker(
                     point: LatLng(
-                        agentStartZone!.latitude, agentStartZone!.longitude),
+                      agentStartZone!.latitude,
+                      agentStartZone!.longitude,
+                    ),
                     radius: CreateLobbyDefaults.startZoneRadius.toDouble(),
                     color: Colors.blue.withOpacity(0.1),
                     borderStrokeWidth: 1.5,
@@ -156,7 +169,9 @@ class CreateLobbyMap extends StatelessWidget {
                 if (rogueStartZone != null)
                   CircleMarker(
                     point: LatLng(
-                        rogueStartZone!.latitude, rogueStartZone!.longitude),
+                      rogueStartZone!.latitude,
+                      rogueStartZone!.longitude,
+                    ),
                     radius: CreateLobbyDefaults.startZoneRadius.toDouble(),
                     color: Colors.green.withOpacity(0.1),
                     borderStrokeWidth: 1.5,

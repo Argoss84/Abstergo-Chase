@@ -41,6 +41,7 @@ class LobbyController extends ChangeNotifier {
   int _turnExpiresAtMs = 0;
   final Map<String, int> _voiceActiveSeenAtMs = <String, int>{};
   Timer? _voiceActivityGcTimer;
+  bool _isRecoveringSession = false;
 
   static const List<String> _objectiveNamePool = <String>[
     'Serveur de donnees',
@@ -286,12 +287,29 @@ class LobbyController extends ChangeNotifier {
       case 'lobby:closed':
       case 'lobby:error':
         final message = payload?.toString() ?? 'Lobby indisponible.';
+        if (_isRecoveringSession) {
+          // During resume recovery, avoid forcing a false fallback route.
+          error = message;
+          connectionStatus = 'connecting';
+          notifyListeners();
+          return;
+        }
         error = message;
         if (message.toLowerCase().contains('lobby introuvable')) {
           // If lobby doesn't exist, code may correspond to an already running game.
           shouldOpenGameForCode = true;
         }
         connectionStatus = 'error';
+        notifyListeners();
+        return;
+      case 'socket:disconnected':
+        connectionStatus = 'connecting';
+        notifyListeners();
+        return;
+      case 'socket:reconnected':
+        connectionStatus = 'connected';
+        requestLatestState();
+        _syncVoiceState();
         notifyListeners();
         return;
       default:
@@ -322,6 +340,41 @@ class LobbyController extends ChangeNotifier {
   }
 
   void requestLatestState() => _socketService.requestLatestState();
+
+  Future<void> recoverAfterResume() async {
+    final bootstrap = bootstrapData;
+    if (_isRecoveringSession || bootstrap == null) return;
+    _isRecoveringSession = true;
+    connectionStatus = 'connecting';
+    notifyListeners();
+    try {
+      if (!_socketService.isConnected) {
+        await _socketService.connect(
+          serverUrl: Uri.parse(bootstrap.serverUrl),
+          socketPath: bootstrap.socketPath,
+        );
+      }
+      final joined = await _socketService.joinLobby(
+        code: bootstrap.code,
+        playerName: bootstrap.playerName,
+        previousPlayerId: playerId ?? bootstrap.previousPlayerId,
+        reconnectAsHost: isHost,
+      );
+      lobbyCode = joined.code;
+      playerId = joined.playerId;
+      isHost = joined.playerId == joined.hostId;
+      error = null;
+      connectionStatus = 'connected';
+      requestLatestState();
+      await _syncVoiceState();
+    } catch (_) {
+      // Keep previous UI state; socket auto-reconnect may still recover.
+      connectionStatus = _socketService.isConnected ? 'connected' : 'error';
+    } finally {
+      _isRecoveringSession = false;
+      notifyListeners();
+    }
+  }
 
   Future<void> toggleVoiceChat() async {
     isVoiceChatEnabled = !isVoiceChatEnabled;

@@ -16,6 +16,8 @@ class LobbySocketService {
     return _messageController!.stream;
   }
 
+  bool get isConnected => _socket?.connected == true;
+
   Future<void> connect({
     required Uri serverUrl,
     required String socketPath,
@@ -53,6 +55,18 @@ class LobbySocketService {
           );
           _messageController?.add(normalized);
         }
+      });
+      _socket!.on('disconnect', (_) {
+        _messageController?.add(const <String, dynamic>{
+          'type': 'socket:disconnected',
+          'payload': <String, dynamic>{},
+        });
+      });
+      _socket!.on('reconnect', (_) {
+        _messageController?.add(const <String, dynamic>{
+          'type': 'socket:reconnected',
+          'payload': <String, dynamic>{},
+        });
       });
     }
 
@@ -104,9 +118,7 @@ class LobbySocketService {
       final payload = event['payload'];
       if (type == 'lobby:error') {
         if (!wait.isCompleted) {
-          wait.completeError(
-            Exception(payload?.toString() ?? 'Erreur lobby'),
-          );
+          wait.completeError(Exception(payload?.toString() ?? 'Erreur lobby'));
         }
       }
       if (type == 'lobby:joined' && payload is Map) {
@@ -155,44 +167,35 @@ class LobbySocketService {
   }
 
   void sendLobbyChat(String text) {
-    _emitMessage(
-      <String, dynamic>{
+    _emitMessage(<String, dynamic>{
       'type': 'lobby:chat',
       'payload': <String, dynamic>{'text': text},
-      },
-    );
+    });
   }
 
-  void sendRoleUpdate({
-    required String playerId,
-    required String? role,
-  }) {
-    _emitMessage(
-      <String, dynamic>{
+  void sendRoleUpdate({required String playerId, required String? role}) {
+    _emitMessage(<String, dynamic>{
       'type': 'lobby:role-update-request',
       'payload': <String, dynamic>{
         'playerId': playerId,
         'role': role,
         'requestId': _newRequestId(),
       },
-      },
-    );
+    });
   }
 
   Future<void> sendWebRtcSignal({
     required String targetId,
     required Map<String, dynamic> signal,
   }) async {
-    _emitMessage(
-      <String, dynamic>{
-        'type': 'webrtc:signal',
-        'payload': <String, dynamic>{
-          'targetId': targetId,
-          'signal': signal,
-          'channel': 'voice',
-        },
+    _emitMessage(<String, dynamic>{
+      'type': 'webrtc:signal',
+      'payload': <String, dynamic>{
+        'targetId': targetId,
+        'signal': signal,
+        'channel': 'voice',
       },
-    );
+    });
   }
 
   Future<TurnCredentialsResult?> requestTurnCredentials({
@@ -223,12 +226,10 @@ class LobbySocketService {
         );
       }
     });
-    _emitMessage(
-      <String, dynamic>{
-        'type': 'turn:credentials-request',
-        'payload': <String, dynamic>{'requestId': requestId},
-      },
-    );
+    _emitMessage(<String, dynamic>{
+      'type': 'turn:credentials-request',
+      'payload': <String, dynamic>{'requestId': requestId},
+    });
     try {
       return await wait.future.timeout(timeout);
     } catch (_) {
@@ -239,43 +240,34 @@ class LobbySocketService {
   }
 
   void requestLatestState() {
-    _emitMessage(
-      const <String, dynamic>{
+    _emitMessage(const <String, dynamic>{
       'type': 'lobby:request-resync',
       'payload': <String, dynamic>{},
-      },
-    );
+    });
   }
 
   void startGame(String code) {
-    _emitMessage(
-      <String, dynamic>{
+    _emitMessage(<String, dynamic>{
       'type': 'lobby:start-game-request',
       'payload': <String, dynamic>{
         'code': code.toUpperCase(),
         'requestId': _newRequestId(),
       },
-      },
-    );
+    });
   }
 
   String _newRequestId() {
     return '${DateTime.now().microsecondsSinceEpoch}-${(DateTime.now().millisecondsSinceEpoch % 997)}';
   }
 
-  void leaveLobby({
-    required String code,
-    required String playerId,
-  }) {
-    _emitMessage(
-      <String, dynamic>{
+  void leaveLobby({required String code, required String playerId}) {
+    _emitMessage(<String, dynamic>{
       'type': 'lobby:leave',
       'payload': <String, dynamic>{
         'lobbyCode': code.toUpperCase(),
         'playerId': playerId,
       },
-      },
-    );
+    });
   }
 
   void _emitMessage(Map<String, dynamic> message) {
@@ -285,10 +277,7 @@ class LobbySocketService {
           : const <String, dynamic>{}),
       'clientVersion': _clientVersion,
     };
-    final envelope = <String, dynamic>{
-      ...message,
-      'meta': meta,
-    };
+    final envelope = <String, dynamic>{...message, 'meta': meta};
     _socket?.emit('message', envelope);
   }
 
