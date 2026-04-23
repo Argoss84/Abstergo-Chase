@@ -12,3 +12,13 @@ relay_min_port         = 49152
 relay_max_port         = 49200
 
 turn_secret = "STfSxH3/J1y7JPiivIQWvmzUIkgEb80KksLLj1FvrC+K0lcBqe41uiPJa0c7//vK"
+
+common_tags = {
+  Project     = "abstergo-chase"
+  Environment = "dev"
+  ManagedBy   = "opentofu"
+  Owner       = "alexandre"
+  Stack       = "voice-turn"
+}
+
+vpc_name_tag = "abstergo-shared-vpc"

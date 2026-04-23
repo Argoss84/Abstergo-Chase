@@ -34,3 +34,14 @@ subnet_ids = [
 security_group_ids = [
   "sg-01b999f1951fb5bc3"
 ]
+
+common_tags = {
+  Project     = "abstergo-chase"
+  Environment = "dev"
+  ManagedBy   = "opentofu"
+  Owner       = "alexandre"
+  Stack       = "ecs-signaling"
+}
+
+vpc_name_tag = "abstergo-shared-vpc"
+network_name_prefix = "abstergo-shared"

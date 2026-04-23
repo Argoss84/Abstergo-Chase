@@ -140,3 +140,25 @@ variable "turn_ttl_seconds" {
   type        = number
   default     = 600
 }
+
+variable "common_tags" {
+  description = "Common tags applied to all taggable AWS resources."
+  type        = map(string)
+  default = {
+    Project   = "abstergo-chase"
+    Component = "signaling"
+    ManagedBy = "opentofu"
+  }
+}
+
+variable "vpc_name_tag" {
+  description = "Optional Name tag to set on the VPC inferred from subnet_ids."
+  type        = string
+  default     = ""
+}
+
+variable "network_name_prefix" {
+  description = "Prefix used for Name tags on shared network resources."
+  type        = string
+  default     = "abstergo-shared"
+}

@@ -11,6 +11,9 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
+  default_tags {
+    tags = var.common_tags
+  }
 }
 
 data "aws_ami" "ubuntu" {
@@ -139,4 +142,11 @@ resource "aws_eip" "turn" {
 resource "aws_eip_association" "turn" {
   instance_id   = aws_instance.turn.id
   allocation_id = aws_eip.turn.id
+}
+
+resource "aws_ec2_tag" "vpc_name" {
+  count       = var.vpc_name_tag != "" ? 1 : 0
+  resource_id = var.vpc_id
+  key         = "Name"
+  value       = var.vpc_name_tag
 }

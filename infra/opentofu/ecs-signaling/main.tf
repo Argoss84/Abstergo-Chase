@@ -11,6 +11,9 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
+  default_tags {
+    tags = var.common_tags
+  }
 }
 
 locals {
@@ -26,6 +29,21 @@ data "aws_ecr_repository" "signaling" {
 
 data "aws_subnet" "first" {
   id = var.subnet_ids[0]
+}
+
+data "aws_internet_gateway" "vpc" {
+  filter {
+    name   = "attachment.vpc-id"
+    values = [data.aws_subnet.first.vpc_id]
+  }
+}
+
+data "aws_route_tables" "vpc" {
+  vpc_id = data.aws_subnet.first.vpc_id
+}
+
+data "aws_network_acls" "vpc" {
+  vpc_id = data.aws_subnet.first.vpc_id
 }
 
 resource "aws_ecs_cluster" "this" {
@@ -174,4 +192,41 @@ resource "aws_ecs_service" "this" {
   deployment_maximum_percent         = 200
 
   depends_on = [aws_lb_listener.http]
+}
+
+resource "aws_ec2_tag" "vpc_name" {
+  count       = var.vpc_name_tag != "" ? 1 : 0
+  resource_id = data.aws_subnet.first.vpc_id
+  key         = "Name"
+  value       = var.vpc_name_tag
+}
+
+resource "aws_ec2_tag" "subnet_name" {
+  for_each = {
+    for idx, subnet_id in var.subnet_ids :
+    subnet_id => idx + 1
+  }
+  resource_id = each.key
+  key         = "Name"
+  value       = "${var.network_name_prefix}-subnet-${each.value}"
+}
+
+resource "aws_ec2_tag" "route_table_name" {
+  for_each = toset(data.aws_route_tables.vpc.ids)
+  resource_id = each.value
+  key         = "Name"
+  value       = "${var.network_name_prefix}-rtb-${replace(each.value, "rtb-", "")}"
+}
+
+resource "aws_ec2_tag" "internet_gateway_name" {
+  resource_id = data.aws_internet_gateway.vpc.id
+  key         = "Name"
+  value       = "${var.network_name_prefix}-igw"
+}
+
+resource "aws_ec2_tag" "network_acl_name" {
+  for_each = toset(data.aws_network_acls.vpc.ids)
+  resource_id = each.value
+  key         = "Name"
+  value       = "${var.network_name_prefix}-nacl-${replace(each.value, "acl-", "")}"
 }
