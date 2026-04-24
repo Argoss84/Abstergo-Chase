@@ -27,6 +27,24 @@ class GameChatMessage {
   final int timestampMs;
 }
 
+class RogueTargetingResult {
+  const RogueTargetingResult({
+    required this.isValid,
+    this.targetPlayerId,
+    this.targetPlayerName,
+    this.distanceMeters,
+    this.angularDeltaDeg,
+    this.reason,
+  });
+
+  final bool isValid;
+  final String? targetPlayerId;
+  final String? targetPlayerName;
+  final double? distanceMeters;
+  final double? angularDeltaDeg;
+  final String? reason;
+}
+
 class GameController extends ChangeNotifier {
   GameController({GameSocketService? socketService})
     : _socketService = socketService ?? GameSocketService() {
@@ -94,6 +112,8 @@ class GameController extends ChangeNotifier {
       <String, String>{};
   final Map<String, int> _voiceActiveSeenAtMs = <String, int>{};
   int _turnExpiresAtMs = 0;
+  static const double _kRogueTargetingMaxDistanceMeters = 5.0;
+  static const double _kRogueTargetingHalfConeDeg = 20.0;
   int? _rogueCaptureInterruptedAtMs;
 
   bool _samePoint(GeoPoint? a, GeoPoint? b, {double eps = 0.000001}) {
@@ -950,6 +970,133 @@ class GameController extends ChangeNotifier {
     _pushSnapshotThrottled();
     _tickObjectiveCapturesIfHost();
     notifyListeners();
+  }
+
+  RogueTargetingResult getRogueTargetForHeading(double? headingDeg) {
+    if ((playerRole ?? '').toUpperCase() != 'AGENT') {
+      return const RogueTargetingResult(
+        isValid: false,
+        reason: 'Action réservée aux agents.',
+      );
+    }
+    if (!gameStarted) {
+      return const RogueTargetingResult(
+        isValid: false,
+        reason: 'La partie n\'a pas démarré.',
+      );
+    }
+    if (headingDeg == null) {
+      return const RogueTargetingResult(
+        isValid: false,
+        reason: 'Orientation boussole indisponible.',
+      );
+    }
+    final me = myPosition;
+    if (me == null) {
+      return const RogueTargetingResult(
+        isValid: false,
+        reason: 'Position GPS indisponible.',
+      );
+    }
+
+    GamePlayer? bestTarget;
+    double? bestDistance;
+    double? bestAngleDelta;
+    var bestScore = double.infinity;
+    for (final player in players) {
+      if ((player.role ?? '').toUpperCase() != 'ROGUE') continue;
+      if ((player.status).toUpperCase() == 'CAPTURED') continue;
+      if ((player.status).toLowerCase() == 'disconnected') continue;
+      if (player.latitude == null || player.longitude == null) continue;
+      final distance = Geolocator.distanceBetween(
+        me.latitude,
+        me.longitude,
+        player.latitude!,
+        player.longitude!,
+      );
+      final bearing = Geolocator.bearingBetween(
+        me.latitude,
+        me.longitude,
+        player.latitude!,
+        player.longitude!,
+      );
+      final delta = _absAngleDeltaDeg(headingDeg, bearing);
+      final inRange = distance <= _kRogueTargetingMaxDistanceMeters;
+      final inCone = delta <= _kRogueTargetingHalfConeDeg;
+      final penalty = (inRange ? 0.0 : 1000.0) + (inCone ? 0.0 : 1000.0);
+      final score = penalty + (delta * 10) + distance;
+      if (score >= bestScore) continue;
+      bestScore = score;
+      bestTarget = player;
+      bestDistance = distance;
+      bestAngleDelta = delta;
+    }
+
+    if (bestTarget == null || bestDistance == null || bestAngleDelta == null) {
+      return const RogueTargetingResult(
+        isValid: false,
+        reason: 'Aucun rogue détecté à proximité.',
+      );
+    }
+    final isValid =
+        bestDistance <= _kRogueTargetingMaxDistanceMeters &&
+        bestAngleDelta <= _kRogueTargetingHalfConeDeg;
+    if (!isValid) {
+      final reason = bestDistance > _kRogueTargetingMaxDistanceMeters
+          ? 'Rogue hors portée (5 m max).'
+          : 'Rogue hors cône de visée.';
+      return RogueTargetingResult(
+        isValid: false,
+        targetPlayerId: bestTarget.id,
+        targetPlayerName: bestTarget.name,
+        distanceMeters: bestDistance,
+        angularDeltaDeg: bestAngleDelta,
+        reason: reason,
+      );
+    }
+    return RogueTargetingResult(
+      isValid: true,
+      targetPlayerId: bestTarget.id,
+      targetPlayerName: bestTarget.name,
+      distanceMeters: bestDistance,
+      angularDeltaDeg: bestAngleDelta,
+    );
+  }
+
+  String triggerAgentCaptureFromTarget({
+    required String targetPlayerId,
+    required double? headingDeg,
+  }) {
+    if (!gameStarted) return 'La partie n\'a pas démarré.';
+    if ((playerRole ?? '').toUpperCase() != 'AGENT') {
+      return 'Action réservée aux agents.';
+    }
+    final targeting = getRogueTargetForHeading(headingDeg);
+    if (!targeting.isValid || targeting.targetPlayerId == null) {
+      return targeting.reason ?? 'Ciblage invalide.';
+    }
+    if (targeting.targetPlayerId != targetPlayerId) {
+      return 'La cible a changé, recommencez le ciblage.';
+    }
+    if (isHost) {
+      final me = playerId;
+      if (me == null || me.isEmpty) return 'Agent introuvable.';
+      _handleAgentCaptureRequest(me, targetPlayerId);
+      return 'Capture envoyée.';
+    }
+    _socketService.sendGameAction(<String, dynamic>{
+      'type': 'agent-capture-request',
+      'targetPlayerId': targetPlayerId,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
+    return 'Capture envoyée.';
+  }
+
+  double _absAngleDeltaDeg(double fromDeg, double toDeg) {
+    var delta = (toDeg - fromDeg) % 360.0;
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    return delta.abs();
   }
 
   void _handleRogueCaptureRequest(String roguePlayerId) {

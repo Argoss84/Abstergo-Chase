@@ -878,12 +878,10 @@ class _GamePageState extends State<GamePage>
 
   Widget _buildActionFabMenu() {
     final role = (_controller.playerRole ?? '').toUpperCase();
-    final roleActionIcon = role == 'ROGUE'
-        ? Icons.terminal
-        : Icons.center_focus_strong;
+    final roleActionIcon = role == 'ROGUE' ? Icons.terminal : Icons.gps_fixed;
     final roleActionLabel = role == 'ROGUE'
         ? 'Hacker objectif'
-        : 'Capturer rogue';
+        : 'Ciblage rogue';
     final rogueActionReady =
         role == 'ROGUE' && _controller.canTriggerRogueObjectiveCapture;
     return SizedBox(
@@ -954,7 +952,7 @@ class _GamePageState extends State<GamePage>
                     _controller.triggerRogueSpecialAction();
                     return;
                   }
-                  _openAgentCaptureScanner();
+                  _openAgentTargetCaptureModal();
                 },
                 backgroundColor: rogueActionReady
                     ? Colors.red.shade700
@@ -1211,6 +1209,143 @@ class _GamePageState extends State<GamePage>
     );
     scanSubscription?.cancel();
     scannerController?.dispose();
+  }
+
+  Future<void> _openAgentTargetCaptureModal() async {
+    setState(() => _isActionFabOpen = false);
+    if ((_controller.playerRole ?? '').toUpperCase() != 'AGENT') {
+      _showFabPlaceholder('Action réservée agent');
+      return;
+    }
+    if (!_controller.gameStarted) {
+      _showFabPlaceholder('Partie non démarrée');
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) {
+                return ValueListenableBuilder<double?>(
+                  valueListenable: _headingDeg,
+                  builder: (context, heading, __) {
+                    final targeting = _controller.getRogueTargetForHeading(
+                      heading,
+                    );
+                    final distance = targeting.distanceMeters;
+                    final angle = targeting.angularDeltaDeg;
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Capture Rogue par ciblage',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Visez le rogue avec le haut du téléphone '
+                          '(distance <= 5 m).',
+                        ),
+                        const SizedBox(height: 12),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: targeting.isValid
+                                ? Colors.green.withOpacity(0.15)
+                                : Colors.orange.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: targeting.isValid
+                                  ? Colors.green
+                                  : Colors.orange,
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                targeting.targetPlayerName == null
+                                    ? 'Aucune cible'
+                                    : 'Cible: ${targeting.targetPlayerName}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              if (distance != null)
+                                Text(
+                                  'Distance: ${distance.toStringAsFixed(1)} m',
+                                ),
+                              if (angle != null)
+                                Text(
+                                  'Écart visée: ${angle.toStringAsFixed(1)}°',
+                                ),
+                              Text(
+                                targeting.isValid
+                                    ? 'Ciblage valide'
+                                    : (targeting.reason ?? 'Ciblage invalide'),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () => Navigator.of(context).pop(),
+                                child: const Text('Fermer'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: FilledButton.icon(
+                                onPressed:
+                                    targeting.isValid &&
+                                        targeting.targetPlayerId != null
+                                    ? () {
+                                        final feedback = _controller
+                                            .triggerAgentCaptureFromTarget(
+                                              targetPlayerId:
+                                                  targeting.targetPlayerId!,
+                                              headingDeg: _headingDeg.value,
+                                            );
+                                        if (!mounted) return;
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(content: Text(feedback)),
+                                        );
+                                        if (feedback.contains('envoyée')) {
+                                          Navigator.of(context).pop();
+                                        }
+                                      }
+                                    : null,
+                                icon: const Icon(Icons.gps_fixed),
+                                label: const Text('Capturer'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _handleScannedCaptureQr(String rawQr) {
