@@ -7,6 +7,20 @@ import 'package:latlong2/latlong.dart';
 const double _kOsmMaxZoom = 19;
 const int _kOsmMaxNativeZoom = 19;
 
+enum PlayerMarkerAura { none, selfBlue, allyGreen }
+
+class PlayerMapMarker {
+  const PlayerMapMarker({
+    required this.point,
+    required this.isAgent,
+    this.aura = PlayerMarkerAura.none,
+  });
+
+  final GeoPoint point;
+  final bool isAgent;
+  final PlayerMarkerAura aura;
+}
+
 class LobbyMapPreview extends StatelessWidget {
   const LobbyMapPreview({
     super.key,
@@ -17,6 +31,7 @@ class LobbyMapPreview extends StatelessWidget {
     required this.agentStartZone,
     required this.rogueStartZone,
     required this.objectiveZoneRadiusMeters,
+    this.startZoneRadiusMeters = CreateLobbyDefaults.startZoneRadius,
     this.showObjectives = true,
     this.showObjectiveMarkers = true,
     this.showObjectiveZones = true,
@@ -24,6 +39,7 @@ class LobbyMapPreview extends StatelessWidget {
     this.objectiveMarkerColor = Colors.red,
     this.objectiveMarkerSize = 18,
     this.playerPositions = const <GeoPoint>[],
+    this.playerMarkers = const <PlayerMapMarker>[],
     this.guidancePath = const <GeoPoint>[],
     this.guidancePathColor = Colors.deepPurple,
     this.guidancePathDotted = false,
@@ -31,6 +47,7 @@ class LobbyMapPreview extends StatelessWidget {
     this.highlightObjectiveZones = const <GeoPoint>[],
     this.highlightObjectiveZoneRadiusMeters = 0,
     this.highlightObjectivePulse = 0,
+    this.showCenterMarker = true,
     this.mapController,
     this.height = 260,
   });
@@ -42,6 +59,7 @@ class LobbyMapPreview extends StatelessWidget {
   final GeoPoint? agentStartZone;
   final GeoPoint? rogueStartZone;
   final int objectiveZoneRadiusMeters;
+  final int startZoneRadiusMeters;
   final bool showObjectives;
   final bool showObjectiveMarkers;
   final bool showObjectiveZones;
@@ -49,6 +67,7 @@ class LobbyMapPreview extends StatelessWidget {
   final Color objectiveMarkerColor;
   final double objectiveMarkerSize;
   final List<GeoPoint> playerPositions;
+  final List<PlayerMapMarker> playerMarkers;
   final List<GeoPoint> guidancePath;
   final Color guidancePathColor;
   final bool guidancePathDotted;
@@ -56,6 +75,7 @@ class LobbyMapPreview extends StatelessWidget {
   final List<GeoPoint> highlightObjectiveZones;
   final int highlightObjectiveZoneRadiusMeters;
   final double highlightObjectivePulse;
+  final bool showCenterMarker;
   final MapController? mapController;
   final double? height;
 
@@ -65,9 +85,17 @@ class LobbyMapPreview extends StatelessWidget {
     final objectiveLatLng = objectives
         .map((p) => LatLng(p.latitude, p.longitude))
         .toList(growable: false);
-    final playerLatLng = playerPositions
-        .map((p) => LatLng(p.latitude, p.longitude))
-        .toList(growable: false);
+    final effectivePlayerMarkers = playerMarkers.isNotEmpty
+        ? playerMarkers
+        : playerPositions
+              .map(
+                (p) => PlayerMapMarker(
+                  point: p,
+                  isAgent: true,
+                  aura: PlayerMarkerAura.none,
+                ),
+              )
+              .toList(growable: false);
     final guidanceLatLng = guidancePath
         .map((p) => LatLng(p.latitude, p.longitude))
         .toList(growable: false);
@@ -162,7 +190,7 @@ class LobbyMapPreview extends StatelessWidget {
                 if (agentLatLng != null)
                   CircleMarker(
                     point: agentLatLng,
-                    radius: CreateLobbyDefaults.startZoneRadius.toDouble(),
+                    radius: startZoneRadiusMeters.toDouble(),
                     useRadiusInMeter: true,
                     color: Colors.blue.withOpacity(0.1),
                     borderStrokeWidth: 1.5,
@@ -171,7 +199,7 @@ class LobbyMapPreview extends StatelessWidget {
                 if (rogueLatLng != null)
                   CircleMarker(
                     point: rogueLatLng,
-                    radius: CreateLobbyDefaults.startZoneRadius.toDouble(),
+                    radius: startZoneRadiusMeters.toDouble(),
                     useRadiusInMeter: true,
                     color: Colors.green.withOpacity(0.1),
                     borderStrokeWidth: 1.5,
@@ -214,14 +242,15 @@ class LobbyMapPreview extends StatelessWidget {
               ),
             MarkerLayer(
               markers: [
-                Marker(
-                  point: centerLatLng,
-                  builder: (_) => const Icon(
-                    Icons.location_on,
-                    color: Colors.red,
-                    size: 34,
+                if (showCenterMarker)
+                  Marker(
+                    point: centerLatLng,
+                    builder: (_) => const Icon(
+                      Icons.location_on,
+                      color: Colors.red,
+                      size: 34,
+                    ),
                   ),
-                ),
                 if (showObjectives && showObjectiveMarkers)
                   ...objectiveLatLng.map(
                     (point) => Marker(
@@ -251,13 +280,19 @@ class LobbyMapPreview extends StatelessWidget {
                       size: 20,
                     ),
                   ),
-                ...playerLatLng.map(
-                  (point) => Marker(
-                    width: 40,
-                    height: 44,
-                    point: point,
-                    anchorPos: AnchorPos.align(AnchorAlign.bottom),
-                    builder: (_) => const _PlayerGpsPin(),
+                ...effectivePlayerMarkers.map(
+                  (player) => Marker(
+                    width: 56,
+                    height: 56,
+                    point: LatLng(
+                      player.point.latitude,
+                      player.point.longitude,
+                    ),
+                    anchorPos: AnchorPos.align(AnchorAlign.center),
+                    builder: (_) => _PlayerGpsPin(
+                      isAgent: player.isAgent,
+                      aura: player.aura,
+                    ),
                   ),
                 ),
               ],
@@ -270,29 +305,61 @@ class LobbyMapPreview extends StatelessWidget {
 }
 
 class _PlayerGpsPin extends StatelessWidget {
-  const _PlayerGpsPin();
+  const _PlayerGpsPin({required this.isAgent, required this.aura});
+
+  final bool isAgent;
+  final PlayerMarkerAura aura;
 
   @override
   Widget build(BuildContext context) {
-    // Material 'location_on' has internal padding; we push it down so the tip
-    // sits exactly on the marker anchor (bottom-center).
-    return const SizedBox(
-      width: 40,
-      height: 44,
+    final auraColor = switch (aura) {
+      PlayerMarkerAura.selfBlue => const Color(0xFF2EA8FF),
+      PlayerMarkerAura.allyGreen => const Color(0xFF22C55E),
+      PlayerMarkerAura.none => Colors.transparent,
+    };
+    final markerAsset = isAgent
+        ? 'assets/images/agent_marker.png'
+        : 'assets/images/rogue_marker.png';
+    return SizedBox(
+      width: 56,
+      height: 56,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
+          if (aura != PlayerMarkerAura.none)
+            Positioned(
+              left: 10,
+              right: 10,
+              top: 10,
+              child: Container(
+                height: 36,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      color: auraColor.withOpacity(0.85),
+                      blurRadius: 14,
+                      spreadRadius: 4,
+                    ),
+                  ],
+                ),
+              ),
+            ),
           Positioned(
-            left: 0,
-            right: 0,
-            bottom: -4,
-            child: Icon(Icons.location_on, color: Colors.white, size: 38),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: -4,
-            child: Icon(Icons.location_on, color: Colors.orange, size: 34),
+            left: 6,
+            right: 6,
+            top: 6,
+            bottom: 6,
+            child: Image.asset(
+              markerAsset,
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.high,
+              errorBuilder: (_, __, ___) => Icon(
+                Icons.location_on,
+                color: isAgent ? Colors.cyanAccent : Colors.deepOrangeAccent,
+                size: 34,
+              ),
+            ),
           ),
         ],
       ),

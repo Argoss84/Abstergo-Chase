@@ -309,6 +309,14 @@ class _GamePageState extends State<GamePage>
                                       widget.bootstrap.lobby.rogueStartZone,
                                   objectiveZoneRadiusMeters:
                                       objectiveZoneRadius,
+                                  startZoneRadiusMeters:
+                                      effectiveGameConfig?.startZoneRadius ??
+                                      widget
+                                          .bootstrap
+                                          .lobby
+                                          .form
+                                          ?.startZoneRadius ??
+                                      25,
                                   showObjectives: true,
                                   showObjectiveMarkers: isRogue,
                                   showObjectiveZones: !isRogue,
@@ -332,10 +340,15 @@ class _GamePageState extends State<GamePage>
                                       objectiveZoneRadius,
                                   highlightObjectivePulse:
                                       _guidancePulseController.value,
-                                  playerPositions: _controller.players
+                                  showCenterMarker: false,
+                                  playerMarkers: _controller.players
                                       .where(
-                                        _controller
-                                            .isPlayerVisibleForCurrentRole,
+                                        (p) =>
+                                            p.id == _controller.playerId ||
+                                            _controller
+                                                .isPlayerVisibleForCurrentRole(
+                                                  p,
+                                                ),
                                       )
                                       .where(
                                         (p) =>
@@ -348,9 +361,20 @@ class _GamePageState extends State<GamePage>
                                             p.longitude != null,
                                       )
                                       .map(
-                                        (p) => GeoPoint(
-                                          latitude: p.latitude!,
-                                          longitude: p.longitude!,
+                                        (p) => PlayerMapMarker(
+                                          point: GeoPoint(
+                                            latitude: p.latitude!,
+                                            longitude: p.longitude!,
+                                          ),
+                                          isAgent:
+                                              (p.role ?? '').toUpperCase() ==
+                                              'AGENT',
+                                          aura: p.id == _controller.playerId
+                                              ? PlayerMarkerAura.selfBlue
+                                              : ((p.role ?? '').toUpperCase() ==
+                                                        roleUpper
+                                                    ? PlayerMarkerAura.allyGreen
+                                                    : PlayerMarkerAura.none),
                                         ),
                                       )
                                       .toList(growable: false),
@@ -463,6 +487,42 @@ class _GamePageState extends State<GamePage>
                             child: _buildRogueCaptureFeedback(
                               remainingSeconds: rogueCaptureRemaining,
                               progress: rogueCaptureProgress,
+                            ),
+                          ),
+                        if (isRogue &&
+                            rogueCaptureRemaining == null &&
+                            _controller.showRogueCaptureInterruptedBanner)
+                          Positioned(
+                            top: topInset,
+                            left: 12,
+                            right: 12,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.shade800.withOpacity(0.9),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Row(
+                                children: [
+                                  Icon(
+                                    Icons.warning_amber,
+                                    color: Colors.white,
+                                  ),
+                                  SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Capture interrompue: vous êtes sorti de la zone.',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         if (_controller.isHost && !_controller.gameStarted)

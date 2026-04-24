@@ -1,4 +1,5 @@
 import 'package:abstergo_chase/features/lobby/application/lobby_controller.dart';
+import 'package:abstergo_chase/features/create_lobby/presentation/widgets/create_lobby_details_sheet.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
 import 'package:abstergo_chase/features/lobby/data/player_name_store.dart';
 import 'package:abstergo_chase/features/game/domain/game_models.dart';
@@ -279,6 +280,10 @@ class _LobbyPageState extends State<LobbyPage> with WidgetsBindingObserver {
                             objectiveZoneRadiusMeters:
                                 config?.objectiveZoneRadius ??
                                 bootstrap!.form!.objectiveZoneRadius,
+                            startZoneRadiusMeters:
+                                config?.startZoneRadius ??
+                                bootstrap?.form?.startZoneRadius ??
+                                25,
                             showObjectives: _controller.isHost,
                           ),
                         ),
@@ -378,6 +383,11 @@ class _LobbyPageState extends State<LobbyPage> with WidgetsBindingObserver {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
+                              FilledButton.tonal(
+                                onPressed: _openHostConfigEditor,
+                                child: const Text('Modifier paramètres'),
+                              ),
+                              const SizedBox(height: 10),
                               const Text(
                                 'Prerequis pour demarrer',
                                 style: TextStyle(fontWeight: FontWeight.w600),
@@ -424,6 +434,10 @@ class _LobbyPageState extends State<LobbyPage> with WidgetsBindingObserver {
                             _kv(
                               'Objectifs victoire',
                               '${bootstrap.form!.victoryConditionObjectives}',
+                            ),
+                            _kv(
+                              'Rayon zone départ',
+                              '${bootstrap.form!.startZoneRadius} m',
                             ),
                             _kv('Rayon map', '${bootstrap.form!.mapRadius} m'),
                           ] else
@@ -521,6 +535,21 @@ class _LobbyPageState extends State<LobbyPage> with WidgetsBindingObserver {
         ],
       ),
     );
+  }
+
+  Future<void> _openHostConfigEditor() async {
+    final initial = _controller.bootstrapData?.form;
+    if (!_controller.isHost || initial == null) {
+      return;
+    }
+    final result = await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => CreateLobbyDetailsSheet(initialData: initial),
+    );
+    if (result is CreateLobbyDetailsResult) {
+      _controller.updateLobbyConfig(result.form);
+    }
   }
 
   Future<void> _openChatSheet() async {

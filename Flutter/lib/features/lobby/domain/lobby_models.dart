@@ -1,4 +1,5 @@
 import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_form_data.dart';
+import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
 
 class LobbyPlayer {
@@ -75,6 +76,44 @@ class LobbyBootstrapData {
   final GeoPoint? agentStartZone;
   final GeoPoint? rogueStartZone;
   final List<GeoPoint> outerStreetContour;
+
+  LobbyBootstrapData copyWith({
+    String? code,
+    String? serverUrl,
+    String? socketPath,
+    String? playerName,
+    Object? previousPlayerId = _noChange,
+    bool? reconnectAsHost,
+    Object? form = _noChange,
+    List<GeoPoint>? objectives,
+    Object? agentStartZone = _noChange,
+    Object? rogueStartZone = _noChange,
+    List<GeoPoint>? outerStreetContour,
+  }) {
+    return LobbyBootstrapData(
+      code: code ?? this.code,
+      serverUrl: serverUrl ?? this.serverUrl,
+      socketPath: socketPath ?? this.socketPath,
+      playerName: playerName ?? this.playerName,
+      previousPlayerId: identical(previousPlayerId, _noChange)
+          ? this.previousPlayerId
+          : previousPlayerId as String?,
+      reconnectAsHost: reconnectAsHost ?? this.reconnectAsHost,
+      form: identical(form, _noChange)
+          ? this.form
+          : form as CreateLobbyFormData?,
+      objectives: objectives ?? this.objectives,
+      agentStartZone: identical(agentStartZone, _noChange)
+          ? this.agentStartZone
+          : agentStartZone as GeoPoint?,
+      rogueStartZone: identical(rogueStartZone, _noChange)
+          ? this.rogueStartZone
+          : rogueStartZone as GeoPoint?,
+      outerStreetContour: outerStreetContour ?? this.outerStreetContour,
+    );
+  }
+
+  static const Object _noChange = Object();
 }
 
 class LobbyGameConfig {
@@ -82,6 +121,7 @@ class LobbyGameConfig {
     required this.mapCenter,
     required this.mapRadius,
     required this.objectiveZoneRadius,
+    required this.startZoneRadius,
     required this.durationSeconds,
     required this.hackDurationMs,
     required this.rogueRange,
@@ -94,6 +134,7 @@ class LobbyGameConfig {
   final GeoPoint mapCenter;
   final int mapRadius;
   final int objectiveZoneRadius;
+  final int startZoneRadius;
   final int durationSeconds;
   final int hackDurationMs;
   final int rogueRange;
@@ -110,10 +151,8 @@ class LobbyGameConfig {
       return GeoPoint(latitude: latitude, longitude: longitude);
     }
 
-    final center = parsePoint(
-          raw['map_center_latitude'],
-          raw['map_center_longitude'],
-        ) ??
+    final center =
+        parsePoint(raw['map_center_latitude'], raw['map_center_longitude']) ??
         const GeoPoint(latitude: 0, longitude: 0);
 
     final contour = <GeoPoint>[];
@@ -159,11 +198,17 @@ class LobbyGameConfig {
       mapRadius: int.tryParse(raw['map_radius']?.toString() ?? '') ?? 1000,
       objectiveZoneRadius:
           int.tryParse(raw['objectiv_zone_radius']?.toString() ?? '') ?? 50,
+      startZoneRadius:
+          int.tryParse(raw['start_zone_radius']?.toString() ?? '') ??
+          CreateLobbyDefaults.startZoneRadius,
       durationSeconds: int.tryParse(raw['duration']?.toString() ?? '') ?? 900,
       hackDurationMs:
           int.tryParse(raw['hack_duration_ms']?.toString() ?? '') ?? 10000,
       rogueRange: int.tryParse(raw['rogue_range']?.toString() ?? '') ?? 120,
-      startZone: parsePoint(raw['start_zone_latitude'], raw['start_zone_longitude']),
+      startZone: parsePoint(
+        raw['start_zone_latitude'],
+        raw['start_zone_longitude'],
+      ),
       rogueStartZone: parsePoint(
         raw['start_zone_rogue_latitude'],
         raw['start_zone_rogue_longitude'],

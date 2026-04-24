@@ -1767,6 +1767,73 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'lobby:config-update-request') {
+      const { lobbyCode } = clients.get(socket.id) || {};
+      const requestId = payload?.requestId || null;
+      const incomingConfig =
+        payload?.gameConfig && typeof payload.gameConfig === 'object'
+          ? payload.gameConfig
+          : null;
+      if (!lobbyCode || !lobbies.has(lobbyCode)) {
+        send(socket, {
+          type: 'lobby:action-rejected',
+          payload: {
+            action: 'config-update',
+            requestId,
+            reason: 'Lobby introuvable.'
+          }
+        });
+        return;
+      }
+      const lobby = lobbies.get(lobbyCode);
+      if (lobby.hostId !== clientId) {
+        send(socket, {
+          type: 'lobby:action-rejected',
+          payload: {
+            action: 'config-update',
+            requestId,
+            reason: 'Seul le host peut modifier les paramètres.'
+          }
+        });
+        return;
+      }
+      if (!incomingConfig) {
+        send(socket, {
+          type: 'lobby:action-rejected',
+          payload: {
+            action: 'config-update',
+            requestId,
+            reason: 'Configuration invalide.'
+          }
+        });
+        return;
+      }
+      lobby.config = {
+        ...(lobby.config && typeof lobby.config === 'object' ? lobby.config : {}),
+        ...incomingConfig
+      };
+      lobby.stateVersion = (lobby.stateVersion || 1) + 1;
+      lobby.players.forEach((p) => {
+        const s = socketsById.get(p.id);
+        if (s) {
+          send(s, {
+            type: 'lobby:config-updated',
+            payload: {
+              config: lobby.config,
+              stateVersion: lobby.stateVersion,
+              requestId
+            }
+          });
+        }
+      });
+      markStateChanged('lobby:config-update-request', {
+        code: lobbyCode,
+        stateVersion: lobby.stateVersion,
+        requestId
+      });
+      return;
+    }
+
     if (type === 'lobby:start-game-request') {
       const { lobbyCode } = clients.get(socket.id) || {};
       const requestId = payload?.requestId || null;

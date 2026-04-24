@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:abstergo_chase/app/config/app_runtime_config.dart';
+import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
 import 'package:abstergo_chase/features/game/data/game_socket_service.dart';
 import 'package:abstergo_chase/features/game/domain/game_models.dart';
@@ -49,6 +50,7 @@ class GameController extends ChangeNotifier {
   Timer? _countdownTimer;
   Timer? _joinWatchdogTimer;
   Timer? _voiceActivityTimer;
+  Timer? _rogueCaptureInterruptedTimer;
 
   bool isLoading = true;
   String? error;
@@ -88,8 +90,11 @@ class GameController extends ChangeNotifier {
   int _lastJoinAttemptMs = 0;
   final Map<String, int> _objectiveCaptureEndAtMs = <String, int>{};
   final Map<String, int> _objectiveCaptureSeenAtMs = <String, int>{};
+  final Map<String, String> _objectiveCaptureRogueByObjectiveId =
+      <String, String>{};
   final Map<String, int> _voiceActiveSeenAtMs = <String, int>{};
   int _turnExpiresAtMs = 0;
+  int? _rogueCaptureInterruptedAtMs;
 
   bool _samePoint(GeoPoint? a, GeoPoint? b, {double eps = 0.000001}) {
     if (a == null && b == null) return true;
@@ -680,6 +685,16 @@ class GameController extends ChangeNotifier {
   }
 
   void _applyStateSync(Map payload) {
+    final previousObjectives = objectives
+        .map(
+          (o) => GameObjective(
+            id: o.id,
+            point: o.point,
+            name: o.name,
+            state: o.state,
+          ),
+        )
+        .toList(growable: false);
     gameStarted =
         payload['started'] == true || payload['countdown_started'] == true;
     convergingPhase = payload['is_converging_phase'] == true;
@@ -731,6 +746,7 @@ class GameController extends ChangeNotifier {
         objectives
           ..clear()
           ..addAll(next);
+        _detectRogueCaptureInterruptionFromSync(previousObjectives);
       }
       _refreshObjectiveCaptureTrackingFromStates();
     }
@@ -953,6 +969,7 @@ class GameController extends ChangeNotifier {
     final now = DateTime.now().millisecondsSinceEpoch;
     _objectiveCaptureSeenAtMs[objectiveId] = now;
     _objectiveCaptureEndAtMs[objectiveId] = now + _configuredHackDurationMs();
+    _objectiveCaptureRogueByObjectiveId[objectiveId] = roguePlayerId;
     _pushSnapshot();
     notifyListeners();
   }
@@ -1008,6 +1025,29 @@ class GameController extends ChangeNotifier {
     if (!isHost || _objectiveCaptureEndAtMs.isEmpty) return;
     final now = DateTime.now().millisecondsSinceEpoch;
     var changed = false;
+    final interruptedIds = <String>[];
+    for (final entry in _objectiveCaptureEndAtMs.entries) {
+      final objectiveId = entry.key;
+      final rogueId = _objectiveCaptureRogueByObjectiveId[objectiveId];
+      if (rogueId == null || rogueId.isEmpty) continue;
+      final stillInRangeObjective = _nearestHackableObjectiveIdForPlayer(
+        rogueId,
+      );
+      if (stillInRangeObjective != objectiveId) {
+        interruptedIds.add(objectiveId);
+      }
+    }
+    for (final id in interruptedIds) {
+      _objectiveCaptureEndAtMs.remove(id);
+      _objectiveCaptureSeenAtMs.remove(id);
+      _objectiveCaptureRogueByObjectiveId.remove(id);
+      final idx = objectives.indexWhere((o) => o.id == id);
+      if (idx == -1) continue;
+      final objective = objectives[idx];
+      if (objective.captured) continue;
+      objectives[idx] = objective.copyWith(state: 'VISIBLE');
+      changed = true;
+    }
     final doneIds = <String>[];
     for (final entry in _objectiveCaptureEndAtMs.entries) {
       if (entry.value > now) continue;
@@ -1016,6 +1056,7 @@ class GameController extends ChangeNotifier {
     for (final id in doneIds) {
       _objectiveCaptureEndAtMs.remove(id);
       _objectiveCaptureSeenAtMs.remove(id);
+      _objectiveCaptureRogueByObjectiveId.remove(id);
       final idx = objectives.indexWhere((o) => o.id == id);
       if (idx == -1) continue;
       final objective = objectives[idx];
@@ -1041,6 +1082,30 @@ class GameController extends ChangeNotifier {
     }
     _objectiveCaptureSeenAtMs.removeWhere((id, _) => !activeIds.contains(id));
     _objectiveCaptureEndAtMs.removeWhere((id, _) => !activeIds.contains(id));
+    _objectiveCaptureRogueByObjectiveId.removeWhere(
+      (id, _) => !activeIds.contains(id),
+    );
+  }
+
+  void _detectRogueCaptureInterruptionFromSync(List<GameObjective> previous) {
+    if (!isRogueRole) return;
+    final previousById = <String, GameObjective>{
+      for (final objective in previous) objective.id: objective,
+    };
+    for (final current in objectives) {
+      final before = previousById[current.id];
+      if (before == null) continue;
+      if (before.state.toUpperCase() == 'CAPTURING' &&
+          current.state.toUpperCase() == 'VISIBLE') {
+        _rogueCaptureInterruptedAtMs = DateTime.now().millisecondsSinceEpoch;
+        _rogueCaptureInterruptedTimer?.cancel();
+        _rogueCaptureInterruptedTimer = Timer(
+          const Duration(milliseconds: 2300),
+          notifyListeners,
+        );
+        break;
+      }
+    }
   }
 
   void _evaluateWinConditionsIfHost() {
@@ -1285,9 +1350,9 @@ class GameController extends ChangeNotifier {
   }
 
   int get startZoneRadiusMeters {
-    return _effectiveGameConfig?.objectiveZoneRadius ??
-        bootstrap?.lobby.form?.objectiveZoneRadius ??
-        50;
+    return _effectiveGameConfig?.startZoneRadius ??
+        bootstrap?.lobby.form?.startZoneRadius ??
+        CreateLobbyDefaults.startZoneRadius;
   }
 
   GeoPoint? _startZoneForRole(String? role) {
@@ -1343,6 +1408,12 @@ class GameController extends ChangeNotifier {
   }
 
   int get configuredHackDurationMs => _configuredHackDurationMs();
+
+  bool get showRogueCaptureInterruptedBanner {
+    if (_rogueCaptureInterruptedAtMs == null) return false;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return now - _rogueCaptureInterruptedAtMs! <= 2200;
+  }
 
   double get rogueCaptureProgress {
     final remaining = rogueCaptureRemainingSeconds;
@@ -1662,6 +1733,7 @@ class GameController extends ChangeNotifier {
     _voiceActivityTimer?.cancel();
     _messagesSub?.cancel();
     _positionSub?.cancel();
+    _rogueCaptureInterruptedTimer?.cancel();
     _voiceChatService.dispose();
     _socketService.dispose();
     super.dispose();

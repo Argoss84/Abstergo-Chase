@@ -184,6 +184,16 @@ class LobbySocketService {
     });
   }
 
+  void sendLobbyConfigUpdate({required Map<String, dynamic> gameConfig}) {
+    _emitMessage(<String, dynamic>{
+      'type': 'lobby:config-update-request',
+      'payload': <String, dynamic>{
+        'gameConfig': gameConfig,
+        'requestId': _newRequestId(),
+      },
+    });
+  }
+
   Future<void> sendWebRtcSignal({
     required String targetId,
     required Map<String, dynamic> signal,

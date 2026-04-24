@@ -1,4 +1,3 @@
-import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -14,6 +13,7 @@ class CreateLobbyMap extends StatelessWidget {
     required this.selectedPosition,
     required this.mapRadiusMeters,
     required this.objectiveZoneRadiusMeters,
+    required this.startZoneRadiusMeters,
     required this.streets,
     required this.outerStreetContour,
     required this.objectives,
@@ -26,6 +26,7 @@ class CreateLobbyMap extends StatelessWidget {
   final GeoPoint? selectedPosition;
   final int mapRadiusMeters;
   final int objectiveZoneRadiusMeters;
+  final int startZoneRadiusMeters;
   final List<List<GeoPoint>> streets;
   final List<GeoPoint> outerStreetContour;
   final List<GeoPoint> objectives;
@@ -160,7 +161,7 @@ class CreateLobbyMap extends StatelessWidget {
                       agentStartZone!.latitude,
                       agentStartZone!.longitude,
                     ),
-                    radius: CreateLobbyDefaults.startZoneRadius.toDouble(),
+                    radius: startZoneRadiusMeters.toDouble(),
                     color: Colors.blue.withOpacity(0.1),
                     borderStrokeWidth: 1.5,
                     borderColor: Colors.blue,
@@ -172,7 +173,7 @@ class CreateLobbyMap extends StatelessWidget {
                       rogueStartZone!.latitude,
                       rogueStartZone!.longitude,
                     ),
-                    radius: CreateLobbyDefaults.startZoneRadius.toDouble(),
+                    radius: startZoneRadiusMeters.toDouble(),
                     color: Colors.green.withOpacity(0.1),
                     borderStrokeWidth: 1.5,
                     borderColor: Colors.green,

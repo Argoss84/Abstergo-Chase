@@ -15,13 +15,13 @@ class CreateLobbyController extends ChangeNotifier {
     ObjectiveGenerationService? objectiveGenerationService,
     StreetFetchService? streetFetchService,
     StreetContourService? streetContourService,
-  })  : _service = service ?? CreateLobbyService.instance,
-        _locationService = locationService ?? const LocationService(),
-        _objectiveGenerationService =
-            objectiveGenerationService ?? ObjectiveGenerationService(),
-        _streetFetchService = streetFetchService ?? const StreetFetchService(),
-        _streetContourService =
-            streetContourService ?? const StreetContourService();
+  }) : _service = service ?? CreateLobbyService.instance,
+       _locationService = locationService ?? const LocationService(),
+       _objectiveGenerationService =
+           objectiveGenerationService ?? ObjectiveGenerationService(),
+       _streetFetchService = streetFetchService ?? const StreetFetchService(),
+       _streetContourService =
+           streetContourService ?? const StreetContourService();
 
   final CreateLobbyService _service;
   final LocationService _locationService;
@@ -203,14 +203,16 @@ class CreateLobbyController extends ChangeNotifier {
       final session = await _service.createLobby(
         playerName: displayName.trim(),
         serverUrl: uri,
-        socketPath:
-            socketPath.trim().isEmpty ? '/socket.io' : socketPath.trim(),
+        socketPath: socketPath.trim().isEmpty
+            ? '/socket.io'
+            : socketPath.trim(),
         gameConfig: <String, dynamic>{
           'objectif_number': form.objectiveNumber,
           'duration': safeDuration,
           'victory_condition_nb_objectivs': form.victoryConditionObjectives,
           'hack_duration_ms': form.hackDurationMs,
           'objectiv_zone_radius': form.objectiveZoneRadius,
+          'start_zone_radius': form.startZoneRadius,
           'rogue_range': form.rogueRange,
           'agent_range': form.agentRange,
           'map_center_latitude': selectedPosition?.latitude.toString() ?? '',

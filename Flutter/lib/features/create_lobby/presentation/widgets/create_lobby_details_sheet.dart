@@ -2,10 +2,7 @@ import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_form_da
 import 'package:flutter/material.dart';
 
 class CreateLobbyDetailsSheet extends StatefulWidget {
-  const CreateLobbyDetailsSheet({
-    super.key,
-    required this.initialData,
-  });
+  const CreateLobbyDetailsSheet({super.key, required this.initialData});
 
   final CreateLobbyFormData initialData;
 
@@ -62,6 +59,11 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
               onChanged: (v) => _form = _form.copyWith(objectiveZoneRadius: v),
             ),
             _numberField(
+              label: 'Rayon zone départ (m)',
+              value: _form.startZoneRadius,
+              onChanged: (v) => _form = _form.copyWith(startZoneRadius: v),
+            ),
+            _numberField(
               label: 'Portée Rogue',
               value: _form.rogueRange,
               onChanged: (v) => _form = _form.copyWith(rogueRange: v),
@@ -78,9 +80,9 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
             ),
             const SizedBox(height: 12),
             FilledButton(
-              onPressed: () => Navigator.of(context).pop(
-                CreateLobbyDetailsResult(form: _form),
-              ),
+              onPressed: () => Navigator.of(
+                context,
+              ).pop(CreateLobbyDetailsResult(form: _form)),
               child: const Text('Appliquer'),
             ),
           ],

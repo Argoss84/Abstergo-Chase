@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_form_data.dart';
 import 'package:abstergo_chase/features/lobby/data/lobby_socket_service.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
 import 'package:abstergo_chase/shared/services/voice_chat_service.dart';
@@ -265,6 +266,21 @@ class LobbyController extends ChangeNotifier {
           }
         }
         return;
+      case 'lobby:config-updated':
+        if (payload is Map) {
+          final rawConfig = payload['config'];
+          if (rawConfig is Map) {
+            final nextConfig = Map<String, dynamic>.from(
+              rawConfig.map((k, v) => MapEntry(k.toString(), v)),
+            );
+            gameConfig = LobbyGameConfig.fromMap(nextConfig);
+            final nextForm = _formFromConfigMap(nextConfig);
+            bootstrapData = bootstrapData?.copyWith(form: nextForm);
+            _regenerateObjectiveNames();
+            notifyListeners();
+          }
+        }
+        return;
       case 'game:started':
       case 'game:created':
         gameStarted = true;
@@ -329,6 +345,28 @@ class LobbyController extends ChangeNotifier {
 
   void updateRole({required String targetPlayerId, required String? role}) {
     _socketService.sendRoleUpdate(playerId: targetPlayerId, role: role);
+  }
+
+  void updateLobbyConfig(CreateLobbyFormData form) {
+    final bootstrap = bootstrapData;
+    if (!isHost || bootstrap == null) return;
+    bootstrapData = bootstrap.copyWith(form: form);
+    _socketService.sendLobbyConfigUpdate(
+      gameConfig: <String, dynamic>{
+        'objectif_number': form.objectiveNumber,
+        'duration': form.duration,
+        'victory_condition_nb_objectivs': form.victoryConditionObjectives,
+        'hack_duration_ms': form.hackDurationMs,
+        'objectiv_zone_radius': form.objectiveZoneRadius,
+        'start_zone_radius': form.startZoneRadius,
+        'rogue_range': form.rogueRange,
+        'agent_range': form.agentRange,
+        'map_center_latitude': form.mapCenterLatitude,
+        'map_center_longitude': form.mapCenterLongitude,
+        'map_radius': form.mapRadius,
+      },
+    );
+    notifyListeners();
   }
 
   bool get canStartGame {
@@ -478,6 +516,47 @@ class LobbyController extends ChangeNotifier {
     if (code != null && player != null) {
       _socketService.leaveLobby(code: code, playerId: player);
     }
+  }
+
+  CreateLobbyFormData _formFromConfigMap(Map<String, dynamic> config) {
+    final current = bootstrapData?.form ?? CreateLobbyFormData.initial();
+    return current.copyWith(
+      objectiveNumber:
+          int.tryParse(config['objectif_number']?.toString() ?? '') ??
+          current.objectiveNumber,
+      duration:
+          int.tryParse(config['duration']?.toString() ?? '') ??
+          current.duration,
+      victoryConditionObjectives:
+          int.tryParse(
+            config['victory_condition_nb_objectivs']?.toString() ?? '',
+          ) ??
+          current.victoryConditionObjectives,
+      hackDurationMs:
+          int.tryParse(config['hack_duration_ms']?.toString() ?? '') ??
+          current.hackDurationMs,
+      objectiveZoneRadius:
+          int.tryParse(config['objectiv_zone_radius']?.toString() ?? '') ??
+          current.objectiveZoneRadius,
+      startZoneRadius:
+          int.tryParse(config['start_zone_radius']?.toString() ?? '') ??
+          current.startZoneRadius,
+      rogueRange:
+          int.tryParse(config['rogue_range']?.toString() ?? '') ??
+          current.rogueRange,
+      agentRange:
+          int.tryParse(config['agent_range']?.toString() ?? '') ??
+          current.agentRange,
+      mapCenterLatitude:
+          config['map_center_latitude']?.toString() ??
+          current.mapCenterLatitude,
+      mapCenterLongitude:
+          config['map_center_longitude']?.toString() ??
+          current.mapCenterLongitude,
+      mapRadius:
+          int.tryParse(config['map_radius']?.toString() ?? '') ??
+          current.mapRadius,
+    );
   }
 
   @override

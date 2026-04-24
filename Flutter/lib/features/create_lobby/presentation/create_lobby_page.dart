@@ -137,6 +137,8 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                           mapRadiusMeters: _controller.form.mapRadius,
                           objectiveZoneRadiusMeters:
                               _controller.form.objectiveZoneRadius,
+                          startZoneRadiusMeters:
+                              _controller.form.startZoneRadius,
                           streets: _controller.streets,
                           outerStreetContour: _controller.outerStreetContour,
                           objectives: _controller.objectives,

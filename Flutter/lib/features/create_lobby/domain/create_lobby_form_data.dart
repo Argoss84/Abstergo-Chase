@@ -7,6 +7,7 @@ class CreateLobbyFormData {
     required this.victoryConditionObjectives,
     required this.hackDurationMs,
     required this.objectiveZoneRadius,
+    required this.startZoneRadius,
     required this.rogueRange,
     required this.agentRange,
     required this.mapCenterLatitude,
@@ -22,6 +23,7 @@ class CreateLobbyFormData {
           CreateLobbyDefaults.victoryConditionObjectives,
       hackDurationMs: CreateLobbyDefaults.hackDurationMs,
       objectiveZoneRadius: CreateLobbyDefaults.objectiveZoneRadius,
+      startZoneRadius: CreateLobbyDefaults.startZoneRadius,
       rogueRange: CreateLobbyDefaults.rogueRange,
       agentRange: CreateLobbyDefaults.agentRange,
       mapCenterLatitude: '',
@@ -35,6 +37,7 @@ class CreateLobbyFormData {
   final int victoryConditionObjectives;
   final int hackDurationMs;
   final int objectiveZoneRadius;
+  final int startZoneRadius;
   final int rogueRange;
   final int agentRange;
   final String mapCenterLatitude;
@@ -47,6 +50,7 @@ class CreateLobbyFormData {
     int? victoryConditionObjectives,
     int? hackDurationMs,
     int? objectiveZoneRadius,
+    int? startZoneRadius,
     int? rogueRange,
     int? agentRange,
     String? mapCenterLatitude,
@@ -60,6 +64,7 @@ class CreateLobbyFormData {
           victoryConditionObjectives ?? this.victoryConditionObjectives,
       hackDurationMs: hackDurationMs ?? this.hackDurationMs,
       objectiveZoneRadius: objectiveZoneRadius ?? this.objectiveZoneRadius,
+      startZoneRadius: startZoneRadius ?? this.startZoneRadius,
       rogueRange: rogueRange ?? this.rogueRange,
       agentRange: agentRange ?? this.agentRange,
       mapCenterLatitude: mapCenterLatitude ?? this.mapCenterLatitude,
