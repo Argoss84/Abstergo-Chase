@@ -10,6 +10,7 @@ import 'package:abstergo_chase/shared/services/socket_environment_service.dart';
 import 'package:abstergo_chase/shared/services/vibration_service.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 class LobbyPage extends StatefulWidget {
   const LobbyPage({super.key, this.initialCode, this.bootstrapData});
@@ -230,24 +231,67 @@ class _LobbyPageState extends State<LobbyPage> with WidgetsBindingObserver {
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const Text(
-                              'Code de la partie',
-                              textAlign: TextAlign.center,
-                            ),
-                            const SizedBox(height: 8),
-                            SelectableText(
-                              (_controller.lobbyCode ?? '').toUpperCase(),
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 28,
-                                letterSpacing: 4,
+                        child: SizedBox(
+                          height: 120,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    const Text(
+                                      'Code de la partie',
+                                      textAlign: TextAlign.center,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    SelectableText(
+                                      (_controller.lobbyCode ?? '')
+                                          .toUpperCase(),
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 28,
+                                        letterSpacing: 4,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 10),
+                              if ((_controller.lobbyCode ?? '').isNotEmpty)
+                                AspectRatio(
+                                  aspectRatio: 1,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: SizedBox.expand(
+                                      child: QrImageView(
+                                        data:
+                                            '{"type":"lobby-join","code":"${(_controller.lobbyCode ?? '').toUpperCase()}"}',
+                                        version: QrVersions.auto,
+                                        eyeStyle: const QrEyeStyle(
+                                          eyeShape: QrEyeShape.square,
+                                          color: Colors.black,
+                                        ),
+                                        dataModuleStyle:
+                                            const QrDataModuleStyle(
+                                              dataModuleShape:
+                                                  QrDataModuleShape.square,
+                                              color: Colors.black,
+                                            ),
+                                        backgroundColor: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
