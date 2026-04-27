@@ -1,6 +1,7 @@
 # TURN voice infrastructure (OpenTofu)
 
 This stack deploys a minimal `coturn` instance on EC2 for voice relay fallback.
+The instance is deployed without a dedicated Elastic IP and with IMDSv2 required.
 
 ## 1) AWS CLI prerequisites
 
@@ -60,4 +61,4 @@ Recommended signaling env vars:
 When fronting TURN through a shared NLB EIP:
 - Keep this TURN instance in place (`turn_secret` and `turn_realm` unchanged).
 - Route TCP/UDP 3478 from NLB to this instance.
-- After cutover, optionally restrict SG ingress to known CIDRs/NLB paths according to your network model.
+- Keep ingress limited to `3478` (TCP/UDP) and relay UDP range; do not expose SSH/5349 publicly unless explicitly needed.
