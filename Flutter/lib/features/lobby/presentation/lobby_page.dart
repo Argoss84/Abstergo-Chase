@@ -183,37 +183,50 @@ class _LobbyPageState extends State<LobbyPage> with WidgetsBindingObserver {
               ),
             ],
           ),
-          floatingActionButton: FloatingActionButton(
-            onPressed: _openChatSheet,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.chat_bubble_outline),
-                if (unreadCount > 0)
-                  Positioned(
-                    right: -6,
-                    top: -8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.red,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        unreadCount > 99 ? '99+' : '$unreadCount',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
+          floatingActionButton: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              FloatingActionButton(
+                heroTag: 'lobby-info-fab',
+                onPressed: _openLobbyInfoSheet,
+                child: const Icon(Icons.info_outline),
+              ),
+              const SizedBox(height: 10),
+              FloatingActionButton(
+                heroTag: 'lobby-chat-fab',
+                onPressed: _openChatSheet,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Icon(Icons.chat_bubble_outline),
+                    if (unreadCount > 0)
+                      Positioned(
+                        right: -6,
+                        top: -8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            unreadCount > 99 ? '99+' : '$unreadCount',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-              ],
-            ),
+                  ],
+                ),
+              ),
+            ],
           ),
           body: _controller.isLoading
               ? const Center(child: CircularProgressIndicator())
@@ -377,68 +390,74 @@ class _LobbyPageState extends State<LobbyPage> with WidgetsBindingObserver {
                                         ? Colors.cyanAccent
                                         : Colors.white70,
                                   ),
-                                  title: Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          player.name +
-                                              (player.id == _controller.playerId
-                                                  ? ' (Vous)'
-                                                  : ''),
-                                        ),
-                                      ),
-                                      if (_roleMarkerAssetFor(player.role) !=
-                                          null)
-                                        SizedBox(
-                                          width: 22,
-                                          height: 22,
-                                          child: Image.asset(
-                                            _roleMarkerAssetFor(player.role)!,
-                                            fit: BoxFit.contain,
-                                            errorBuilder: (context, _, __) =>
-                                                Icon(
-                                                  _roleFallbackIconFor(
-                                                    player.role,
-                                                  ),
-                                                  size: 18,
-                                                  color: _roleColorFor(
-                                                    player.role,
-                                                  ),
-                                                ),
-                                          ),
-                                        ),
-                                    ],
+                                  title: Text(
+                                    player.name +
+                                        (player.id == _controller.playerId
+                                            ? ' (Vous)'
+                                            : ''),
                                   ),
                                   subtitle: Text(
                                     player.isHost ? 'Host' : 'Joueur',
                                   ),
-                                  trailing: _controller.isHost
-                                      ? DropdownButton<String>(
-                                          value: player.role ?? '',
-                                          items: const [
-                                            DropdownMenuItem(
-                                              value: '',
-                                              child: Text('Aucun'),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
+                                    children: [
+                                      if (_roleMarkerAssetFor(player.role) !=
+                                          null)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            right: 8,
+                                          ),
+                                          child: SizedBox(
+                                            width: 24,
+                                            height: 24,
+                                            child: Image.asset(
+                                              _roleMarkerAssetFor(player.role)!,
+                                              fit: BoxFit.contain,
+                                              errorBuilder: (context, _, __) =>
+                                                  Icon(
+                                                    _roleFallbackIconFor(
+                                                      player.role,
+                                                    ),
+                                                    size: 20,
+                                                    color: _roleColorFor(
+                                                      player.role,
+                                                    ),
+                                                  ),
                                             ),
-                                            DropdownMenuItem(
-                                              value: 'AGENT',
-                                              child: Text('Agent'),
-                                            ),
-                                            DropdownMenuItem(
-                                              value: 'ROGUE',
-                                              child: Text('Rogue'),
-                                            ),
-                                          ],
-                                          onChanged: (value) {
-                                            _controller.updateRole(
-                                              targetPlayerId: player.id,
-                                              role: (value?.isEmpty ?? true)
-                                                  ? null
-                                                  : value,
-                                            );
-                                          },
-                                        )
-                                      : Text(player.role ?? 'Aucun'),
+                                          ),
+                                        ),
+                                      _controller.isHost
+                                          ? DropdownButton<String>(
+                                              value: player.role ?? '',
+                                              items: const [
+                                                DropdownMenuItem(
+                                                  value: '',
+                                                  child: Text('Aucun'),
+                                                ),
+                                                DropdownMenuItem(
+                                                  value: 'AGENT',
+                                                  child: Text('Agent'),
+                                                ),
+                                                DropdownMenuItem(
+                                                  value: 'ROGUE',
+                                                  child: Text('Rogue'),
+                                                ),
+                                              ],
+                                              onChanged: (value) {
+                                                _controller.updateRole(
+                                                  targetPlayerId: player.id,
+                                                  role: (value?.isEmpty ?? true)
+                                                      ? null
+                                                      : value,
+                                                );
+                                              },
+                                            )
+                                          : Text(player.role ?? 'Aucun'),
+                                    ],
+                                  ),
                                 ),
                               );
                             }),
@@ -487,46 +506,6 @@ class _LobbyPageState extends State<LobbyPage> with WidgetsBindingObserver {
                           child: Text('Partie en cours de demarrage...'),
                         ),
                       ),
-                    Card(
-                      child: ExpansionTile(
-                        title: const Text('Details Partie'),
-                        childrenPadding: const EdgeInsets.all(12),
-                        children: [
-                          if (bootstrap?.form != null) ...[
-                            _kv(
-                              'Objectifs',
-                              '${bootstrap!.form!.objectiveNumber}',
-                            ),
-                            _kv(
-                              'Duree',
-                              '${bootstrap.form!.duration} secondes',
-                            ),
-                            _kv(
-                              'Objectifs victoire',
-                              '${bootstrap.form!.victoryConditionObjectives}',
-                            ),
-                            _kv(
-                              'Rayon zone départ',
-                              '${bootstrap.form!.startZoneRadius} m',
-                            ),
-                            _kv('Rayon map', '${bootstrap.form!.mapRadius} m'),
-                          ] else
-                            const Text(
-                              'Details non disponibles sur ce client.',
-                            ),
-                          if (_controller.objectiveNames.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            const Text(
-                              'Noms des objectifs',
-                              style: TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                            ..._controller.objectiveNames.map(
-                              (name) => Text('- $name'),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
                     if (_controller.connectionStatus == 'connected' &&
                         _controller.players.isEmpty)
                       Align(
@@ -781,5 +760,120 @@ class _LobbyPageState extends State<LobbyPage> with WidgetsBindingObserver {
       _isChatOpen = false;
       _lastReadCount = _controller.chatMessages.length;
     });
+  }
+
+  Future<void> _openLobbyInfoSheet() async {
+    final bootstrap = _controller.bootstrapData;
+    final form = bootstrap?.form;
+    final config = _controller.gameConfig;
+    final code = (_controller.lobbyCode ?? bootstrap?.code ?? '').toUpperCase();
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.86,
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              const Text(
+                'Informations du lobby',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 14),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Code de la partie',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      SelectableText(
+                        code,
+                        style: const TextStyle(
+                          fontSize: 30,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    children: [
+                      _kv('Joueurs', '${_controller.players.length}'),
+                      _kv(
+                        'Host',
+                        _controller.players
+                            .where((p) => p.isHost)
+                            .map((p) => p.name)
+                            .join(', '),
+                      ),
+                      _kv(
+                        'Objectifs',
+                        '${form?.objectiveNumber ?? _controller.objectiveNames.length}',
+                      ),
+                      _kv(
+                        'Objectifs victoire',
+                        '${form?.victoryConditionObjectives ?? 'n/a'}',
+                      ),
+                      _kv('Duree', '${form?.duration ?? 'n/a'} secondes'),
+                    ],
+                  ),
+                ),
+              ),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    children: [
+                      _kv(
+                        'Rayon map',
+                        '${config?.mapRadius ?? form?.mapRadius ?? 'n/a'} m',
+                      ),
+                      _kv(
+                        'Rayon zone objectif',
+                        '${config?.objectiveZoneRadius ?? form?.objectiveZoneRadius ?? 'n/a'} m',
+                      ),
+                      _kv(
+                        'Rayon zone départ',
+                        '${config?.startZoneRadius ?? form?.startZoneRadius ?? 'n/a'} m',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_controller.objectiveNames.isNotEmpty)
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Noms des objectifs',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 8),
+                        ..._controller.objectiveNames.map(
+                          (name) => Text('- $name'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
