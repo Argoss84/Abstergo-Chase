@@ -186,10 +186,11 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                         ),
                       ],
                       const SizedBox(height: 8),
-                      FilledButton.tonal(
-                        onPressed: _controller.generateObjectives,
-                        child: const Text('Générer les objectifs'),
-                      ),
+                      if (_controller.selectedPosition != null)
+                        FilledButton.tonal(
+                          onPressed: _controller.generateObjectives,
+                          child: const Text('Générer les objectifs'),
+                        ),
                       const SizedBox(height: 8),
                       if (_controller.objectives.isNotEmpty)
                         Text(
@@ -200,55 +201,59 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                           style: const TextStyle(fontSize: 13),
                         ),
                       const SizedBox(height: 8),
-                      FilledButton(
-                        onPressed: _controller.canCreateLobby
-                            ? () async {
-                                await _controller.createLobby();
-                                if (!mounted) {
-                                  return;
-                                }
-                                if (_controller.createdLobbyCode != null) {
-                                  await _playerNameStore.save(
-                                    _controller.displayName,
-                                  );
+                      if (_controller.objectives.isNotEmpty)
+                        FilledButton(
+                          onPressed: _controller.canCreateLobby
+                              ? () async {
+                                  await _controller.createLobby();
                                   if (!mounted) {
                                     return;
                                   }
-                                  final session =
-                                      _controller.createdLobbySession;
-                                  final bootstrap = LobbyBootstrapData(
-                                    code: _controller.createdLobbyCode!,
-                                    serverUrl: _controller.serverUrl,
-                                    socketPath: _controller.socketPath,
-                                    playerName: _controller.displayName.trim(),
-                                    previousPlayerId: session?.playerId,
-                                    reconnectAsHost: true,
-                                    form: _controller.form,
-                                    objectives: _controller.objectives,
-                                    agentStartZone: _controller.agentStartZone,
-                                    rogueStartZone: _controller.rogueStartZone,
-                                    outerStreetContour:
-                                        _controller.outerStreetContour,
-                                  );
-                                  context.go(
-                                    '${LobbyPage.routePath}?code=${_controller.createdLobbyCode}',
-                                    extra: bootstrap,
-                                  );
-                                } else if (_controller.lastError != null) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(_controller.lastError!),
-                                    ),
-                                  );
+                                  if (_controller.createdLobbyCode != null) {
+                                    await _playerNameStore.save(
+                                      _controller.displayName,
+                                    );
+                                    if (!mounted) {
+                                      return;
+                                    }
+                                    final session =
+                                        _controller.createdLobbySession;
+                                    final bootstrap = LobbyBootstrapData(
+                                      code: _controller.createdLobbyCode!,
+                                      serverUrl: _controller.serverUrl,
+                                      socketPath: _controller.socketPath,
+                                      playerName: _controller.displayName
+                                          .trim(),
+                                      previousPlayerId: session?.playerId,
+                                      reconnectAsHost: true,
+                                      form: _controller.form,
+                                      objectives: _controller.objectives,
+                                      agentStartZone:
+                                          _controller.agentStartZone,
+                                      rogueStartZone:
+                                          _controller.rogueStartZone,
+                                      outerStreetContour:
+                                          _controller.outerStreetContour,
+                                    );
+                                    context.go(
+                                      '${LobbyPage.routePath}?code=${_controller.createdLobbyCode}',
+                                      extra: bootstrap,
+                                    );
+                                  } else if (_controller.lastError != null) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(_controller.lastError!),
+                                      ),
+                                    );
+                                  }
                                 }
-                              }
-                            : null,
-                        child: Text(
-                          _controller.isSubmitting
-                              ? 'Création en cours...'
-                              : 'Créer la partie',
+                              : null,
+                          child: Text(
+                            _controller.isSubmitting
+                                ? 'Création en cours...'
+                                : 'Créer la partie',
+                          ),
                         ),
-                      ),
                       if (_controller.lastError != null) ...[
                         const SizedBox(height: 8),
                         Text(

@@ -377,11 +377,37 @@ class _LobbyPageState extends State<LobbyPage> with WidgetsBindingObserver {
                                         ? Colors.cyanAccent
                                         : Colors.white70,
                                   ),
-                                  title: Text(
-                                    player.name +
-                                        (player.id == _controller.playerId
-                                            ? ' (Vous)'
-                                            : ''),
+                                  title: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          player.name +
+                                              (player.id == _controller.playerId
+                                                  ? ' (Vous)'
+                                                  : ''),
+                                        ),
+                                      ),
+                                      if (_roleMarkerAssetFor(player.role) !=
+                                          null)
+                                        SizedBox(
+                                          width: 22,
+                                          height: 22,
+                                          child: Image.asset(
+                                            _roleMarkerAssetFor(player.role)!,
+                                            fit: BoxFit.contain,
+                                            errorBuilder: (context, _, __) =>
+                                                Icon(
+                                                  _roleFallbackIconFor(
+                                                    player.role,
+                                                  ),
+                                                  size: 18,
+                                                  color: _roleColorFor(
+                                                    player.role,
+                                                  ),
+                                                ),
+                                          ),
+                                        ),
+                                    ],
                                   ),
                                   subtitle: Text(
                                     player.isHost ? 'Host' : 'Joueur',
@@ -579,6 +605,39 @@ class _LobbyPageState extends State<LobbyPage> with WidgetsBindingObserver {
         ],
       ),
     );
+  }
+
+  String? _roleMarkerAssetFor(String? role) {
+    switch ((role ?? '').toUpperCase()) {
+      case 'AGENT':
+        return 'assets/images/agent_marker.png';
+      case 'ROGUE':
+        return 'assets/images/rogue_marker.png';
+      default:
+        return null;
+    }
+  }
+
+  IconData _roleFallbackIconFor(String? role) {
+    switch ((role ?? '').toUpperCase()) {
+      case 'AGENT':
+        return Icons.shield;
+      case 'ROGUE':
+        return Icons.visibility_off;
+      default:
+        return Icons.help_outline;
+    }
+  }
+
+  Color _roleColorFor(String? role) {
+    switch ((role ?? '').toUpperCase()) {
+      case 'AGENT':
+        return Colors.lightBlueAccent;
+      case 'ROGUE':
+        return Colors.purpleAccent;
+      default:
+        return Colors.white70;
+    }
   }
 
   Future<void> _openHostConfigEditor() async {
