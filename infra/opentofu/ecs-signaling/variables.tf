@@ -98,22 +98,21 @@ variable "assign_public_ip" {
   default     = true
 }
 
-variable "alb_name" {
-  description = "Application Load Balancer name."
+variable "nlb_name" {
+  description = "Network Load Balancer name."
   type        = string
-  default     = "abstergo-signaling-alb"
+  default     = "abstergo-signaling-nlb"
 }
 
-variable "alb_listener_port" {
-  description = "ALB listener port."
+variable "signaling_listener_port" {
+  description = "Public listener port exposed by the NLB."
   type        = number
   default     = 80
 }
 
-variable "alb_ingress_cidr_ipv4" {
-  description = "CIDR allowed to access ALB listener."
+variable "nlb_subnet_id" {
+  description = "Single public subnet used by the mono-AZ NLB."
   type        = string
-  default     = "0.0.0.0/0"
 }
 
 variable "turn_urls" {
@@ -141,6 +140,12 @@ variable "turn_ttl_seconds" {
   default     = 600
 }
 
+variable "turn_backend_instance_id" {
+  description = "Optional TURN EC2 instance ID to route TCP/UDP 3478 through the shared NLB EIP."
+  type        = string
+  default     = ""
+}
+
 variable "common_tags" {
   description = "Common tags applied to all taggable AWS resources."
   type        = map(string)
@@ -157,8 +162,3 @@ variable "vpc_name_tag" {
   default     = ""
 }
 
-variable "network_name_prefix" {
-  description = "Prefix used for Name tags on shared network resources."
-  type        = string
-  default     = "abstergo-shared"
-}

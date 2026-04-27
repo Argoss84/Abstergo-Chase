@@ -38,10 +38,12 @@ tofu apply
 
 ## 4) Client + signaling integration
 
-Use outputs to configure your app/signaling:
+If TURN is exposed directly, use outputs to configure your app/signaling:
 - `stun:<ip>:3478`
 - `turn:<ip>:3478?transport=udp`
 - `turn:<ip>:3478?transport=tcp`
+
+If you are migrating to a single shared EIP via the signaling NLB, set signaling `TURN_URLS` to the shared NLB EIP instead of this instance EIP.
 
 Signaling server should mint temporary TURN credentials with:
 - shared secret = `turn_secret`
@@ -52,3 +54,10 @@ Recommended signaling env vars:
 - `TURN_SECRET`
 - `TURN_REALM`
 - `TURN_TTL_SECONDS`
+
+## 5) Single-EIP migration note
+
+When fronting TURN through a shared NLB EIP:
+- Keep this TURN instance in place (`turn_secret` and `turn_realm` unchanged).
+- Route TCP/UDP 3478 from NLB to this instance.
+- After cutover, optionally restrict SG ingress to known CIDRs/NLB paths according to your network model.

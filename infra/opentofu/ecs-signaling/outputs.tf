@@ -18,12 +18,26 @@ output "deployed_image_uri" {
   value       = local.image_uri
 }
 
-output "alb_dns_name" {
-  description = "Public DNS name of the ALB."
+output "nlb_dns_name" {
+  description = "Public DNS name of the NLB."
   value       = aws_lb.this.dns_name
+}
+
+output "public_eip" {
+  description = "Public IPv4 address used by the NLB."
+  value       = aws_eip.nlb_public.public_ip
 }
 
 output "socket_base_url" {
   description = "Base URL to use for signaling server."
-  value       = "http://${aws_lb.this.dns_name}"
+  value       = "http://${aws_lb.this.dns_name}:${var.signaling_listener_port}"
+}
+
+output "turn_urls_via_shared_eip" {
+  description = "TURN URLs to use when turn_backend_instance_id is configured."
+  value = var.turn_backend_instance_id != "" ? [
+    "stun:${aws_eip.nlb_public.public_ip}:3478",
+    "turn:${aws_eip.nlb_public.public_ip}:3478?transport=udp",
+    "turn:${aws_eip.nlb_public.public_ip}:3478?transport=tcp"
+  ] : []
 }

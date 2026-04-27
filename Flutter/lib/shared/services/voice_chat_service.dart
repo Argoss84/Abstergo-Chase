@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:abstergo_chase/app/config/app_runtime_config.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 typedef VoiceSignalSender = Future<void> Function(
@@ -27,7 +28,7 @@ class VoiceChatService {
   bool _transmissionActive = true;
   DateTime? _lastLocalStreamFailureAt;
   List<Map<String, dynamic>> _iceServers = <Map<String, dynamic>>[
-    <String, dynamic>{'urls': 'stun:13.37.68.16:3478'},
+    <String, dynamic>{'urls': AppRuntimeConfig.defaultStunUrl},
   ];
 
   void configureIceServers(List<Map<String, dynamic>> servers) {

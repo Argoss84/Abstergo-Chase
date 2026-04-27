@@ -12,7 +12,7 @@ container_port         = 5174
 socket_io_path         = "/socket.io"
 memory_only_mode       = true
 empty_game_ttl_ms      = 300000
-turn_urls              = "stun:13.37.68.16:3478,turn:13.37.68.16:3478?transport=udp,turn:13.37.68.16:3478?transport=tcp"
+turn_urls              = "stun:35.181.228.185:3478,turn:35.181.228.185:3478?transport=udp,turn:35.181.228.185:3478?transport=tcp"
 turn_secret            = "STfSxH3/J1y7JPiivIQWvmzUIkgEb80KksLLj1FvrC+K0lcBqe41uiPJa0c7//vK"
 turn_realm             = "voice.abstergochase"
 turn_ttl_seconds       = 600
@@ -20,9 +20,10 @@ desired_count          = 1
 assign_public_ip       = true
 task_security_group_id = "sg-01b999f1951fb5bc3"
 
-alb_name              = "abstergo-signaling-alb"
-alb_listener_port     = 80
-alb_ingress_cidr_ipv4 = "0.0.0.0/0"
+nlb_name                 = "abstergo-signaling-nlb-1eip"
+signaling_listener_port  = 80
+nlb_subnet_id            = "subnet-0547ed2467da2d42a"
+turn_backend_instance_id = "i-07babea06c00eeab9"
 
 # Auto-populated from AWS CLI (default VPC in eu-west-3).
 subnet_ids = [
@@ -44,4 +45,3 @@ common_tags = {
 }
 
 vpc_name_tag = "abstergo-shared-vpc"
-network_name_prefix = "abstergo-shared"

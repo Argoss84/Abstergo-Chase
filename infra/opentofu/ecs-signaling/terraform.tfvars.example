@@ -17,6 +17,7 @@ turn_urls         = ""
 turn_secret       = ""
 turn_realm        = ""
 turn_ttl_seconds  = 600
+turn_backend_instance_id = ""
 
 desired_count      = 1
 assign_public_ip   = true
@@ -24,9 +25,9 @@ assign_public_ip   = true
 # Optional override (otherwise first security group ID below is used)
 # task_security_group_id = "sg-xxxxxxxxxxxxxxxxx"
 
-alb_name               = "abstergo-signaling-alb"
-alb_listener_port      = 80
-alb_ingress_cidr_ipv4  = "0.0.0.0/0"
+nlb_name               = "abstergo-signaling-nlb"
+signaling_listener_port = 80
+nlb_subnet_id          = "subnet-xxxxxxxx"
 
 # Replace with your existing subnet IDs (at least 2 recommended)
 subnet_ids = [
