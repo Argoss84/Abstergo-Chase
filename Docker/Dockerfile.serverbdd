@@ -1,4 +1,4 @@
-# API ServerBDD (Express + MySQL)
+# API ServerBDD (Express + PostgreSQL + Cognito)
 FROM node:20-alpine
 WORKDIR /app
 
@@ -8,4 +8,4 @@ RUN npm ci --omit=dev
 COPY ServerBDD/ ./
 
 EXPOSE 5175
-CMD ["node", "server.js"]
+CMD ["node", "src/server.js"]

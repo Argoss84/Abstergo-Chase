@@ -1,16 +1,17 @@
 {
   "name": "abstergo-chase-serverbdd",
   "version": "1.0.0",
-  "description": "Serveur API pour la base de données MySQL/MariaDB (Abstergo Chase)",
+  "description": "Serveur API PostgreSQL privé pour application Android (Abstergo Chase)",
   "type": "module",
-  "main": "server.js",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "migrate": "node src/db/run-migrations.js"
   },
   "keywords": [
-    "mysql",
-    "mariadb",
+    "postgresql",
+    "cognito",
     "api",
     "database"
   ],
@@ -19,7 +20,9 @@
   "dependencies": {
     "dotenv": "^16.6.1",
     "express": "^4.21.0",
-    "mysql2": "^3.16.3"
+    "joi": "^17.13.3",
+    "jose": "^5.9.6",
+    "pg": "^8.16.3"
   },
   "engines": {
     "node": ">=18.0.0"
