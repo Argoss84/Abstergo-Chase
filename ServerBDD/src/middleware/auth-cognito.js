@@ -14,8 +14,15 @@ export async function requireAuth(req, _res, next) {
     const token = rawAuth.replace('Bearer ', '').trim();
     const { payload } = await jwtVerify(token, jwks, {
       issuer: env.cognito.issuer,
-      audience: env.cognito.audience,
     });
+
+    const tokenUse = payload.token_use;
+    if (tokenUse === 'id' && payload.aud !== env.cognito.audience) {
+      throw new HttpError(401, 'Audience Cognito invalide');
+    }
+    if (tokenUse === 'access' && payload.client_id !== env.cognito.audience) {
+      throw new HttpError(401, 'Client Cognito invalide');
+    }
 
     req.auth = {
       sub: payload.sub,

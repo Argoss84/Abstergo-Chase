@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BDD Tester - Cognito + ServerBDD</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>BDD Tester</h1>
+      <p class="subtitle">Interface de test ServerBDD avec authentification Cognito</p>
+
+      <section class="card">
+        <h2>Configuration active</h2>
+        <div id="configSummary"></div>
+      </section>
+
+      <section class="card">
+        <h2>1) Authentification Cognito</h2>
+        <div class="row">
+          <button id="loginBtn">Se connecter avec Cognito</button>
+          <button id="logoutBtn" class="secondary">Se deconnecter</button>
+        </div>
+        <p id="authStatus">Statut auth: non connecte</p>
+      </section>
+
+      <section class="card">
+        <h2>2) Appels API</h2>
+        <div class="row wrap">
+          <button data-endpoint="/health">GET /health</button>
+          <button data-endpoint="/api/auth/sync" data-method="POST">POST /api/auth/sync</button>
+          <button data-endpoint="/api/users/me">GET /api/users/me</button>
+          <button data-endpoint="/api/progression/me">GET /api/progression/me</button>
+        </div>
+
+        <h3>Payload JSON (pour POST/PATCH)</h3>
+        <textarea id="payload" rows="6">{}</textarea>
+
+        <h3>Resultat</h3>
+        <pre id="result">En attente d'appel...</pre>
+      </section>
+    </main>
+
+    <script src="./config"></script>
+    <script src="./app.js"></script>
+  </body>
+  </html>
