@@ -1,0 +1,73 @@
+# Déploiement stack Abstergo Chase (depuis ce dossier : docker compose up --build)
+# Contexte de build : répertoire parent du dossier Docker (racine du dépôt).
+
+services:
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?define MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-abstergo}
+      MYSQL_USER: ${MYSQL_USER:-abstergo}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?define MYSQL_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+      - ../ServerBDD/scripts/create_game_replay_tables.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+
+  serverbdd:
+    build:
+      context: ..
+      dockerfile: Docker/Dockerfile.serverbdd
+    restart: unless-stopped
+    ports:
+      - '${SERVERBDD_PUBLISH_PORT:-5175}:5175'
+    environment:
+      PORT: 5175
+      DATABASE_HOST: db
+      DATABASE_PORT: 3306
+      DATABASE_NAME: ${MYSQL_DATABASE:-abstergo}
+      DATABASE_USER: ${MYSQL_USER:-abstergo}
+      DATABASE_PASSWORD: ${MYSQL_PASSWORD:?define MYSQL_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  signaling:
+    build:
+      context: ..
+      dockerfile: Docker/Dockerfile.signaling
+    restart: unless-stopped
+    ports:
+      - '${SIGNALING_PUBLISH_PORT:-5174}:5174'
+    environment:
+      SIGNALING_PORT: 5174
+      BDD_URL: http://serverbdd:5175
+      SOCKET_IO_PATH: /socket.io
+    depends_on:
+      - serverbdd
+
+  web:
+    build:
+      context: ..
+      dockerfile: Docker/Dockerfile.web
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:5175}
+        VITE_SIGNALING_URL: ${VITE_SIGNALING_URL:-http://localhost:5174}
+        VITE_TURN_URL: ${VITE_TURN_URL:-}
+        VITE_TURN_USERNAME: ${VITE_TURN_USERNAME:-}
+        VITE_TURN_CREDENTIAL: ${VITE_TURN_CREDENTIAL:-}
+    restart: unless-stopped
+    ports:
+      - '${WEB_PUBLISH_PORT:-8080}:80'
+    depends_on:
+      - signaling
+      - serverbdd
+
+volumes:
+  db_data:

@@ -1,0 +1,26 @@
+---
+description: Après modifications Flutter, publier uniquement en APK debug sur les émulateurs
+globs: Flutter/**/*
+alwaysApply: false
+---
+
+# Publication APK **debug** sur émulateurs (obligatoire)
+
+Les installations sur émulateurs doivent **toujours** être des builds **debug**, pas release ni profile.
+
+À la **fin** d’une série de modifications sous `Flutter/` (depuis le dossier `Flutter/`), exécuter dans l’ordre :
+
+1. **`flutter build apk --debug`**  
+   - Ne pas utiliser `flutter build apk` sans `--debug`, ni `--release`, ni `--profile` pour cette étape émulateurs.
+
+2. Pour chaque appareil `emulator-*` en état `device` dans `adb devices` :  
+   **`flutter install -d <id> --debug`**  
+   - Le flag **`--debug` est obligatoire** : sans lui, Flutter peut réinstaller une variante déjà présente (ex. release) et ce n’est pas le comportement voulu.
+
+3. **Ouvrir automatiquement l’application après installation** sur chaque émulateur :  
+   - Lancer explicitement l’app `com.abstergo.chase` juste après l’installation (ex. via `adb shell monkey -p com.abstergo.chase -c android.intent.category.LAUNCHER 1`).
+   - Ce lancement automatique est **obligatoire** : ne pas laisser l’app fermée après publication.
+
+Ne pas seulement indiquer les commandes : **les lancer** dans le terminal du projet.
+
+Si aucun émulateur n’est connecté, le signaler clairement.

@@ -1,0 +1,22 @@
+# Front Ionic/Vite (dossier Application/) — build statique + nginx
+# Aucune autre dépendance : l’API et le signaling sont supposés déjà accessibles
+# aux URLs que tu passes en VITE_* (vues depuis le navigateur).
+#
+#   docker compose -f docker-compose.application.yml up --build
+#
+# Puis ouvre http://localhost:8080 (ou APPLICATION_PUBLISH_PORT)
+
+services:
+  application:
+    build:
+      context: ..
+      dockerfile: Docker/Dockerfile.web
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:5175}
+        VITE_SIGNALING_URL: ${VITE_SIGNALING_URL:-http://localhost:5174}
+        VITE_TURN_URL: ${VITE_TURN_URL:-}
+        VITE_TURN_USERNAME: ${VITE_TURN_USERNAME:-}
+        VITE_TURN_CREDENTIAL: ${VITE_TURN_CREDENTIAL:-}
+    restart: unless-stopped
+    ports:
+      - '${APPLICATION_PUBLISH_PORT:-8080}:80'

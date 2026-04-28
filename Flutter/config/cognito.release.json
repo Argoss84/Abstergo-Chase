@@ -1,0 +1,12 @@
+{
+  "COGNITO_REGION": "eu-west-3",
+  "COGNITO_USER_POOL_ID": "eu-west-3_UsmMc4F3e",
+  "COGNITO_CLIENT_ID": "5i7coe0slu9oju2kq7c9ctb2hl",
+  "COGNITO_DOMAIN": "https://eu-west-3usmmc4f3e.auth.eu-west-3.amazoncognito.com",
+  "COGNITO_REDIRECT_URI": "com.abstergo.chase://oauth/callback",
+  "COGNITO_LOGOUT_REDIRECT_URI": "com.abstergo.chase://oauth/signout",
+  "SIGNALING_PRODUCTION_URL": "http://35.181.228.185",
+  "SIGNALING_DEVELOPMENT_URL": "http://10.0.2.2:5174",
+  "SIGNALING_SOCKET_PATH": "/socket.io",
+  "VOICE_STUN_URL": "stun:35.181.228.185:3478"
+}

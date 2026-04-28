@@ -1,0 +1,11 @@
+# API ServerBDD (Express + MySQL)
+FROM node:20-alpine
+WORKDIR /app
+
+COPY ServerBDD/package.json ServerBDD/package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY ServerBDD/ ./
+
+EXPOSE 5175
+CMD ["node", "server.js"]

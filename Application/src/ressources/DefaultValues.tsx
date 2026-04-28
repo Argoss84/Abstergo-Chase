@@ -81,6 +81,13 @@ export const DEFAULT_STUN_SERVER = 'stun:stun.l.google.com:19302';
 
 // ===== URLS PAR DÉFAUT =====
 export const getDefaultWebSocketUrl = () => {
+  const raw = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_SIGNALING_URL : undefined;
+  if (raw) {
+    const s = String(raw).trim();
+    if (s.startsWith('ws://')) return `http://${s.slice(6)}`;
+    if (s.startsWith('wss://')) return `https://${s.slice(7)}`;
+    return s;
+  }
   return window.location.hostname === 'localhost'
     ? 'http://localhost:5174'
     : 'https://ws.abstergochase.fr';

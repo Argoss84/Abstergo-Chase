@@ -1,0 +1,33 @@
+# Signaling + monitoring sur le même réseau Docker
+#
+#   docker compose -f docker-compose.signaling-monitor.yml up --build
+#
+# UI : http://localhost:8090  —  Socket.IO jeu : http://localhost:5174
+
+services:
+  signaling:
+    build:
+      context: ..
+      dockerfile: Docker/Dockerfile.signaling
+    restart: unless-stopped
+    ports:
+      - '${SIGNALING_PUBLISH_PORT:-5174}:5174'
+    environment:
+      SIGNALING_PORT: 5174
+      SOCKET_IO_PATH: /socket.io
+      DISABLE_BDD: ${DISABLE_BDD:-true}
+      BDD_URL: ${BDD_URL:-}
+
+  monitor:
+    build:
+      context: ..
+      dockerfile: Docker/monitor/Dockerfile
+    restart: unless-stopped
+    ports:
+      - '${MONITOR_PUBLISH_PORT:-8090}:8090'
+    environment:
+      PORT: 8090
+      SIGNALING_URL: http://signaling:5174
+      SOCKET_IO_PATH: /socket.io
+    depends_on:
+      - signaling

@@ -1029,7 +1029,7 @@ class GameSessionService {
       reconnectionDelay: SOCKET_RECONNECTION_DELAY,
       reconnectionDelayMax: SOCKET_RECONNECTION_DELAY_MAX,
       timeout: SOCKET_TIMEOUT,
-      transports: ['polling', 'websocket']
+      transports: ['websocket']
     });
     this.socketReady = new Promise((resolve, reject) => {
       if (!this.socket) return reject();

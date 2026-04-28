@@ -1,0 +1,41 @@
+aws_region          = "eu-west-3"
+ecr_repository_name = "abstergo/signaling"
+image_tag           = "latest"
+
+ecs_cluster_name      = "abstergo-signaling-cluster"
+ecs_service_name      = "abstergo-signaling-service"
+task_definition_family = "abstergo-signaling-task"
+
+task_cpu    = 256
+task_memory = 512
+
+container_port  = 5174
+socket_io_path  = "/socket.io"
+memory_only_mode = true
+empty_game_ttl_ms = 300000
+turn_urls         = ""
+turn_secret       = ""
+turn_realm        = ""
+turn_ttl_seconds  = 600
+turn_backend_instance_id = ""
+
+desired_count      = 1
+assign_public_ip   = true
+
+# Optional override (otherwise first security group ID below is used)
+# task_security_group_id = "sg-xxxxxxxxxxxxxxxxx"
+
+nlb_name               = "abstergo-signaling-nlb"
+signaling_listener_port = 80
+nlb_subnet_id          = "subnet-xxxxxxxx"
+
+# Replace with your existing subnet IDs (at least 2 recommended)
+subnet_ids = [
+  "subnet-xxxxxxxx",
+  "subnet-yyyyyyyy"
+]
+
+# Replace with your ECS task security group IDs
+security_group_ids = [
+  "sg-xxxxxxxxxxxxxxxxx"
+]

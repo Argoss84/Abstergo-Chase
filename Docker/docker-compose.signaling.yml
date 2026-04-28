@@ -1,0 +1,20 @@
+# Signalisation WebSocket uniquement (Server/server.js — Socket.IO)
+# Depuis ce dossier :
+#   docker compose -f docker-compose.signaling.yml up --build
+# Avec fichier d’env dédié :
+#   docker compose -f docker-compose.signaling.yml --env-file env.signaling.example up --build
+
+services:
+  signaling:
+    build:
+      context: ..
+      dockerfile: Docker/Dockerfile.signaling
+    restart: unless-stopped
+    ports:
+      - '${SIGNALING_PUBLISH_PORT:-5174}:5174'
+    environment:
+      SIGNALING_PORT: 5174
+      SOCKET_IO_PATH: /socket.io
+      # Par défaut pas de ServerBDD dans ce compose (évite des fetch vers localhost:5175 dans le conteneur)
+      DISABLE_BDD: ${DISABLE_BDD:-true}
+      BDD_URL: ${BDD_URL:-}

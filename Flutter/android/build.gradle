@@ -1,0 +1,36 @@
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.buildDir = '../build'
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+
+subprojects {
+    project.evaluationDependsOn(':app')
+}
+
+gradle.projectsEvaluated {
+    subprojects { subproject ->
+        def androidExt = subproject.extensions.findByName("android")
+        if (androidExt == null) return
+        if (!androidExt.hasProperty("namespace")) return
+        if (androidExt.namespace != null) return
+
+        def manifestFile = file("${subproject.projectDir}/src/main/AndroidManifest.xml")
+        if (!manifestFile.exists()) return
+        def manifestText = manifestFile.getText('UTF-8')
+        def matcher = (manifestText =~ /package="([^"]+)"/)
+        if (matcher.find()) {
+            androidExt.namespace = matcher.group(1)
+        }
+    }
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}

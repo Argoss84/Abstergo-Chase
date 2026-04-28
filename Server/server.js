@@ -1,17 +1,97 @@
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHmac } from 'crypto';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { inspect } from 'util';
 
 // Charger les variables d'environnement depuis le fichier .env
 dotenv.config();
 
 const PORT = process.env.SIGNALING_PORT || 5174;
 const SOCKET_IO_PATH = process.env.SOCKET_IO_PATH || '/socket.io';
-const BDD_URL = process.env.BDD_URL || 'http://localhost:5175';
+const SIGNALING_VERSION = process.env.SIGNALING_VERSION || '2026.04.10';
+const MEMORY_ONLY_MODE =
+  process.env.MEMORY_ONLY_MODE === undefined
+    ? true
+    : process.env.MEMORY_ONLY_MODE === '1' ||
+      /^true$/i.test(process.env.MEMORY_ONLY_MODE || '');
+const LOBBY_TTL_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.LOBBY_TTL_MS || '1800000', 10) || 1_800_000
+);
+const GAME_TTL_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.GAME_TTL_MS || '10800000', 10) || 10_800_000
+);
+const EMPTY_GAME_TTL_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.EMPTY_GAME_TTL_MS || '300000', 10) || 300_000
+);
+const FINISHED_GAME_TTL_MS = Math.max(
+  5_000,
+  Number.parseInt(process.env.FINISHED_GAME_TTL_MS || '30000', 10) || 30_000
+);
+const ENABLE_COST_METRICS =
+  process.env.ENABLE_COST_METRICS === undefined
+    ? true
+    : process.env.ENABLE_COST_METRICS === '1' ||
+      /^true$/i.test(process.env.ENABLE_COST_METRICS || '');
+const ENABLE_SERVER_LOGS =
+  process.env.ENABLE_SERVER_LOGS === '1' ||
+  /^true$/i.test(process.env.ENABLE_SERVER_LOGS || '');
+const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
+const LOG_LEVEL_ORDER = {
+  error: 0,
+  warn: 1,
+  info: 2,
+  debug: 3
+};
+const MESSAGE_DEBUG_SAMPLE_RATE = Math.min(
+  1,
+  Math.max(
+    0,
+    Number.parseFloat(process.env.MESSAGE_DEBUG_SAMPLE_RATE || '0.05') || 0.05
+  )
+);
+const TURN_URLS = (process.env.TURN_URLS || '')
+  .split(',')
+  .map((v) => v.trim())
+  .filter(Boolean);
+const TURN_SECRET = process.env.TURN_SECRET || '';
+const TURN_REALM = process.env.TURN_REALM || '';
+const TURN_TTL_SECONDS = Math.max(
+  60,
+  Number.parseInt(process.env.TURN_TTL_SECONDS || '600', 10) || 600
+);
+const COST_METRICS_INTERVAL_MS = Math.max(
+  5_000,
+  Number.parseInt(process.env.COST_METRICS_INTERVAL_MS || '60000', 10) || 60_000
+);
+const COST_METRICS_HISTORY_SIZE = Math.max(
+  10,
+  Number.parseInt(process.env.COST_METRICS_HISTORY_SIZE || '120', 10) || 120
+);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const RUNTIME_DATA_DIR = path.join(__dirname, 'data');
+const SNAPSHOT_FILE = path.join(RUNTIME_DATA_DIR, 'runtime-state.json');
+const EVENT_LOG_FILE = path.join(RUNTIME_DATA_DIR, 'runtime-events.log');
+const DISCONNECTED_GAME_PLAYER_TTL_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.DISCONNECTED_GAME_PLAYER_TTL_MS || '300000', 10) ||
+    300_000
+);
+const bddDisabled =
+  process.env.DISABLE_BDD === '1' || /^true$/i.test(process.env.DISABLE_BDD || '');
+const BDD_URL = bddDisabled ? null : (process.env.BDD_URL || 'http://localhost:5175');
 
 // Helper : persister vers ServerBDD (replay)
 const persistToBdd = async (path, method, body) => {
+  if (MEMORY_ONLY_MODE) return;
   if (!BDD_URL) return;
   try {
     const res = await fetch(`${BDD_URL}${path}`, {
@@ -37,20 +117,88 @@ const formatRemainingTime = (seconds) => {
   return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
 };
 
+const prettyInspect = (value) =>
+  inspect(value, {
+    depth: 6,
+    colors: false,
+    compact: false,
+    maxArrayLength: 50
+  });
+
 const getRemainingTimeSeconds = (game) => {
   if (!game || typeof game.remainingTimeSeconds !== 'number') {
     return null;
   }
-  // Ne décrémenter en temps réel que si le host a démarré le décompte (started + countdown_started).
-  // Sinon afficher la valeur exacte du host (ex. durée avant le début de partie).
-  if (!game.remainingTimeCountdownActive) {
-    return game.remainingTimeSeconds;
+  // Mode léger: éviter tout calcul temps réel côté serveur.
+  // Le client host reste source de vérité pour le chrono.
+  return game.remainingTimeSeconds;
+};
+
+const COST_METRICS_PATH = '/monitoring/cost';
+let costMetricsLastCpuUsage = process.cpuUsage();
+let costMetricsLastHrtimeNs = process.hrtime.bigint();
+let costMetricsLastTotalMessages = 0;
+let latestCostMetrics = null;
+const costMetricsHistory = [];
+
+const buildCostMetricsSample = () => {
+  const now = new Date();
+  const nowHr = process.hrtime.bigint();
+  const elapsedNs = Number(nowHr - costMetricsLastHrtimeNs);
+  const elapsedMs = Math.max(elapsedNs / 1e6, 1);
+
+  const cpuNow = process.cpuUsage();
+  const cpuUserUs = Math.max(0, cpuNow.user - costMetricsLastCpuUsage.user);
+  const cpuSystemUs = Math.max(0, cpuNow.system - costMetricsLastCpuUsage.system);
+  const cpuTotalMs = (cpuUserUs + cpuSystemUs) / 1000;
+  const cpuCoreCount = Math.max(1, os.cpus()?.length || 1);
+  const cpuPercentOfSingleCore = Math.min(100, (cpuTotalMs / elapsedMs) * 100);
+  const cpuPercentOfMachine = Math.min(
+    100,
+    (cpuTotalMs / (elapsedMs * cpuCoreCount)) * 100
+  );
+
+  const mem = process.memoryUsage();
+  const totalMessages = totalSocketMessages;
+  const messageDelta = Math.max(0, totalMessages - costMetricsLastTotalMessages);
+  const messagesPerSecond = (messageDelta * 1000) / elapsedMs;
+
+  const sample = {
+    timestampIso: now.toISOString(),
+    intervalMs: Math.round(elapsedMs),
+    connectedClients: clients.size,
+    activeLobbies: lobbies.size,
+    activeGames: games.size,
+    socketMessagesTotal: totalMessages,
+    socketMessagesDelta: messageDelta,
+    socketMessagesPerSecond: Number(messagesPerSecond.toFixed(2)),
+    cpu: {
+      coreCount: cpuCoreCount,
+      userMs: Number((cpuUserUs / 1000).toFixed(2)),
+      systemMs: Number((cpuSystemUs / 1000).toFixed(2)),
+      totalMs: Number(cpuTotalMs.toFixed(2)),
+      percentSingleCore: Number(cpuPercentOfSingleCore.toFixed(2)),
+      percentMachine: Number(cpuPercentOfMachine.toFixed(2))
+    },
+    memory: {
+      rssBytes: mem.rss,
+      heapUsedBytes: mem.heapUsed,
+      heapTotalBytes: mem.heapTotal,
+      externalBytes: mem.external,
+      arrayBuffersBytes: mem.arrayBuffers || 0
+    }
+  };
+
+  costMetricsLastCpuUsage = cpuNow;
+  costMetricsLastHrtimeNs = nowHr;
+  costMetricsLastTotalMessages = totalMessages;
+  latestCostMetrics = sample;
+  costMetricsHistory.push(sample);
+  if (costMetricsHistory.length > COST_METRICS_HISTORY_SIZE) {
+    costMetricsHistory.splice(0, costMetricsHistory.length - COST_METRICS_HISTORY_SIZE);
   }
-  const updatedAt = typeof game.remainingTimeUpdatedAt === 'number'
-    ? game.remainingTimeUpdatedAt
-    : Date.now();
-  const elapsedSeconds = Math.floor((Date.now() - updatedAt) / 1000);
-  return Math.max(game.remainingTimeSeconds - elapsedSeconds, 0);
+
+  return sample;
 };
 
 // Fonction pour obtenir les statistiques du serveur
@@ -114,1116 +262,47 @@ const getServerStats = () => ({
     uptime: process.uptime(),
     memoryUsage: process.memoryUsage()
   },
+  costMetrics: {
+    enabled: ENABLE_COST_METRICS,
+    intervalMs: COST_METRICS_INTERVAL_MS,
+    latest: latestCostMetrics
+  },
   logs: logs.slice(-50).reverse() // 50 derniers logs, plus récent en premier
 });
 
-// Créer le serveur HTTP avec un gestionnaire de requêtes
+// HTTP minimal : handshake Engine.IO / Socket.IO uniquement sur SOCKET_IO_PATH
 const server = createServer((req, res) => {
-  // Gérer les requêtes OPTIONS pour CORS
-  if (req.method === 'OPTIONS') {
-    res.writeHead(200, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
-    });
-    res.end();
-    return;
-  }
-
-  // API endpoint pour les statistiques
-  if (req.method === 'GET' && req.url === '/api/stats') {
-    const stats = getServerStats();
-    res.writeHead(200, { 
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*'
-    });
-    res.end(JSON.stringify(stats));
-    return;
-  }
-
-  // API endpoint pour les données d'une game (pour la modal live)
-  const gameMatch = req.url && req.url.match(/^\/api\/stats\/game\/([A-Za-z0-9]+)/);
-  if (req.method === 'GET' && gameMatch) {
-    const code = gameMatch[1].toUpperCase();
-    const game = games.get(code);
-    if (!game) {
-      res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-      res.end(JSON.stringify({ error: 'Game not found', code }));
-      return;
-    }
-    const gameData = {
-      code,
-      hostId: game.hostId,
-      playerCount: game.players.size,
-      socketMessageCount: gameSocketMessageCounts.get(code) || 0,
-      remainingTimeSeconds: getRemainingTimeSeconds(game),
-      remainingTimeUpdatedAt: game.remainingTimeUpdatedAt || null,
-      lastHostState: game.lastHostState || null,
-      lastHostStateAt: game.lastHostStateAt || null,
-      lastHostStateHostId: game.lastHostStateHostId || null,
-      reconnectedPlayerIds: game.reconnectedPlayerIds || {},
-      players: Array.from(game.players.values()).map(player => {
-        const socket = socketsById.get(player.id);
-        return {
-          ...player,
-          socketConnected: Boolean(socket?.connected),
-          status: player.status || 'active'
-        };
-      })
+  const url = req.url || '';
+  if (url === COST_METRICS_PATH || url.startsWith(`${COST_METRICS_PATH}?`)) {
+    const requestUrl = new URL(url, 'http://localhost');
+    const includeHistory = requestUrl.searchParams.get('history') === '1';
+    const payload = {
+      enabled: ENABLE_COST_METRICS,
+      intervalMs: COST_METRICS_INTERVAL_MS,
+      latest: latestCostMetrics,
+      ...(includeHistory
+        ? { history: costMetricsHistory.slice(-COST_METRICS_HISTORY_SIZE) }
+        : {})
     };
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-    res.end(JSON.stringify(gameData));
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(payload));
     return;
   }
-
-  // API: envoyer une notification à un joueur (clientId)
-  if (req.method === 'POST' && req.url === '/api/notify/player') {
-    let body = '';
-    req.on('data', (chunk) => { body += chunk; });
-    req.on('end', () => {
-      try {
-        const data = JSON.parse(body || '{}');
-        const clientId = data.clientId;
-        const message = data.message != null ? String(data.message) : '';
-        const title = data.title != null ? String(data.title) : undefined;
-        if (!clientId) {
-          res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-          res.end(JSON.stringify({ success: false, error: 'clientId requis' }));
-          return;
-        }
-        const socket = socketsById.get(clientId);
-        if (!socket || !socket.connected) {
-          res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-          res.end(JSON.stringify({ success: false, error: 'Joueur introuvable ou déconnecté' }));
-          return;
-        }
-        send(socket, { type: 'admin:notification', payload: { message, title, timestamp: Date.now() } });
-        log(`[NOTIFICATION] Envoyée au joueur ${clientId.substring(0, 8)}...`);
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({ success: true }));
-      } catch (e) {
-        res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({ success: false, error: e.message }));
-      }
-    });
+  if (
+    url === SOCKET_IO_PATH ||
+    url.startsWith(`${SOCKET_IO_PATH}/`) ||
+    url.startsWith(`${SOCKET_IO_PATH}?`)
+  ) {
     return;
   }
-
-  // API: envoyer une notification à tous les joueurs d'une partie
-  if (req.method === 'POST' && req.url === '/api/notify/game') {
-    let body = '';
-    req.on('data', (chunk) => { body += chunk; });
-    req.on('end', () => {
-      try {
-        const data = JSON.parse(body || '{}');
-        const gameCode = data.gameCode != null ? String(data.gameCode).toUpperCase() : '';
-        const message = data.message != null ? String(data.message) : '';
-        const title = data.title != null ? String(data.title) : undefined;
-        if (!gameCode) {
-          res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-          res.end(JSON.stringify({ success: false, error: 'gameCode requis' }));
-          return;
-        }
-        const game = games.get(gameCode);
-        if (!game) {
-          res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-          res.end(JSON.stringify({ success: false, error: 'Partie introuvable' }));
-          return;
-        }
-        let count = 0;
-        game.players.forEach((p) => {
-          const s = socketsById.get(p.id);
-          if (s && s.connected) {
-            send(s, { type: 'admin:notification', payload: { message, title, timestamp: Date.now() } });
-            count++;
-          }
-        });
-        log(`[NOTIFICATION] Envoyée à ${count} joueur(s) de la partie ${gameCode}`);
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({ success: true, count }));
-      } catch (e) {
-        res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-        res.end(JSON.stringify({ success: false, error: e.message }));
-      }
-    });
-    return;
-  }
-
-  // Page de monitoring accessible via HTTP
-  if (req.method === 'GET') {
-    const stats = getServerStats();
-
-    const protoHeader = req.headers['x-forwarded-proto'];
-    const protocol = Array.isArray(protoHeader) ? protoHeader[0] : protoHeader || 'http';
-
-    const html = `
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Serveur WebRTC - Monitoring</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      padding: 20px;
-      min-height: 100vh;
-    }
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-    h1 {
-      color: white;
-      text-align: center;
-      margin-bottom: 30px;
-      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-    }
-    .card {
-      background: white;
-      border-radius: 10px;
-      padding: 20px;
-      margin-bottom: 20px;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .card h2 {
-      color: #667eea;
-      margin-bottom: 15px;
-      border-bottom: 2px solid #667eea;
-      padding-bottom: 10px;
-    }
-    .stat-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 15px;
-      margin-bottom: 20px;
-    }
-    .stat-box {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 20px;
-      border-radius: 8px;
-      text-align: center;
-    }
-    .stat-box .number {
-      font-size: 2.5em;
-      font-weight: bold;
-      margin-bottom: 5px;
-    }
-    .stat-box .label {
-      font-size: 0.9em;
-      opacity: 0.9;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 10px;
-    }
-    th, td {
-      padding: 12px;
-      text-align: left;
-      border-bottom: 1px solid #e0e0e0;
-      color: #000;
-    }
-    th {
-      background-color: #f5f5f5;
-      font-weight: 600;
-      color: #667eea;
-    }
-    tr:hover {
-      background-color: #f9f9f9;
-    }
-    .status {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 0.85em;
-      font-weight: 600;
-      animation: fadeIn 0.3s ease-in;
-    }
-    .status.connected {
-      background-color: #4caf50;
-      color: white;
-      box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
-    }
-    .status.disconnected {
-      background-color: #f44336;
-      color: white;
-    }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: scale(0.8); }
-      to { opacity: 1; transform: scale(1); }
-    }
-    .info-item {
-      display: flex;
-      justify-content: space-between;
-      padding: 8px 0;
-      border-bottom: 1px solid #e0e0e0;
-    }
-    .info-item:last-child {
-      border-bottom: none;
-    }
-    .info-label {
-      font-weight: 600;
-      color: #555;
-    }
-    .info-value {
-      color: #000;
-    }
-    .refresh-btn {
-      position: fixed;
-      bottom: 30px;
-      right: 30px;
-      background: #667eea;
-      color: white;
-      border: none;
-      padding: 15px 30px;
-      border-radius: 50px;
-      font-size: 1em;
-      font-weight: 600;
-      cursor: pointer;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-      transition: all 0.3s;
-    }
-    .refresh-btn:hover {
-      background: #764ba2;
-      transform: translateY(-2px);
-      box-shadow: 0 6px 8px rgba(0,0,0,0.3);
-    }
-    .no-data {
-      text-align: center;
-      color: #999;
-      padding: 20px;
-      font-style: italic;
-    }
-    .player-list {
-      margin-left: 20px;
-      font-size: 0.9em;
-      color: #000;
-    }
-    .reconnection-badge {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 0.85em;
-      font-weight: 600;
-      background-color: #ff9800;
-      color: white;
-      margin-left: 8px;
-    }
-    .logs-container {
-      background: #1e1e1e;
-      border-radius: 8px;
-      padding: 15px;
-      max-height: 500px;
-      overflow-y: auto;
-      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-      font-size: 0.85em;
-    }
-    .log-entry {
-      color: #d4d4d4;
-      padding: 4px 0;
-      border-bottom: 1px solid #333;
-      line-height: 1.6;
-    }
-    .log-entry:last-child {
-      border-bottom: none;
-    }
-    .log-entry:hover {
-      background-color: #2d2d2d;
-    }
-    .log-connexion { color: #4ec9b0; }
-    .log-message { color: #9cdcfe; }
-    .log-lobby { color: #4caf50; }
-    .log-erreur { color: #f44336; }
-    .log-webrtc { color: #ce9178; }
-    .log-notification { color: #9c27b0; }
-    .log-deconnexion { color: #ff9800; }
-    .log-avertissement { color: #ffc107; }
-    .logs-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 10px;
-    }
-    .logs-count {
-      background: #667eea;
-      color: white;
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 0.9em;
-    }
-    .live-badge {
-      display: inline-block;
-      background: #f44336;
-      color: white;
-      padding: 6px 12px;
-      border-radius: 20px;
-      font-size: 0.9em;
-      font-weight: 600;
-      margin-left: 15px;
-      animation: pulse 2s infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.7; }
-    }
-    .modal-overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.5);
-      z-index: 1000;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
-    .modal-overlay.open { display: flex; }
-    .modal-box {
-      background: white;
-      border-radius: 12px;
-      max-width: 720px;
-      width: 100%;
-      max-height: 90vh;
-      overflow: hidden;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-    }
-    .modal-header {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 14px 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .modal-header h3 { margin: 0; font-size: 1.05em; }
-    .modal-close {
-      background: rgba(255,255,255,0.25);
-      border: none;
-      color: white;
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      cursor: pointer;
-      font-size: 1.2em;
-      line-height: 1;
-    }
-    .modal-close:hover { background: rgba(255,255,255,0.4); }
-    .modal-body {
-      padding: 16px 20px;
-      overflow-y: auto;
-      max-height: calc(90vh - 54px);
-      font-size: 0.9em;
-    }
-    .modal-body .loading { color: #667eea; }
-    .modal-body .error { color: #f44336; }
-    .dash-kpis {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 10px;
-      margin-bottom: 16px;
-    }
-    @media (max-width: 500px) {
-      .dash-kpis { grid-template-columns: repeat(2, 1fr); }
-      .modal-box { max-width: 100%; }
-    }
-    .dash-kpi {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 10px 12px;
-      border-radius: 8px;
-      text-align: center;
-    }
-    .dash-kpi .dash-kpi-val { font-size: 1.1em; font-weight: 700; }
-    .dash-kpi .dash-kpi-lbl { font-size: 0.75em; opacity: 0.9; }
-    .dash-section {
-      margin-bottom: 14px;
-    }
-    .dash-section h4 {
-      color: #667eea;
-      margin: 0 0 8px 0;
-      padding-bottom: 4px;
-      border-bottom: 1px solid #e0e0e0;
-      font-size: 0.95em;
-    }
-    .dash-section table { width: 100%; font-size: 0.88em; }
-    .dash-section th, .dash-section td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #eee; }
-    .dash-section th { background: #f5f5f5; color: #555; }
-    .dash-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; }
-    .dash-badge.phase-lobby { background: #e3f2fd; color: #1565c0; }
-    .dash-badge.phase-start { background: #fff3e0; color: #e65100; }
-    .dash-badge.phase-running { background: #e8f5e9; color: #2e7d32; }
-    .dash-badge.phase-done { background: #fce4ec; color: #c2185b; }
-    .dash-badge.role-agent { background: #e3f2fd; color: #0d47a1; }
-    .dash-badge.role-rogue { background: #ffebee; color: #b71c1c; }
-    .dash-badge.ok { background: #e8f5e9; color: #2e7d32; }
-    .dash-badge.no { background: #ffebee; color: #c62828; }
-    .dash-badge.socket-ok { background: #e8f5e9; color: #1b5e20; }
-    .dash-badge.socket-ko { background: #ffebee; color: #b71c1c; }
-    .dash-muted { color: #999; font-size: 0.9em; }
-    .btn-game-data {
-      background: #667eea;
-      color: white;
-      border: none;
-      padding: 6px 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 0.85em;
-    }
-    .btn-game-data:hover { background: #764ba2; }
-    .dash-section textarea, .dash-section input[type="text"] { width: 100%; max-width: 100%; box-sizing: border-box; padding: 8px; margin: 4px 0; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 0.9em; }
-    .dash-section #gameModalNotifyBtn, .notify-form button { margin-top: 6px; }
-    .notify-form { margin-top: 12px; }
-    .notify-form select { width: 100%; padding: 8px; margin: 4px 0; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 0.9em; box-sizing: border-box; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>🚀 Serveur de Signalisation WebRTC - Monitoring <span class="live-badge">🔴 LIVE</span></h1>
-    
-    <div class="stat-grid">
-      <div class="stat-box">
-        <div class="number">${stats.connectedClients}</div>
-        <div class="label">Clients Connectés</div>
-      </div>
-      <div class="stat-box">
-        <div class="number">${stats.activeLobbies}</div>
-        <div class="label">Lobbies Actifs</div>
-      </div>
-      <div class="stat-box">
-        <div class="number">${stats.activeGames}</div>
-        <div class="label">Games en cours</div>
-      </div>
-      <div class="stat-box">
-        <div class="number">${stats.totalSocketMessages}</div>
-        <div class="label">Messages Socket Totaux</div>
-      </div>
-      <div class="stat-box">
-        <div class="number">${Math.floor(stats.serverInfo.uptime / 60)}m</div>
-        <div class="label">Temps d'Activité</div>
-      </div>
-      <div class="stat-box">
-        <div class="number">${Math.round(stats.serverInfo.memoryUsage.heapUsed / 1024 / 1024)}MB</div>
-        <div class="label">Mémoire Utilisée</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>📡 Informations Serveur</h2>
-      <div class="info-item">
-        <span class="info-label">Port:</span>
-        <span class="info-value">${stats.serverInfo.port}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">URL Socket.io:</span>
-        <span class="info-value">${protocol}://${req.headers.host}${SOCKET_IO_PATH}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">URL HTTP:</span>
-        <span class="info-value">${protocol}://${req.headers.host}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">Version Node.js:</span>
-        <span class="info-value">${stats.serverInfo.nodeVersion}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">Plateforme:</span>
-        <span class="info-value">${stats.serverInfo.platform}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">Hôte de la Requête:</span>
-        <span class="info-value">${req.headers.host}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">User Agent:</span>
-        <span class="info-value">${req.headers['user-agent'] || 'N/A'}</span>
-      </div>
-      <div class="info-item">
-        <span class="info-label">IP Client:</span>
-        <span class="info-value">${req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'N/A'}</span>
-      </div>
-    </div>
-
-    <div class="card" id="clientsCard">
-      <h2>👥 Clients Socket.io Connectés</h2>
-      ${stats.clients.length > 0 ? `
-        <table>
-          <thead>
-            <tr>
-              <th>Client ID</th>
-              <th>Lobby</th>
-              <th>Game</th>
-              <th>Statut</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${stats.clients.map(client => `
-              <tr>
-                <td><code>${client.clientId.substring(0, 8)}...</code></td>
-                <td>${client.lobbyCode}</td>
-                <td>${client.gameCode}</td>
-                <td>
-                  <span class="status ${client.connected ? 'connected' : 'disconnected'}">
-                    ${client.connected ? '🟢 Connecté' : '🔴 Déconnecté'}
-                  </span>
-                </td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      ` : '<div class="no-data">Aucun client connecté actuellement</div>'}
-    </div>
-
-    <div class="card" id="lobbiesCard">
-      <h2>🎮 Lobbies Actifs</h2>
-      ${stats.lobbies.length > 0 ? `
-        <table>
-          <thead>
-            <tr>
-              <th>Code Lobby</th>
-              <th>Host ID</th>
-              <th>Joueurs</th>
-              <th>Messages</th>
-              <th>Détails</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${stats.lobbies.map(lobby => `
-              <tr>
-                <td>
-                  <strong>${lobby.code}</strong>
-                  ${lobby.hostDisconnected ? `<span class="reconnection-badge">⏱️ ${lobby.reconnectionTimeout}s</span>` : ''}
-                  ${lobby.hostAway ? `<span class="reconnection-badge" style="background-color: #dc3545;">🔴 ${lobby.awayTimeout}s</span>` : ''}
-                </td>
-                <td><code>${lobby.hostId.substring(0, 8)}...</code></td>
-                <td>${lobby.playerCount}</td>
-                <td>${lobby.socketMessageCount}</td>
-                <td>
-                  <div class="player-list">
-                    ${lobby.players.map(p => {
-                      const isDisconnected = p.status === 'disconnected' || !p.socketConnected;
-                      const isAway = p.status === 'away';
-                      const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
-                      const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
-                      const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
-                      const roleLabel = p.role ? ` [${p.role}]` : ' [n/a]';
-                      return `
-                        <div style="margin: 2px 0; opacity: ${opacity};">
-                          ${icon} ${p.name}${roleLabel} ${p.isHost ? '👑' : ''} ${badge}
-                        </div>
-                      `;
-                    }).join('')}
-                  </div>
-                </td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      ` : '<div class="no-data">Aucun lobby actif actuellement</div>'}
-    </div>
-
-    <div class="card" id="gamesCard">
-      <h2>🎯 Games en cours</h2>
-      ${stats.games.length > 0 ? `
-        <table>
-          <thead>
-            <tr>
-              <th>Code Game</th>
-              <th>Host ID</th>
-              <th>Joueurs</th>
-              <th>Messages</th>
-              <th>Temps restant</th>
-              <th>Détails</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${stats.games.map(game => `
-              <tr>
-                <td><strong>${game.code}</strong></td>
-                <td><code>${game.hostId.substring(0, 8)}...</code></td>
-                <td>${game.playerCount}</td>
-                <td>${game.socketMessageCount}</td>
-                <td><strong>${formatRemainingTime(game.remainingTimeSeconds)}</strong></td>
-                <td>
-                  <div class="player-list">
-                    ${game.players.map(p => {
-                      const isDisconnected = p.status === 'disconnected' || !p.socketConnected;
-                      const isAway = p.status === 'away';
-                      const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
-                      const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
-                      const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
-                      const roleLabel = p.role ? ` [${p.role}]` : ' [n/a]';
-                      return `
-                        <div style="margin: 2px 0; opacity: ${opacity};">
-                          ${icon} ${p.name}${roleLabel} ${p.isHost ? '👑' : ''} ${badge}
-                        </div>
-                      `;
-                    }).join('')}
-                  </div>
-                </td>
-                <td><button type="button" class="btn-game-data" data-game-code="${game.code}">📊 Tableau de bord</button></td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      ` : '<div class="no-data">Aucune game en cours</div>'}
-    </div>
-
-    <div class="card" id="notifyCard">
-      <h2>📤 Envoi de notifications</h2>
-      <p style="margin-bottom:12px;color:#555;font-size:0.9em;">Envoyer une notification aux clients via le canal de signalisation (Socket.io). Les clients reçoivent un message de type <code>admin:notification</code> avec <code>payload: { message, title?, timestamp }</code>.</p>
-      <div class="notify-form">
-        <h4 style="color:#667eea;margin:0 0 8px 0;font-size:0.95em;">À un joueur</h4>
-        <select id="notifyPlayerSelect"><option value="">— Choisir un joueur —</option></select>
-        <textarea id="notifyPlayerMsg" rows="2" placeholder="Message…"></textarea>
-        <input type="text" id="notifyPlayerTitle" placeholder="Titre (optionnel)" />
-        <button type="button" id="notifyPlayerBtn" class="btn-game-data">Envoyer au joueur</button>
-      </div>
-      <div class="notify-form">
-        <h4 style="color:#667eea;margin:0 0 8px 0;font-size:0.95em;">À tous les joueurs d'une partie</h4>
-        <select id="notifyGameSelect"><option value="">— Choisir une partie —</option></select>
-        <textarea id="notifyGameMsg" rows="2" placeholder="Message…"></textarea>
-        <input type="text" id="notifyGameTitle" placeholder="Titre (optionnel)" />
-        <button type="button" id="notifyGameBtn" class="btn-game-data">Envoyer à la partie</button>
-      </div>
-    </div>
-
-    <div class="modal-overlay" id="gameModal">
-      <div class="modal-box">
-        <div class="modal-header">
-          <h3 id="gameModalTitle">Tableau de bord — </h3>
-          <button type="button" class="modal-close" id="gameModalClose" aria-label="Fermer">×</button>
-        </div>
-        <div class="modal-body" id="gameModalBody">
-          <div id="gameModalDashboard"><span class="loading">Chargement…</span></div>
-          <div class="dash-section" id="gameModalNotify">
-            <h4>📤 Envoyer une notification à tous les joueurs</h4>
-            <textarea id="gameModalNotifyMsg" rows="2" placeholder="Message…"></textarea>
-            <input type="text" id="gameModalNotifyTitle" placeholder="Titre (optionnel)" />
-            <button type="button" id="gameModalNotifyBtn">Envoyer</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card" id="logsCard">
-      <div class="logs-header">
-        <h2>📋 Logs Serveur</h2>
-        <span class="logs-count">${stats.logs.length} logs</span>
-      </div>
-      <div class="logs-container">
-        ${stats.logs.length > 0 ? 
-          stats.logs.map(log => {
-            const message = log.message;
-            let className = 'log-entry';
-            
-            if (message.includes('[CONNEXION]')) className += ' log-connexion';
-            else if (message.includes('[MESSAGE')) className += ' log-message';
-            else if (message.includes('[LOBBY CRÉÉ]') || message.includes('[LOBBY REJOINT]')) className += ' log-lobby';
-            else if (message.includes('[ERREUR]')) className += ' log-erreur';
-            else if (message.includes('[WEBRTC]')) className += ' log-webrtc';
-            else if (message.includes('[NOTIFICATION]')) className += ' log-notification';
-            else if (message.includes('[DÉCONNEXION]') || message.includes('[LOBBY FERMÉ]') || message.includes('[JOUEUR PARTI]')) className += ' log-deconnexion';
-            else if (message.includes('[AVERTISSEMENT]')) className += ' log-avertissement';
-            
-            return `<div class="${className}">${message}</div>`;
-          }).join('')
-        : '<div class="no-data">Aucun log disponible</div>'}
-      </div>
-    </div>
-
-  </div>
-
-  <script>
-    let lastLogCount = 0;
-    let gameModalPollId = null;
-
-    const formatRemainingTime = (seconds) => {
-      if (seconds === null || seconds === undefined || Number.isNaN(seconds)) {
-        return 'n/a';
-      }
-      const safeSeconds = Math.max(0, Math.floor(seconds));
-      const minutes = Math.floor(safeSeconds / 60);
-      const remainingSeconds = safeSeconds % 60;
-      return minutes + ':' + String(remainingSeconds).padStart(2, '0');
-    };
-    
-    // Fonction pour mettre à jour les statistiques
-    async function updateStats() {
-      try {
-        const response = await fetch('/api/stats');
-        const stats = await response.json();
-        
-        // Mettre à jour les statistiques principales
-        document.querySelectorAll('.stat-box')[0].querySelector('.number').textContent = stats.connectedClients;
-        document.querySelectorAll('.stat-box')[1].querySelector('.number').textContent = stats.activeLobbies;
-        document.querySelectorAll('.stat-box')[2].querySelector('.number').textContent = stats.activeGames;
-        document.querySelectorAll('.stat-box')[3].querySelector('.number').textContent = stats.totalSocketMessages;
-        document.querySelectorAll('.stat-box')[4].querySelector('.number').textContent = Math.floor(stats.serverInfo.uptime / 60) + 'm';
-        document.querySelectorAll('.stat-box')[5].querySelector('.number').textContent = Math.round(stats.serverInfo.memoryUsage.heapUsed / 1024 / 1024) + 'MB';
-        
-        // Mettre à jour les clients
-        const clientsCard = document.getElementById('clientsCard');
-        if (stats.clients.length > 0) {
-          const clientsHTML = \`
-            <table>
-              <thead>
-                <tr>
-                  <th>Client ID</th>
-                  <th>Lobby</th>
-                  <th>Game</th>
-                  <th>Statut</th>
-                </tr>
-              </thead>
-              <tbody>
-                \${stats.clients.map(client => \`
-                  <tr>
-                    <td><code>\${client.clientId.substring(0, 8)}...</code></td>
-                    <td>\${client.lobbyCode}</td>
-                    <td>\${client.gameCode}</td>
-                    <td>
-                      <span class="status \${client.connected ? 'connected' : 'disconnected'}">
-                        \${client.connected ? '🟢 Connecté' : '🔴 Déconnecté'}
-                      </span>
-                    </td>
-                  </tr>
-                \`).join('')}
-              </tbody>
-            </table>
-          \`;
-          clientsCard.innerHTML = '<h2>👥 Clients Socket.io Connectés</h2>' + clientsHTML;
-        } else {
-          clientsCard.innerHTML = '<h2>👥 Clients Socket.io Connectés</h2><div class="no-data">Aucun client connecté actuellement</div>';
-        }
-        
-        // Mettre à jour les lobbies
-        const lobbiesCard = document.getElementById('lobbiesCard');
-        if (stats.lobbies.length > 0) {
-          const lobbiesHTML = \`
-            <table>
-              <thead>
-                <tr>
-                  <th>Code Lobby</th>
-                  <th>Host ID</th>
-                  <th>Joueurs</th>
-                  <th>Messages</th>
-                  <th>Détails</th>
-                </tr>
-              </thead>
-              <tbody>
-                \${stats.lobbies.map(lobby => \`
-                  <tr>
-                    <td>
-                      <strong>\${lobby.code}</strong>
-                      \${lobby.hostDisconnected ? \`<span class="reconnection-badge">⏱️ \${lobby.reconnectionTimeout}s</span>\` : ''}
-                      \${lobby.hostAway ? \`<span class="reconnection-badge" style="background-color: #dc3545;">🔴 \${lobby.awayTimeout}s</span>\` : ''}
-                    </td>
-                    <td><code>\${lobby.hostId.substring(0, 8)}...</code></td>
-                    <td>\${lobby.playerCount}</td>
-                    <td>\${lobby.socketMessageCount}</td>
-                    <td>
-                      <div class="player-list">
-                        \${lobby.players.map(p => {
-                          const isDisconnected = p.status === 'disconnected' || !p.socketConnected;
-                          const isAway = p.status === 'away';
-                          const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
-                          const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
-                          const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
-                          const roleLabel = p.role ? \` [\${p.role}]\` : ' [n/a]';
-                          return \`
-                            <div style="margin: 2px 0; opacity: \${opacity};">
-                              \${icon} \${p.name}\${roleLabel} \${p.isHost ? '👑' : ''} \${badge}
-                            </div>
-                          \`;
-                        }).join('')}
-                      </div>
-                    </td>
-                  </tr>
-                \`).join('')}
-              </tbody>
-            </table>
-          \`;
-          lobbiesCard.innerHTML = '<h2>🎮 Lobbies Actifs</h2>' + lobbiesHTML;
-        } else {
-          lobbiesCard.innerHTML = '<h2>🎮 Lobbies Actifs</h2><div class="no-data">Aucun lobby actif actuellement</div>';
-        }
-
-        // Mettre à jour les games
-        const gamesCard = document.getElementById('gamesCard');
-        if (stats.games.length > 0) {
-          const gamesHTML = \`
-            <table>
-              <thead>
-                <tr>
-                  <th>Code Game</th>
-                  <th>Host ID</th>
-                  <th>Joueurs</th>
-                  <th>Messages</th>
-                  <th>Temps restant</th>
-                  <th>Détails</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                \${stats.games.map(game => \`
-                  <tr>
-                    <td><strong>\${game.code}</strong></td>
-                    <td><code>\${game.hostId.substring(0, 8)}...</code></td>
-                    <td>\${game.playerCount}</td>
-                    <td>\${game.socketMessageCount}</td>
-                    <td><strong>\${formatRemainingTime(game.remainingTimeSeconds)}</strong></td>
-                    <td>
-                      <div class="player-list">
-                        \${game.players.map(p => {
-                          const isDisconnected = p.status === 'disconnected' || !p.socketConnected;
-                          const isAway = p.status === 'away';
-                          const icon = isDisconnected ? '🔴' : (isAway ? '🟠' : '🟢');
-                          const badge = isDisconnected ? '❌' : (isAway ? '💤' : '');
-                          const opacity = isDisconnected ? '0.4' : (isAway ? '0.6' : '1');
-                          const roleLabel = p.role ? \` [\${p.role}]\` : ' [n/a]';
-                          return \`
-                            <div style="margin: 2px 0; opacity: \${opacity};">
-                              \${icon} \${p.name}\${roleLabel} \${p.isHost ? '👑' : ''} \${badge}
-                            </div>
-                          \`;
-                        }).join('')}
-                      </div>
-                    </td>
-                    <td><button type="button" class="btn-game-data" data-game-code="\${game.code}">📊 Tableau de bord</button></td>
-                  </tr>
-                \`).join('')}
-              </tbody>
-            </table>
-          \`;
-          gamesCard.innerHTML = '<h2>🎯 Games en cours</h2>' + gamesHTML;
-        } else {
-          gamesCard.innerHTML = '<h2>🎯 Games en cours</h2><div class="no-data">Aucune game en cours</div>';
-        }
-
-        // Mettre à jour les listes du formulaire de notifications
-        var selPlayer = document.getElementById('notifyPlayerSelect');
-        if (selPlayer) {
-          var curPlayer = selPlayer.value;
-          selPlayer.innerHTML = '<option value="">— Choisir un joueur —</option>' + (stats.clients || []).map(function(c) { return '<option value="' + c.clientId + '">' + c.clientId.substring(0, 8) + '... ' + (c.lobbyCode || '—') + ' / ' + (c.gameCode || '—') + '</option>'; }).join('');
-          if (curPlayer && (stats.clients || []).some(function(c) { return c.clientId === curPlayer; })) selPlayer.value = curPlayer;
-        }
-        var selGame = document.getElementById('notifyGameSelect');
-        if (selGame) {
-          var curGame = selGame.value;
-          selGame.innerHTML = '<option value="">— Choisir une partie —</option>' + (stats.games || []).map(function(g) { return '<option value="' + g.code + '">' + g.code + ' (' + g.playerCount + ' joueurs)</option>'; }).join('');
-          if (curGame && (stats.games || []).some(function(g) { return g.code === curGame; })) selGame.value = curGame;
-        }
-        
-        // Mettre à jour les logs seulement si nécessaire
-        if (stats.logs.length !== lastLogCount) {
-          lastLogCount = stats.logs.length;
-          const logsCard = document.getElementById('logsCard');
-          const logsContainer = logsCard.querySelector('.logs-container');
-          const logsCount = logsCard.querySelector('.logs-count');
-          logsCount.textContent = stats.logs.length + ' logs';
-          
-          if (stats.logs.length > 0) {
-            const logsHTML = stats.logs.map(log => {
-              const message = log.message;
-              let className = 'log-entry';
-              
-              if (message.includes('[CONNEXION]')) className += ' log-connexion';
-              else if (message.includes('[MESSAGE')) className += ' log-message';
-              else if (message.includes('[LOBBY CRÉÉ]') || message.includes('[LOBBY REJOINT]')) className += ' log-lobby';
-              else if (message.includes('[ERREUR]')) className += ' log-erreur';
-              else if (message.includes('[WEBRTC]')) className += ' log-webrtc';
-              else if (message.includes('[NOTIFICATION]')) className += ' log-notification';
-              else if (message.includes('[DÉCONNEXION]') || message.includes('[LOBBY FERMÉ]') || message.includes('[JOUEUR PARTI]')) className += ' log-deconnexion';
-              else if (message.includes('[AVERTISSEMENT]')) className += ' log-avertissement';
-              
-              return \`<div class="\${className}">\${message}</div>\`;
-            }).join('');
-            
-            logsContainer.innerHTML = logsHTML;
-          } else {
-            logsContainer.innerHTML = '<div class="no-data">Aucun log disponible</div>';
-          }
-          
-          // Auto-scroll vers le haut (plus récent en premier)
-          logsContainer.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-      } catch (error) {
-        console.error('Erreur lors de la mise à jour des stats:', error);
-      }
-    }
-
-    function renderDashboard(data) {
-      if (data.error) return '<p class="error">' + (data.error || 'Partie introuvable') + '</p>';
-      var gd = (data.lastHostState && data.lastHostState.gameDetails) ? data.lastHostState.gameDetails : null;
-      var hostPlayers = (data.lastHostState && data.lastHostState.players) ? data.lastHostState.players : [];
-      var props = (data.lastHostState && data.lastHostState.props) ? data.lastHostState.props : [];
-      var hostStateAt = data.lastHostStateAt;
-      var phase = 'Convergence', phaseClass = 'dash-badge phase-lobby', phaseExtra = '';
-      if (gd && gd.winner_type) { phase = 'Terminée'; phaseClass = 'dash-badge phase-done'; phaseExtra = ' · ' + (gd.winner_type || '').toUpperCase(); }
-      else if (gd && gd.started && gd.countdown_started) { phase = 'En cours'; phaseClass = 'dash-badge phase-running'; }
-      else if (gd && gd.game_starting && !gd.started) { phase = 'Démarrage'; phaseClass = 'dash-badge phase-start'; }
-      var t = data.remainingTimeSeconds;
-      if (t == null && gd) t = gd.remaining_time;
-      var timeStr = (t != null && !isNaN(t)) ? (Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0')) : 'n/a';
-      var cap = 0, total = (props && props.length) || 0;
-      if (props) for (var i = 0; i < props.length; i++) if ((props[i].state || '').toUpperCase() === 'CAPTURED') cap++;
-      var objStr = total ? cap + ' / ' + total : '—';
-      var html = '<div class="dash-kpis">';
-      html += '<div class="dash-kpi"><div class="dash-kpi-val"><span class="' + phaseClass + '">' + phase + '</span>' + phaseExtra + '</div><div class="dash-kpi-lbl">Phase</div></div>';
-      html += '<div class="dash-kpi"><div class="dash-kpi-val">' + timeStr + '</div><div class="dash-kpi-lbl">Temps restant</div></div>';
-      html += '<div class="dash-kpi"><div class="dash-kpi-val">' + (data.playerCount || 0) + '</div><div class="dash-kpi-lbl">Joueurs</div></div>';
-      html += '<div class="dash-kpi"><div class="dash-kpi-val">' + objStr + '</div><div class="dash-kpi-lbl">Objectifs</div></div>';
-      html += '</div>';
-      html += '<div class="dash-section"><h4>👥 Joueurs</h4><table><thead><tr><th>Joueur</th><th>Rôle</th><th>Zone départ</th><th>Prêt</th><th>Socket</th><th>Statut</th></tr></thead><tbody>';
-      var pl = data.players || [];
-      for (var i = 0; i < pl.length; i++) {
-        var p = pl[i];
-        var hp = null;
-        for (var j = 0; j < hostPlayers.length; j++) if (hostPlayers[j].id_player === p.id) { hp = hostPlayers[j]; break; }
-        if (!hp && p.isHost && data.lastHostStateHostId) {
-          for (var j = 0; j < hostPlayers.length; j++) if (String(hostPlayers[j].id_player) === String(data.lastHostStateHostId)) { hp = hostPlayers[j]; break; }
-        }
-        if (!hp && data.reconnectedPlayerIds) {
-          for (var oldId in data.reconnectedPlayerIds) if (data.reconnectedPlayerIds[oldId] === p.id) {
-            for (var j = 0; j < hostPlayers.length; j++) if (String(hostPlayers[j].id_player) === String(oldId)) { hp = hostPlayers[j]; break; }
-            if (hp) break;
-          }
-        }
-        var role = (hp && hp.role) ? hp.role : (p.role || '—');
-        var roleCl = (role + '').toUpperCase() === 'AGENT' ? 'dash-badge role-agent' : ((role + '').toUpperCase() === 'ROGUE' ? 'dash-badge role-rogue' : '');
-        var zone = (hp && hp.isInStartZone === true) ? '<span class="dash-badge ok">Oui</span>' : ((hp && hp.isInStartZone === false) ? '<span class="dash-badge no">Non</span>' : '—');
-        var ready = (hp && hp.hasAcknowledgedStart === true) ? '<span class="dash-badge ok">Oui</span>' : '—';
-        var sock = p.socketConnected ? '<span class="dash-badge socket-ok">Connecté</span>' : '<span class="dash-badge socket-ko">Déco</span>';
-        var name = (p.name || p.id || '—').substring(0, 20) + (p.isHost ? ' 👑' : '');
-        html += '<tr><td>' + name + '</td><td>' + (roleCl ? '<span class="' + roleCl + '">' + role + '</span>' : role) + '</td><td>' + zone + '</td><td>' + ready + '</td><td>' + sock + '</td><td>' + (p.status || 'actif') + '</td></tr>';
-      }
-      html += '</tbody></table></div>';
-      if (props && props.length > 0) {
-        html += '<div class="dash-section"><h4>🎯 Objectifs (vue host)</h4><table><thead><tr><th>#</th><th>Nom</th><th>État</th></tr></thead><tbody>';
-        for (var i = 0; i < props.length; i++) {
-          var pr = props[i];
-          var st = (pr.state || '—').toUpperCase();
-          var stLabel = st === 'CAPTURED' ? 'Capturé' : (st === 'VISIBLE' ? 'Visible' : st);
-          html += '<tr><td>' + (pr.id_prop || i + 1) + '</td><td>' + (pr.name || '—') + '</td><td>' + stLabel + '</td></tr>';
-        }
-        html += '</tbody></table></div>';
-      }
-      if (gd) {
-        html += '<div class="dash-section"><h4>⚙️ Règles (vue host)</h4><table><thead><tr><th>Paramètre</th><th>Valeur</th></tr></thead><tbody>';
-        html += '<tr><td>Durée</td><td>' + (gd.duration != null ? gd.duration + ' s' : '—') + '</td></tr>';
-        html += '<tr><td>Objectifs pour victoire</td><td>' + (gd.victory_condition_nb_objectivs != null ? gd.victory_condition_nb_objectivs : '—') + '</td></tr>';
-        html += '<tr><td>Rayon carte</td><td>' + (gd.map_radius != null ? gd.map_radius + ' m' : '—') + '</td></tr>';
-        html += '<tr><td>Hack (ms)</td><td>' + (gd.hack_duration_ms != null ? gd.hack_duration_ms : '—') + '</td></tr>';
-        html += '<tr><td>Rayon zone objectif</td><td>' + (gd.objectiv_zone_radius != null ? gd.objectiv_zone_radius + ' m' : '—') + '</td></tr>';
-        html += '<tr><td>Portée Rogue / Agent</td><td>' + (gd.rogue_range != null ? gd.rogue_range : '—') + ' / ' + (gd.agent_range != null ? gd.agent_range : '—') + '</td></tr>';
-        html += '</tbody></table></div>';
-      }
-      if (hostStateAt) html += '<p class="dash-muted">Dernière synchro host : ' + new Date(hostStateAt).toLocaleTimeString('fr-FR') + '</p>';
-      else if (!gd) html += '<p class="dash-muted">Vue host : en attente de la première synchro du host.</p>';
-      return html;
-    }
-
-    function openGameModal(code) {
-      const overlay = document.getElementById('gameModal');
-      const title = document.getElementById('gameModalTitle');
-      const dash = document.getElementById('gameModalDashboard');
-      const notifyBtn = document.getElementById('gameModalNotifyBtn');
-      title.textContent = 'Tableau de bord — ' + code + ' · en direct';
-      if (dash) dash.innerHTML = '<span class="loading">Chargement…</span>';
-      if (notifyBtn) notifyBtn.setAttribute('data-game-code', code);
-      overlay.classList.add('open');
-      if (gameModalPollId) clearInterval(gameModalPollId);
-      function poll() {
-        fetch('/api/stats/game/' + code)
-          .then(r => r.json())
-          .then(data => {
-            if (!dash) return;
-            if (data.error) { dash.innerHTML = '<p class="error">' + (data.error || 'Partie introuvable') + '</p>'; return; }
-            dash.innerHTML = renderDashboard(data);
-          })
-          .catch(function() { if (dash) dash.innerHTML = '<p class="error">Erreur de chargement</p>'; });
-      }
-      poll();
-      gameModalPollId = setInterval(poll, 1500);
-    }
-
-    function closeGameModal() {
-      document.getElementById('gameModal').classList.remove('open');
-      if (gameModalPollId) { clearInterval(gameModalPollId); gameModalPollId = null; }
-    }
-
-    document.addEventListener('click', (e) => {
-      if (e.target.closest('.btn-game-data')) {
-        const code = e.target.closest('.btn-game-data').getAttribute('data-game-code');
-        if (code) openGameModal(code);
-      }
-      if (e.target.id === 'gameModalClose' || e.target.id === 'gameModal') closeGameModal();
-      if (e.target.id === 'gameModalNotifyBtn') {
-        const code = e.target.getAttribute('data-game-code');
-        const msgEl = document.getElementById('gameModalNotifyMsg');
-        const titleEl = document.getElementById('gameModalNotifyTitle');
-        const msg = msgEl ? msgEl.value.trim() : '';
-        const title = titleEl ? titleEl.value.trim() : '';
-        if (!code) { alert('Partie inconnue'); return; }
-        if (!msg) { alert('Veuillez saisir un message'); return; }
-        fetch('/api/notify/game', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameCode: code, message: msg, title: title || undefined }) })
-          .then(r => r.json())
-          .then(d => { if (d.success) { alert('Envoyé à ' + d.count + ' joueur(s)'); if (msgEl) msgEl.value = ''; if (titleEl) titleEl.value = ''; } else alert('Erreur: ' + (d.error || 'Inconnue')); })
-          .catch(() => alert('Erreur réseau'));
-      }
-      if (e.target.id === 'notifyPlayerBtn') {
-        var cid = document.getElementById('notifyPlayerSelect') && document.getElementById('notifyPlayerSelect').value;
-        var msgEl = document.getElementById('notifyPlayerMsg');
-        var titleEl = document.getElementById('notifyPlayerTitle');
-        var msg = msgEl ? msgEl.value.trim() : '';
-        var title = titleEl ? titleEl.value.trim() : '';
-        if (!cid) { alert('Choisir un joueur'); return; }
-        if (!msg) { alert('Veuillez saisir un message'); return; }
-        fetch('/api/notify/player', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: cid, message: msg, title: title || undefined }) })
-          .then(r => r.json())
-          .then(d => { if (d.success) alert('Notification envoyée'); else alert('Erreur: ' + (d.error || 'Inconnue')); })
-          .catch(function() { alert('Erreur réseau'); });
-      }
-      if (e.target.id === 'notifyGameBtn') {
-        var gcode = document.getElementById('notifyGameSelect') && document.getElementById('notifyGameSelect').value;
-        var msgEl = document.getElementById('notifyGameMsg');
-        var titleEl = document.getElementById('notifyGameTitle');
-        var msg = msgEl ? msgEl.value.trim() : '';
-        var title = titleEl ? titleEl.value.trim() : '';
-        if (!gcode) { alert('Choisir une partie'); return; }
-        if (!msg) { alert('Veuillez saisir un message'); return; }
-        fetch('/api/notify/game', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameCode: gcode, message: msg, title: title || undefined }) })
-          .then(r => r.json())
-          .then(d => { if (d.success) alert('Envoyé à ' + d.count + ' joueur(s)'); else alert('Erreur: ' + (d.error || 'Inconnue')); })
-          .catch(function() { alert('Erreur réseau'); });
-      }
-    });
-
-    document.getElementById('gameModalClose').addEventListener('click', closeGameModal);
-    
-    // Mettre à jour toutes les 2 secondes
-    setInterval(updateStats, 2000);
-    
-    // Première mise à jour immédiate
-    updateStats();
-  </script>
-</body>
-</html>
-    `;
-
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(html);
-  } else {
-    res.writeHead(405, { 'Content-Type': 'text/plain' });
-    res.end('Method Not Allowed');
-  }
+  res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('Not Found');
 });
+
 
 const io = new SocketIOServer(server, {
   path: SOCKET_IO_PATH,
+  transports: ['websocket'],
   perMessageDeflate: false,
   cors: {
     origin: '*',
@@ -1246,8 +325,266 @@ let totalSocketMessages = 0;
 const logs = [];
 const MAX_LOGS = 100;
 
+const touchLobby = (code) => {
+  const lobby = lobbies.get(code);
+  if (!lobby) return;
+  lobby.lastActivityAt = Date.now();
+  lobby.expiresAt = lobby.lastActivityAt + LOBBY_TTL_MS;
+};
+
+const touchGame = (code) => {
+  const game = games.get(code);
+  if (!game) return;
+  game.lastActivityAt = Date.now();
+  if (!game.finishedAt) {
+    game.expiresAt = game.lastActivityAt + GAME_TTL_MS;
+  }
+};
+
+const hasPresentPlayersInGame = (game) => {
+  if (!game?.players || game.players.size === 0) return false;
+  for (const player of game.players.values()) {
+    if ((player?.status || 'active').toLowerCase() !== 'disconnected') {
+      return true;
+    }
+  }
+  return false;
+};
+
+const forEachConnectedGameRecipient = (game, callback, { exceptId = null } = {}) => {
+  if (!game?.players) return;
+  for (const player of game.players.values()) {
+    if (!player?.id) continue;
+    if (exceptId && player.id === exceptId) continue;
+    if ((player.status || 'active').toLowerCase() === 'disconnected') continue;
+    const playerSocket = socketsById.get(player.id);
+    if (!playerSocket || !playerSocket.connected) continue;
+    callback(playerSocket, player);
+  }
+};
+
+const pruneDisconnectedGamePlayers = (game, now = Date.now()) => {
+  if (!game?.players || game.players.size === 0) return 0;
+  let removed = 0;
+  for (const [id, player] of game.players.entries()) {
+    if (!player) continue;
+    if ((player.status || '').toLowerCase() !== 'disconnected') continue;
+    const disconnectedAt =
+      typeof player.disconnectedAt === 'number' ? player.disconnectedAt : now;
+    if (now - disconnectedAt < DISCONNECTED_GAME_PLAYER_TTL_MS) continue;
+    game.players.delete(id);
+    removed += 1;
+  }
+  return removed;
+};
+
+const closeLobby = (code, reason = 'Lobby expiré', notify = true) => {
+  const lobby = lobbies.get(code);
+  if (!lobby) return false;
+  if (notify) {
+    lobby.players.forEach((player) => {
+      const playerSocket = socketsById.get(player.id);
+      send(playerSocket, { type: 'lobby:closed', payload: { code, reason } });
+    });
+  }
+  if (disconnectedHosts.has(code)) {
+    clearTimeout(disconnectedHosts.get(code).timeoutId);
+    disconnectedHosts.delete(code);
+  }
+  if (awayHosts.has(code)) {
+    clearTimeout(awayHosts.get(code).timeoutId);
+    awayHosts.delete(code);
+  }
+  lobbies.delete(code);
+  lobbySocketMessageCounts.delete(code);
+  return true;
+};
+
+const closeGame = (code, reason = 'Partie expirée', notify = true) => {
+  const game = games.get(code);
+  if (!game) return false;
+  if (notify) {
+    game.players.forEach((player) => {
+      const playerSocket = socketsById.get(player.id);
+      send(playerSocket, { type: 'game:closed', payload: { code, reason } });
+    });
+  }
+  if (disconnectedGameHosts.has(code)) {
+    clearTimeout(disconnectedGameHosts.get(code).timeoutId);
+    disconnectedGameHosts.delete(code);
+  }
+  games.delete(code);
+  gameSocketMessageCounts.delete(code);
+  return true;
+};
+
+const pickReplacementGameHost = (game, excludedId = null) => {
+  if (!game) return null;
+  const candidates = Array.from(game.players.values()).filter(
+    (player) => player?.id && player.id !== excludedId
+  );
+  if (!candidates.length) return null;
+
+  const connectedActive = candidates.find((player) => {
+    const socket = socketsById.get(player.id);
+    return socket?.connected && (player.status || 'active') === 'active';
+  });
+  if (connectedActive) return connectedActive.id;
+
+  const connectedAny = candidates.find((player) => {
+    const socket = socketsById.get(player.id);
+    return socket?.connected;
+  });
+  if (connectedAny) return connectedAny.id;
+
+  const activeAny = candidates.find((player) => (player.status || 'active') === 'active');
+  if (activeAny) return activeAny.id;
+
+  return candidates[0].id;
+};
+
+const transferGameHost = ({
+  code,
+  oldHostId,
+  reason = 'Le host a quitté la partie'
+}) => {
+  const game = games.get(code);
+  if (!game) return false;
+  const newHostId = pickReplacementGameHost(game, oldHostId);
+  if (!newHostId) return false;
+
+  game.hostId = newHostId;
+  game.players.forEach((player) => {
+    player.isHost = player.id === newHostId;
+  });
+
+  if (disconnectedGameHosts.has(code)) {
+    clearTimeout(disconnectedGameHosts.get(code).timeoutId);
+    disconnectedGameHosts.delete(code);
+  }
+
+  game.players.forEach((player) => {
+    const playerSocket = socketsById.get(player.id);
+    if (playerSocket) {
+      send(playerSocket, {
+        type: 'game:host-transferred',
+        payload: {
+          code,
+          oldHostId,
+          newHostId,
+          reason
+        }
+      });
+      // Compat event déjà utilisé côté clients.
+      send(playerSocket, {
+        type: 'game:host-reconnected',
+        payload: { newHostId }
+      });
+    }
+  });
+  markStateChanged('game:host-transfer', { code, oldHostId, newHostId, reason });
+  return true;
+};
+
+const pickReplacementLobbyHost = (lobby, excludedId = null) => {
+  if (!lobby) return null;
+  const candidates = Array.from(lobby.players.values()).filter(
+    (player) => player?.id && player.id !== excludedId
+  );
+  if (!candidates.length) return null;
+
+  const connectedActive = candidates.find((player) => {
+    const socket = socketsById.get(player.id);
+    return socket?.connected && (player.status || 'active') === 'active';
+  });
+  if (connectedActive) return connectedActive.id;
+
+  const connectedAny = candidates.find((player) => {
+    const socket = socketsById.get(player.id);
+    return socket?.connected;
+  });
+  if (connectedAny) return connectedAny.id;
+
+  const activeAny = candidates.find((player) => (player.status || 'active') === 'active');
+  if (activeAny) return activeAny.id;
+
+  return candidates[0].id;
+};
+
+const transferLobbyHost = ({
+  code,
+  oldHostId,
+  reason = 'Le host a quitté le lobby'
+}) => {
+  const lobby = lobbies.get(code);
+  if (!lobby) return false;
+  const newHostId = pickReplacementLobbyHost(lobby, oldHostId);
+  if (!newHostId) return false;
+
+  lobby.hostId = newHostId;
+  lobby.players.forEach((player) => {
+    player.isHost = player.id === newHostId;
+  });
+
+  if (disconnectedHosts.has(code)) {
+    clearTimeout(disconnectedHosts.get(code).timeoutId);
+    disconnectedHosts.delete(code);
+  }
+  if (awayHosts.has(code)) {
+    clearTimeout(awayHosts.get(code).timeoutId);
+    awayHosts.delete(code);
+  }
+
+  lobby.players.forEach((player) => {
+    const playerSocket = socketsById.get(player.id);
+    if (playerSocket) {
+      if (oldHostId) {
+        send(playerSocket, {
+          type: 'lobby:peer-left',
+          payload: { playerId: oldHostId }
+        });
+      }
+      send(playerSocket, {
+        type: 'lobby:host-transferred',
+        payload: {
+          code,
+          oldHostId,
+          newHostId,
+          reason
+        }
+      });
+      // Compat event already consumed by clients.
+      send(playerSocket, {
+        type: 'lobby:host-reconnected',
+        payload: { newHostId }
+      });
+    }
+  });
+  markStateChanged('lobby:host-transfer', { code, oldHostId, newHostId, reason });
+  return true;
+};
+
+const shouldLogLevel = (level) => {
+  if (!ENABLE_SERVER_LOGS) return false;
+  const requested = LOG_LEVEL_ORDER[level] ?? LOG_LEVEL_ORDER.info;
+  const configured = LOG_LEVEL_ORDER[LOG_LEVEL] ?? LOG_LEVEL_ORDER.info;
+  return requested <= configured;
+};
+
+const formatLogArg = (arg) => {
+  if (typeof arg === 'object') {
+    try {
+      return JSON.stringify(arg);
+    } catch (_) {
+      return '[unserializable-object]';
+    }
+  }
+  return String(arg);
+};
+
 // Helper pour les logs horodatés
-const log = (...args) => {
+const logAt = (level, ...args) => {
+  if (!shouldLogLevel(level)) return;
   const timestamp = new Date().toLocaleString('fr-FR', {
     year: 'numeric',
     month: '2-digit',
@@ -1257,11 +594,11 @@ const log = (...args) => {
     second: '2-digit',
     hour12: false
   });
-  const logMessage = `[${timestamp}] ${args.map(arg => 
-    typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
-  ).join(' ')}`;
+  const logMessage = `[${timestamp}] [${level.toUpperCase()}] ${args
+    .map(formatLogArg)
+    .join(' ')}`;
   
-  console.log(`[${timestamp}]`, ...args);
+  console.log(`[${timestamp}] [${level.toUpperCase()}]`, ...args);
   
   // Stocker le log
   logs.push({
@@ -1272,6 +609,251 @@ const log = (...args) => {
   // Garder seulement les MAX_LOGS derniers
   if (logs.length > MAX_LOGS) {
     logs.shift();
+  }
+};
+
+const log = (...args) => logAt('info', ...args);
+const logWarn = (...args) => logAt('warn', ...args);
+const logError = (...args) => logAt('error', ...args);
+const logDebug = (...args) => logAt('debug', ...args);
+
+let persistTimer = null;
+let persistInFlight = false;
+let persistQueued = false;
+let eventLogFlushTimer = null;
+let eventLogFlushInFlight = false;
+const pendingEventLogLines = [];
+
+const serializeLobby = (lobby) => ({
+  code: lobby.code,
+  hostId: lobby.hostId,
+  stateVersion: lobby.stateVersion || 1,
+  createdAt: lobby.createdAt || Date.now(),
+  expiresAt: lobby.expiresAt || Date.now() + LOBBY_TTL_MS,
+  config: lobby.config || null,
+  players: Array.from(lobby.players.values()).map((p) => ({
+    id: p.id,
+    name: p.name,
+    isHost: !!p.isHost,
+    role: p.role ?? null,
+    status: p.status ?? 'active'
+  }))
+});
+
+const serializeGame = (game) => ({
+  code: game.code,
+  hostId: game.hostId,
+  stateVersion: game.stateVersion || 1,
+  createdAt: game.createdAt || Date.now(),
+  expiresAt: game.expiresAt || Date.now() + GAME_TTL_MS,
+  config: game.config || null,
+  players: Array.from(game.players.values()).map((p) => ({
+    id: p.id,
+    name: p.name,
+    isHost: !!p.isHost,
+    role: p.role ?? null,
+    status: p.status ?? 'active'
+  })),
+  remainingTimeSeconds:
+    typeof game.remainingTimeSeconds === 'number' ? game.remainingTimeSeconds : null,
+  remainingTimeUpdatedAt:
+    typeof game.remainingTimeUpdatedAt === 'number' ? game.remainingTimeUpdatedAt : null,
+  remainingTimeCountdownActive: !!game.remainingTimeCountdownActive,
+  lastHostState: game.lastHostState || null,
+  lastHostStateAt:
+    typeof game.lastHostStateAt === 'number' ? game.lastHostStateAt : null,
+  lastHostStateHostId: game.lastHostStateHostId || null,
+  reconnectedPlayerIds: game.reconnectedPlayerIds || {}
+});
+
+const persistRuntimeStateNow = async (reason = 'unspecified') => {
+  if (MEMORY_ONLY_MODE) return;
+  if (persistInFlight) {
+    persistQueued = true;
+    return;
+  }
+  persistInFlight = true;
+  try {
+    await fs.mkdir(RUNTIME_DATA_DIR, { recursive: true });
+    const snapshot = {
+      version: 1,
+      signalingVersion: SIGNALING_VERSION,
+      savedAt: new Date().toISOString(),
+      reason,
+      lobbies: Array.from(lobbies.values()).map(serializeLobby),
+      games: Array.from(games.values()).map(serializeGame),
+      counters: {
+        totalSocketMessages
+      }
+    };
+    const tempPath = `${SNAPSHOT_FILE}.tmp`;
+    await fs.writeFile(tempPath, JSON.stringify(snapshot), 'utf8');
+    await fs.rename(tempPath, SNAPSHOT_FILE);
+  } catch (error) {
+    logError('[PERSIST] Erreur snapshot runtime:', error?.message || error);
+  } finally {
+    persistInFlight = false;
+    if (persistQueued) {
+      persistQueued = false;
+      void persistRuntimeStateNow('queued-followup');
+    }
+  }
+};
+
+const schedulePersist = (reason = 'state-change') => {
+  if (MEMORY_ONLY_MODE) return;
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+  }
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    void persistRuntimeStateNow(reason);
+  }, 500);
+};
+
+const flushRuntimeEvents = async () => {
+  if (MEMORY_ONLY_MODE || pendingEventLogLines.length === 0 || eventLogFlushInFlight) {
+    return;
+  }
+  eventLogFlushInFlight = true;
+  const lines = pendingEventLogLines.splice(0, pendingEventLogLines.length);
+  try {
+    await fs.mkdir(RUNTIME_DATA_DIR, { recursive: true });
+    await fs.appendFile(EVENT_LOG_FILE, `${lines.join('\n')}\n`, 'utf8');
+  } catch (error) {
+    logError('[PERSIST] Erreur event log:', error?.message || error);
+    // Requeue to avoid losing events when temporary I/O issues happen.
+    pendingEventLogLines.unshift(...lines);
+  } finally {
+    eventLogFlushInFlight = false;
+    if (pendingEventLogLines.length > 0 && !eventLogFlushTimer) {
+      eventLogFlushTimer = setTimeout(() => {
+        eventLogFlushTimer = null;
+        void flushRuntimeEvents();
+      }, 250);
+    }
+  }
+};
+
+const appendRuntimeEvent = (type, payload = {}) => {
+  if (MEMORY_ONLY_MODE) return;
+  pendingEventLogLines.push(
+    JSON.stringify({
+      ts: Date.now(),
+      type,
+      payload
+    })
+  );
+  if (!eventLogFlushTimer) {
+    eventLogFlushTimer = setTimeout(() => {
+      eventLogFlushTimer = null;
+      void flushRuntimeEvents();
+    }, 250);
+  }
+};
+
+const markStateChanged = (type, payload = {}) => {
+  appendRuntimeEvent(type, payload);
+  schedulePersist(type);
+};
+
+const hydrateRuntimeState = async () => {
+  if (MEMORY_ONLY_MODE) return;
+  try {
+    await fs.mkdir(RUNTIME_DATA_DIR, { recursive: true });
+    const raw = await fs.readFile(SNAPSHOT_FILE, 'utf8');
+    const snapshot = JSON.parse(raw);
+    if (!snapshot || typeof snapshot !== 'object') {
+      return;
+    }
+    lobbies.clear();
+    games.clear();
+    lobbySocketMessageCounts.clear();
+    gameSocketMessageCounts.clear();
+
+    for (const lobby of snapshot.lobbies || []) {
+      if (!lobby?.code || !lobby?.hostId) continue;
+      const playersMap = new Map();
+      for (const p of lobby.players || []) {
+        if (!p?.id) continue;
+        playersMap.set(p.id, {
+          id: p.id,
+          name: p.name || 'Joueur',
+          isHost: !!p.isHost,
+          role: p.role ?? null,
+          status: p.status || 'active'
+        });
+      }
+      lobbies.set(lobby.code, {
+        code: lobby.code,
+        hostId: lobby.hostId,
+        stateVersion:
+          typeof lobby.stateVersion === 'number' && lobby.stateVersion > 0
+            ? Math.floor(lobby.stateVersion)
+            : 1,
+        createdAt: typeof lobby.createdAt === 'number' ? lobby.createdAt : Date.now(),
+        lastActivityAt: Date.now(),
+        expiresAt:
+          typeof lobby.expiresAt === 'number' && lobby.expiresAt > Date.now()
+            ? lobby.expiresAt
+            : Date.now() + LOBBY_TTL_MS,
+        config: lobby.config || null,
+        players: playersMap
+      });
+      lobbySocketMessageCounts.set(lobby.code, 0);
+    }
+
+    for (const game of snapshot.games || []) {
+      if (!game?.code || !game?.hostId) continue;
+      const playersMap = new Map();
+      for (const p of game.players || []) {
+        if (!p?.id) continue;
+        playersMap.set(p.id, {
+          id: p.id,
+          name: p.name || 'Joueur',
+          isHost: !!p.isHost,
+          role: p.role ?? null,
+          status: p.status || 'active'
+        });
+      }
+      games.set(game.code, {
+        code: game.code,
+        hostId: game.hostId,
+        stateVersion:
+          typeof game.stateVersion === 'number' && game.stateVersion > 0
+            ? Math.floor(game.stateVersion)
+            : 1,
+        createdAt: typeof game.createdAt === 'number' ? game.createdAt : Date.now(),
+        lastActivityAt: Date.now(),
+        expiresAt:
+          typeof game.expiresAt === 'number' && game.expiresAt > Date.now()
+            ? game.expiresAt
+            : Date.now() + GAME_TTL_MS,
+        config: game.config || null,
+        players: playersMap,
+        remainingTimeSeconds:
+          typeof game.remainingTimeSeconds === 'number' ? game.remainingTimeSeconds : undefined,
+        remainingTimeUpdatedAt:
+          typeof game.remainingTimeUpdatedAt === 'number' ? game.remainingTimeUpdatedAt : undefined,
+        remainingTimeCountdownActive: !!game.remainingTimeCountdownActive,
+        lastHostState: game.lastHostState || null,
+        lastHostStateAt:
+          typeof game.lastHostStateAt === 'number' ? game.lastHostStateAt : null,
+        lastHostStateHostId: game.lastHostStateHostId || null,
+        reconnectedPlayerIds: game.reconnectedPlayerIds || {}
+      });
+      gameSocketMessageCounts.set(game.code, 0);
+    }
+    if (snapshot.counters && typeof snapshot.counters.totalSocketMessages === 'number') {
+      totalSocketMessages = snapshot.counters.totalSocketMessages;
+    }
+    log(
+      `[PERSIST] Etat runtime restaure: ${lobbies.size} lobby(s), ${games.size} game(s)`
+    );
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      log('[PERSIST] Erreur restauration runtime:', error?.message || error);
+    }
   }
 };
 
@@ -1330,61 +912,534 @@ const getGameCodeFromMessage = (type, payload, clientInfo) => {
   return clientInfo?.gameCode || null;
 };
 
+const enrichMessageWithVersion = (message) => {
+  const base = message && typeof message === 'object' ? message : {};
+  const originalMeta = base.meta && typeof base.meta === 'object' ? base.meta : {};
+  return {
+    ...base,
+    meta: {
+      ...originalMeta,
+      signalingVersion: SIGNALING_VERSION,
+      sentAt: Date.now()
+    }
+  };
+};
+
+const buildTurnCredentials = (clientId) => {
+  if (!TURN_URLS.length || !TURN_SECRET) return null;
+  const expiresAtSec = Math.floor(Date.now() / 1000) + TURN_TTL_SECONDS;
+  const username = `${expiresAtSec}:${clientId}`;
+  const credential = createHmac('sha1', TURN_SECRET)
+    .update(username)
+    .digest('base64');
+  return {
+    urls: TURN_URLS,
+    username,
+    credential,
+    ttlSeconds: TURN_TTL_SECONDS,
+    expiresAtMs: expiresAtSec * 1000,
+    realm: TURN_REALM || null
+  };
+};
+
+const getRawMessagePreview = (raw) => {
+  if (typeof raw === 'string') {
+    return raw.substring(0, 200);
+  }
+  if (raw && typeof raw === 'object') {
+    const type = raw.type || 'unknown';
+    return `[object type=${type}]`;
+  }
+  return String(raw).substring(0, 200);
+};
+
 const send = (socket, message) => {
   if (socket && socket.connected) {
     incrementTotalSocketMessages();
     const clientInfo = clients.get(socket.id);
     incrementLobbySocketMessages(clientInfo?.lobbyCode || null);
     const recipientId = clientInfo?.clientId || 'unknown';
-    log(`[MESSAGE ENVOYÉ] À: ${recipientId}, Type: ${message.type}`);
-    socket.emit('message', message);
+    const finalMessage = enrichMessageWithVersion(message);
+    if (Math.random() < MESSAGE_DEBUG_SAMPLE_RATE) {
+      logDebug(
+        `[MESSAGE ENVOYE] to=${recipientId} type=${finalMessage.type} version=${SIGNALING_VERSION}`
+      );
+    }
+    socket.emit('message', finalMessage);
   }
 };
 
 const getLobbySnapshot = (lobby) => ({
   code: lobby.code,
   hostId: lobby.hostId,
-  players: Array.from(lobby.players.values()).map(({ id, name, isHost }) => ({
+  stateVersion: lobby.stateVersion || 1,
+  config: lobby.config || null,
+  players: Array.from(lobby.players.values()).map(({ id, name, isHost, role, status }) => ({
     id,
     name,
-    isHost
+    isHost,
+    role: role ?? null,
+    status: status ?? 'active'
   }))
 });
 
+const countRolesInLobby = (lobby) => {
+  let agents = 0;
+  let rogues = 0;
+  lobby.players.forEach((p) => {
+    const role = (p.role || '').toUpperCase();
+    if (role === 'AGENT') agents += 1;
+    if (role === 'ROGUE') rogues += 1;
+  });
+  return { agents, rogues };
+};
+
+const applyLobbyRoleUpdate = ({
+  lobby,
+  targetId,
+  role,
+  requestId
+}) => {
+  const player = lobby.players.get(targetId);
+  if (!player) {
+    return false;
+  }
+  player.role = role;
+  lobby.stateVersion = (lobby.stateVersion || 1) + 1;
+  lobby.players.forEach((p) => {
+    const s = socketsById.get(p.id);
+    if (s) {
+      send(s, {
+        type: 'lobby:role-updated',
+        payload: {
+          playerId: targetId,
+          role,
+          stateVersion: lobby.stateVersion,
+          requestId: requestId || null
+        }
+      });
+      // Compat backward with existing listeners.
+      send(s, {
+        type: 'lobby:player-updated',
+        payload: {
+          playerId: targetId,
+          changes: { role: role },
+          stateVersion: lobby.stateVersion
+        }
+      });
+    }
+  });
+  return true;
+};
+
+const bumpGameStateVersion = (game) => {
+  game.stateVersion = (game.stateVersion || 1) + 1;
+  return game.stateVersion;
+};
+
+const sendGameActionRejected = (socket, action, requestId, reason) => {
+  send(socket, {
+    type: 'game:action-rejected',
+    payload: {
+      action,
+      requestId: requestId || null,
+      reason
+    }
+  });
+};
+
+const applyGameRemainingTimeUpdate = ({
+  game,
+  remaining,
+  countdownStarted,
+  hasCountdownStarted,
+  requestId = null
+}) => {
+  game.remainingTimeSeconds = Math.max(0, Math.floor(remaining));
+  game.remainingTimeUpdatedAt = Date.now();
+  if (hasCountdownStarted) {
+    game.remainingTimeCountdownActive = !!countdownStarted;
+  }
+  const stateVersion = bumpGameStateVersion(game);
+  game.players.forEach((p) => {
+    const s = socketsById.get(p.id);
+    if (s) {
+      send(s, {
+        type: 'game:remaining-time-updated',
+        payload: {
+          remaining_time: game.remainingTimeSeconds,
+          countdown_started: !!game.remainingTimeCountdownActive,
+          stateVersion,
+          requestId
+        }
+      });
+    }
+  });
+  return stateVersion;
+};
+
+const applyGameStateSync = ({
+  game,
+  hostId,
+  statePayload,
+  targetId = null,
+  requestId = null
+}) => {
+  const remainingTime = statePayload?.gameDetails?.remaining_time;
+  if (typeof remainingTime === 'number') {
+    game.remainingTimeSeconds = remainingTime;
+    game.remainingTimeUpdatedAt = Date.now();
+  }
+  if (typeof statePayload?.gameDetails?.countdown_started === 'boolean') {
+    game.remainingTimeCountdownActive = statePayload.gameDetails.countdown_started;
+  }
+  // Mode léger: le serveur stocke l'état fourni par le host sans recalcul métier.
+  game.lastHostState = statePayload || null;
+  game.lastHostStateAt = Date.now();
+  game.lastHostStateHostId = hostId;
+  const winnerType = statePayload?.gameDetails?.winner_type || null;
+  const shouldCloseImmediately = Boolean(winnerType && !game.finishedAt);
+  if (winnerType && !game.finishedAt) {
+    game.finishedAt = Date.now();
+    game.expiresAt = game.finishedAt + FINISHED_GAME_TTL_MS;
+  }
+  const stateVersion = bumpGameStateVersion(game);
+
+  if (targetId) {
+    const targetSocket = socketsById.get(targetId);
+    if (targetSocket) {
+      send(targetSocket, {
+        type: 'state:sync',
+        payload: statePayload
+      });
+    }
+  } else {
+    game.players.forEach((p) => {
+      if (p.id === hostId) return;
+      const s = socketsById.get(p.id);
+      if (s) {
+        send(s, {
+          type: 'state:sync',
+          payload: statePayload
+        });
+      }
+    });
+  }
+
+  game.players.forEach((p) => {
+    const s = socketsById.get(p.id);
+    if (s) {
+      send(s, {
+        type: 'game:state-version',
+        payload: {
+          stateVersion,
+          requestId
+        }
+      });
+    }
+  });
+
+  if (shouldCloseImmediately) {
+    const closedCode = game.code;
+    closeGame(closedCode, 'Partie terminée', false);
+    markStateChanged('game:finished-immediate', { code: closedCode });
+  }
+
+  return stateVersion;
+};
+
+const tryStartGameFromLobby = ({
+  socket,
+  clientId,
+  code,
+  requestId = null,
+  requireRoleCheck = false
+}) => {
+  const lobby = lobbies.get(code);
+  if (!code || !lobby) {
+    const errorMessage = 'Lobby introuvable pour démarrer la partie.';
+    if (requestId) {
+      send(socket, {
+        type: 'lobby:action-rejected',
+        payload: { action: 'start-game', requestId, reason: errorMessage }
+      });
+    } else {
+      send(socket, { type: 'game:error', payload: { message: errorMessage } });
+    }
+    return true;
+  }
+
+  if (lobby.hostId !== clientId) {
+    const errorMessage = 'Seul le host peut démarrer la partie.';
+    if (requestId) {
+      send(socket, {
+        type: 'lobby:action-rejected',
+        payload: { action: 'start-game', requestId, reason: errorMessage }
+      });
+    } else {
+      send(socket, { type: 'game:error', payload: { message: errorMessage } });
+    }
+    return true;
+  }
+
+  if (requireRoleCheck) {
+    const { agents, rogues } = countRolesInLobby(lobby);
+    if (agents < 1 || rogues < 1) {
+      send(socket, {
+        type: 'lobby:action-rejected',
+        payload: {
+          action: 'start-game',
+          requestId,
+          reason: 'Prerequis roles non satisfaits (>=1 AGENT et >=1 ROGUE).'
+        }
+      });
+      return true;
+    }
+  }
+
+  if (games.has(code)) {
+    send(socket, {
+      type: 'game:created',
+      payload: {
+        code,
+        playerId: clientId,
+        hostId: lobby.hostId,
+        game: getLobbySnapshot(games.get(code))
+      }
+    });
+    return true;
+  }
+
+  const game = {
+    code,
+    hostId: lobby.hostId,
+    config: lobby.config || null,
+    players: new Map(),
+    stateVersion: 1,
+    createdAt: Date.now(),
+    lastActivityAt: Date.now(),
+    expiresAt: Date.now() + GAME_TTL_MS
+  };
+
+  lobby.players.forEach((player) => {
+    game.players.set(player.id, { ...player });
+  });
+
+  games.set(code, game);
+  gameSocketMessageCounts.set(code, gameSocketMessageCounts.get(code) || 0);
+  markStateChanged('game:create', { code, hostId: clientId });
+  persistToBdd('/api/game-sessions', 'POST', { game_code: code });
+
+  lobby.players.forEach((player) => {
+    const playerSocket = socketsById.get(player.id);
+    if (playerSocket) {
+      const playerClient = clients.get(playerSocket.id);
+      if (playerClient) {
+        playerClient.lobbyCode = null;
+      }
+    }
+  });
+
+  closeLobby(code, 'Partie démarrée', false);
+
+  lobby.players.forEach((player) => {
+    const playerSocket = socketsById.get(player.id);
+    if (playerSocket) {
+      send(playerSocket, {
+        type: 'game:started',
+        payload: { code }
+      });
+    }
+  });
+
+  clients.get(socket.id).gameCode = code;
+  clients.get(socket.id).lobbyCode = null;
+
+  if (requestId) {
+    send(socket, {
+      type: 'lobby:action-ack',
+      payload: { action: 'start-game', requestId, code }
+    });
+  }
+  send(socket, {
+    type: 'game:created',
+    payload: {
+      code,
+      playerId: clientId,
+      hostId: lobby.hostId,
+      game: getLobbySnapshot(game)
+    }
+  });
+  return true;
+};
+
 io.on('connection', (socket) => {
   const clientId = randomUUID();
-  clients.set(socket.id, { clientId, lobbyCode: null, gameCode: null });
+  clients.set(socket.id, {
+    clientId,
+    lobbyCode: null,
+    gameCode: null,
+    clientVersion: null
+  });
   socketsById.set(clientId, socket);
   
   log(`[CONNEXION] Nouveau client connecté: ${clientId}`);
+  send(socket, {
+    type: 'server:hello',
+    payload: {
+      clientId,
+      signalingVersion: SIGNALING_VERSION
+    }
+  });
+
+  socket.on('admin:getStats', (ack) => {
+    if (typeof ack === 'function') ack(getServerStats());
+  });
+
+  socket.on('admin:getGame', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    const code = String(payload?.code ?? '').toUpperCase();
+    if (!code) {
+      ack({ ok: false, error: 'code requis' });
+      return;
+    }
+    const game = games.get(code);
+    if (!game) {
+      ack({ ok: false, error: 'Game not found', code });
+      return;
+    }
+    ack({
+      ok: true,
+      game: {
+        code,
+        hostId: game.hostId,
+        playerCount: game.players.size,
+        socketMessageCount: gameSocketMessageCounts.get(code) || 0,
+        remainingTimeSeconds: getRemainingTimeSeconds(game),
+        remainingTimeUpdatedAt: game.remainingTimeUpdatedAt || null,
+        lastHostState: game.lastHostState || null,
+        lastHostStateAt: game.lastHostStateAt || null,
+        lastHostStateHostId: game.lastHostStateHostId || null,
+        reconnectedPlayerIds: game.reconnectedPlayerIds || {},
+        players: Array.from(game.players.values()).map((player) => {
+          const s = socketsById.get(player.id);
+          return {
+            ...player,
+            socketConnected: Boolean(s?.connected),
+            status: player.status || 'active'
+          };
+        })
+      }
+    });
+  });
+
+  socket.on('admin:notifyPlayer', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    try {
+      const targetId = payload?.clientId;
+      const message = payload?.message != null ? String(payload.message) : '';
+      const title = payload?.title != null ? String(payload.title) : undefined;
+      if (!targetId) {
+        ack({ success: false, error: 'clientId requis' });
+        return;
+      }
+      const targetSocket = socketsById.get(targetId);
+      if (!targetSocket || !targetSocket.connected) {
+        ack({ success: false, error: 'Joueur introuvable ou déconnecté' });
+        return;
+      }
+      send(targetSocket, { type: 'admin:notification', payload: { message, title, timestamp: Date.now() } });
+      log(`[NOTIFICATION] Envoyée au joueur ${targetId.substring(0, 8)}...`);
+      ack({ success: true });
+    } catch (e) {
+      ack({ success: false, error: e.message });
+    }
+  });
+
+  socket.on('admin:notifyGame', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    try {
+      const gameCode = payload?.gameCode != null ? String(payload.gameCode).toUpperCase() : '';
+      const message = payload?.message != null ? String(payload.message) : '';
+      const title = payload?.title != null ? String(payload.title) : undefined;
+      if (!gameCode) {
+        ack({ success: false, error: 'gameCode requis' });
+        return;
+      }
+      const game = games.get(gameCode);
+      if (!game) {
+        ack({ success: false, error: 'Partie introuvable' });
+        return;
+      }
+      let count = 0;
+      game.players.forEach((p) => {
+        const s = socketsById.get(p.id);
+        if (s && s.connected) {
+          send(s, { type: 'admin:notification', payload: { message, title, timestamp: Date.now() } });
+          count++;
+        }
+      });
+      log(`[NOTIFICATION] Envoyée à ${count} joueur(s) de la partie ${gameCode}`);
+      ack({ success: true, count });
+    } catch (e) {
+      ack({ success: false, error: e.message });
+    }
+  });
 
   socket.on('message', (raw) => {
     incrementTotalSocketMessages();
-    const rawPreview = typeof raw === 'string' ? raw.substring(0, 200) : JSON.stringify(raw).substring(0, 200);
-    log(`[MESSAGE BRUT REÇU] ClientId: ${clientId}, Taille: ${rawPreview.length} caractères, Contenu: ${rawPreview}`);
+    if (Math.random() < MESSAGE_DEBUG_SAMPLE_RATE) {
+      const rawPreview = getRawMessagePreview(raw);
+      logDebug(
+        `[MESSAGE BRUT RECU] client=${clientId} size=${rawPreview.length} preview=${rawPreview}`
+      );
+    }
     
     let message = raw;
     if (typeof raw === 'string') {
       try {
         message = JSON.parse(raw);
       } catch (error) {
-        log(`[ERREUR PARSING] ClientId: ${clientId}, Erreur: ${error.message}`);
+        logWarn(`[ERREUR PARSING] client=${clientId} err=${error.message}`);
         send(socket, { type: 'error', payload: { message: 'Message JSON invalide.' } });
         return;
       }
     }
 
     const { type, payload } = message || {};
+    const clientVersion =
+      (message?.meta && typeof message.meta.clientVersion === 'string'
+        ? message.meta.clientVersion
+        : null) ||
+      (payload && typeof payload.clientVersion === 'string'
+        ? payload.clientVersion
+        : null);
+    const info = clients.get(socket.id);
+    if (info && clientVersion && info.clientVersion !== clientVersion) {
+      info.clientVersion = clientVersion;
+      log(`[VERSION CLIENT] ${clientId}: ${clientVersion}`);
+    }
     if (!type) {
-      log(`[ERREUR] ClientId: ${clientId}, Message sans type`, message);
+      logWarn(`[ERREUR MESSAGE] client=${clientId} missing-type`);
       send(socket, { type: 'error', payload: { message: 'Type de message manquant.' } });
       return;
     }
-
-    log(`[MESSAGE REÇU] ClientId: ${clientId}, Type: ${type}, Payload:`, payload);
+    if (Math.random() < MESSAGE_DEBUG_SAMPLE_RATE) {
+      const payloadSize =
+        payload && typeof payload === 'object' ? Object.keys(payload).length : 0;
+      logDebug(
+        `[MESSAGE RECU] client=${clientId} type=${type} payloadKeys=${payloadSize}`
+      );
+    }
     const clientInfo = clients.get(socket.id);
     const lobbyCodeForMessage = getLobbyCodeFromMessage(type, payload, clientInfo);
     const gameCodeForMessage = getGameCodeFromMessage(type, payload, clientInfo);
+    if (lobbyCodeForMessage && lobbies.has(lobbyCodeForMessage)) {
+      touchLobby(lobbyCodeForMessage);
+    }
+    if (gameCodeForMessage && games.has(gameCodeForMessage)) {
+      touchGame(gameCodeForMessage);
+    }
     incrementLobbySocketMessages(lobbyCodeForMessage);
     incrementGameSocketMessages(gameCodeForMessage);
 
@@ -1397,7 +1452,12 @@ io.on('connection', (socket) => {
       const lobby = {
         code,
         hostId: clientId,
-        players: new Map()
+        players: new Map(),
+        config: payload?.gameConfig || null,
+        stateVersion: 1,
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+        expiresAt: Date.now() + LOBBY_TTL_MS
       };
 
       lobby.players.set(clientId, { id: clientId, name: payload?.playerName || 'Host', isHost: true });
@@ -1407,6 +1467,7 @@ io.on('connection', (socket) => {
 
       log(`[LOBBY CRÉÉ] Code: ${code}, Host: ${clientId}, Nom: ${payload?.playerName || 'Host'}`);
       incrementLobbySocketMessages(code);
+      markStateChanged('lobby:create', { code, hostId: clientId });
 
       send(socket, {
         type: 'lobby:created',
@@ -1415,6 +1476,24 @@ io.on('connection', (socket) => {
           playerId: clientId,
           hostId: clientId,
           lobby: getLobbySnapshot(lobby)
+        }
+      });
+      return;
+    }
+
+    if (type === 'turn:credentials-request') {
+      const requestId = payload?.requestId || null;
+      const turn = buildTurnCredentials(clientId);
+      send(socket, {
+        type: 'turn:credentials',
+        payload: {
+          requestId,
+          urls: turn?.urls || [],
+          username: turn?.username || null,
+          credential: turn?.credential || null,
+          ttlSeconds: turn?.ttlSeconds || 0,
+          expiresAtMs: turn?.expiresAtMs || null,
+          realm: turn?.realm || null
         }
       });
       return;
@@ -1530,6 +1609,7 @@ io.on('connection', (socket) => {
       clients.get(socket.id).lobbyCode = code;
 
       log(`[LOBBY REJOINT] Code: ${code}, Joueur: ${clientId}, Nom: ${payload?.playerName || 'Joueur'}`);
+      markStateChanged('lobby:join', { code, playerId: clientId });
 
       send(socket, {
         type: 'lobby:joined',
@@ -1596,7 +1676,12 @@ io.on('connection', (socket) => {
         // Mettre à jour les maps globales
         socketsById.delete(oldPlayerId);
         socketsById.set(clientId, socket);
-        clients.set(socket.id, { clientId, lobbyCode: code });
+        clients.set(socket.id, {
+          clientId,
+          lobbyCode: code,
+          gameCode: null,
+          clientVersion: clients.get(socket.id)?.clientVersion || null
+        });
 
         send(socket, {
           type: 'lobby:joined',
@@ -1628,81 +1713,147 @@ io.on('connection', (socket) => {
       }
     }
 
-    if (type === 'game:create') {
-      const code = payload?.code?.toUpperCase();
-      const lobby = lobbies.get(code);
-      if (!code || !lobby) {
-        send(socket, { type: 'game:error', payload: { message: 'Lobby introuvable pour démarrer la partie.' } });
-        return;
-      }
-
-      if (lobby.hostId !== clientId) {
-        send(socket, { type: 'game:error', payload: { message: 'Seul le host peut démarrer la partie.' } });
-        return;
-      }
-
-      if (games.has(code)) {
+    if (type === 'lobby:role-update-request') {
+      const { lobbyCode } = clients.get(socket.id) || {};
+      const requestId = payload?.requestId || null;
+      const targetId = payload?.playerId || clientId;
+      const role = payload?.role ?? null;
+      if (!lobbyCode || !lobbies.has(lobbyCode)) {
         send(socket, {
-          type: 'game:created',
+          type: 'lobby:action-rejected',
           payload: {
-            code,
-            playerId: clientId,
-            hostId: lobby.hostId,
-            game: getLobbySnapshot(games.get(code))
+            action: 'role-update',
+            requestId,
+            reason: 'Lobby introuvable.'
           }
         });
         return;
       }
-
-      const game = {
-        code,
-        hostId: lobby.hostId,
-        players: new Map()
-      };
-
-      lobby.players.forEach((player) => {
-        game.players.set(player.id, { ...player });
-      });
-
-      games.set(code, game);
-      gameSocketMessageCounts.set(code, gameSocketMessageCounts.get(code) || 0);
-
-      persistToBdd('/api/game-sessions', 'POST', { game_code: code });
-
-      lobby.players.forEach((player) => {
-        const playerSocket = socketsById.get(player.id);
-        if (playerSocket) {
-          const playerClient = clients.get(playerSocket.id);
-          if (playerClient) {
-            playerClient.lobbyCode = null;
+      const lobby = lobbies.get(lobbyCode);
+      if (lobby.hostId !== clientId) {
+        send(socket, {
+          type: 'lobby:action-rejected',
+          payload: {
+            action: 'role-update',
+            requestId,
+            reason: 'Seul le host peut modifier les roles.'
           }
-        }
+        });
+        return;
+      }
+      const applied = applyLobbyRoleUpdate({
+        lobby,
+        targetId,
+        role,
+        requestId
       });
+      if (!applied) {
+        send(socket, {
+          type: 'lobby:action-rejected',
+          payload: {
+            action: 'role-update',
+            requestId,
+            reason: 'Joueur cible introuvable.'
+          }
+        });
+        return;
+      }
+      markStateChanged('lobby:role-update-request', {
+        code: lobbyCode,
+        targetId,
+        role,
+        requestId
+      });
+      return;
+    }
 
-      lobbies.delete(code);
-      lobbySocketMessageCounts.delete(code);
-
-      lobby.players.forEach((player) => {
-        const playerSocket = socketsById.get(player.id);
-        if (playerSocket) {
-          send(playerSocket, {
-            type: 'game:started',
-            payload: { code }
+    if (type === 'lobby:config-update-request') {
+      const { lobbyCode } = clients.get(socket.id) || {};
+      const requestId = payload?.requestId || null;
+      const incomingConfig =
+        payload?.gameConfig && typeof payload.gameConfig === 'object'
+          ? payload.gameConfig
+          : null;
+      if (!lobbyCode || !lobbies.has(lobbyCode)) {
+        send(socket, {
+          type: 'lobby:action-rejected',
+          payload: {
+            action: 'config-update',
+            requestId,
+            reason: 'Lobby introuvable.'
+          }
+        });
+        return;
+      }
+      const lobby = lobbies.get(lobbyCode);
+      if (lobby.hostId !== clientId) {
+        send(socket, {
+          type: 'lobby:action-rejected',
+          payload: {
+            action: 'config-update',
+            requestId,
+            reason: 'Seul le host peut modifier les paramètres.'
+          }
+        });
+        return;
+      }
+      if (!incomingConfig) {
+        send(socket, {
+          type: 'lobby:action-rejected',
+          payload: {
+            action: 'config-update',
+            requestId,
+            reason: 'Configuration invalide.'
+          }
+        });
+        return;
+      }
+      lobby.config = {
+        ...(lobby.config && typeof lobby.config === 'object' ? lobby.config : {}),
+        ...incomingConfig
+      };
+      lobby.stateVersion = (lobby.stateVersion || 1) + 1;
+      lobby.players.forEach((p) => {
+        const s = socketsById.get(p.id);
+        if (s) {
+          send(s, {
+            type: 'lobby:config-updated',
+            payload: {
+              config: lobby.config,
+              stateVersion: lobby.stateVersion,
+              requestId
+            }
           });
         }
       });
+      markStateChanged('lobby:config-update-request', {
+        code: lobbyCode,
+        stateVersion: lobby.stateVersion,
+        requestId
+      });
+      return;
+    }
 
-      clients.get(socket.id).gameCode = code;
-      clients.get(socket.id).lobbyCode = null;
+    if (type === 'lobby:start-game-request') {
+      const { lobbyCode } = clients.get(socket.id) || {};
+      const requestId = payload?.requestId || null;
+      tryStartGameFromLobby({
+        socket,
+        clientId,
+        code: lobbyCode?.toUpperCase(),
+        requestId,
+        requireRoleCheck: false
+      });
+      return;
+    }
 
-      send(socket, {
-        type: 'game:created',
-        payload: {
-          code,
-          playerId: clientId,
-          hostId: lobby.hostId,
-          game: getLobbySnapshot(game)
-        }
+    if (type === 'game:create') {
+      const code = payload?.code?.toUpperCase();
+      tryStartGameFromLobby({
+        socket,
+        clientId,
+        code,
+        requireRoleCheck: false
       });
       return;
     }
@@ -1723,7 +1874,7 @@ io.on('connection', (socket) => {
           id: clientId,
           name: payload?.playerName || existingPlayer?.name || 'Joueur',
           isHost: existingPlayer?.isHost || false,
-          status: existingPlayer?.status || 'active',
+          status: 'active',
           role: existingPlayer?.role ?? undefined
         });
 
@@ -1749,19 +1900,32 @@ io.on('connection', (socket) => {
           }
         });
 
-        if (game.hostId !== clientId) {
-          const hostSocket = socketsById.get(game.hostId);
-          if (hostSocket) {
-            send(hostSocket, {
+        game.players.forEach((p) => {
+          if (p.id === clientId) return;
+          const s = socketsById.get(p.id);
+          if (s) {
+            send(s, {
+              type: 'game:peer-joined',
+              payload: {
+                playerId: clientId,
+                oldPlayerId,
+                playerName: existingPlayer?.name || payload?.playerName || 'Joueur',
+                role: existingPlayer?.role ?? null,
+                status: 'active'
+              }
+            });
+            send(s, {
               type: 'game:peer-reconnected',
               payload: {
                 playerId: clientId,
                 oldPlayerId,
-                playerName: existingPlayer?.name || payload?.playerName || 'Joueur'
+                playerName: existingPlayer?.name || payload?.playerName || 'Joueur',
+                role: existingPlayer?.role ?? null,
+                status: 'active'
               }
             });
           }
-        }
+        });
         return;
       }
 
@@ -1863,16 +2027,21 @@ io.on('connection', (socket) => {
         }
       });
 
-      const hostSocketForJoin = socketsById.get(game.hostId);
-      if (hostSocketForJoin) {
-        send(hostSocketForJoin, {
-          type: 'game:peer-joined',
-          payload: {
-            playerId: clientId,
-            playerName: payload?.playerName || 'Joueur'
-          }
-        });
-      }
+      game.players.forEach((p) => {
+        if (p.id === clientId) return;
+        const s = socketsById.get(p.id);
+        if (s) {
+          send(s, {
+            type: 'game:peer-joined',
+            payload: {
+              playerId: clientId,
+              playerName: payload?.playerName || 'Joueur',
+              role: game.players.get(clientId)?.role ?? null,
+              status: game.players.get(clientId)?.status || 'active'
+            }
+          });
+        }
+      });
       return;
     }
 
@@ -1918,7 +2087,12 @@ io.on('connection', (socket) => {
 
         socketsById.delete(oldPlayerId);
         socketsById.set(clientId, socket);
-        clients.set(socket.id, { clientId, lobbyCode: null, gameCode: code });
+        clients.set(socket.id, {
+          clientId,
+          lobbyCode: null,
+          gameCode: code,
+          clientVersion: clients.get(socket.id)?.clientVersion || null
+        });
 
         send(socket, {
           type: 'game:joined',
@@ -2026,17 +2200,65 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'game:update-remaining-time-request') {
+      const gameCode = clientInfo?.gameCode;
+      const requestId = payload?.requestId || null;
+      const remaining = payload?.remaining_time;
+      if (!gameCode || !games.has(gameCode)) {
+        sendGameActionRejected(socket, 'update-remaining-time', requestId, 'Partie introuvable.');
+        return;
+      }
+      if (typeof remaining !== 'number') {
+        sendGameActionRejected(socket, 'update-remaining-time', requestId, 'remaining_time invalide.');
+        return;
+      }
+      const game = games.get(gameCode);
+      if (clientInfo?.clientId !== game.hostId) {
+        sendGameActionRejected(socket, 'update-remaining-time', requestId, 'Seul le host peut modifier le temps.');
+        return;
+      }
+      const hasCountdownStarted = !!(payload && 'countdown_started' in payload);
+      const stateVersion = applyGameRemainingTimeUpdate({
+        game,
+        remaining,
+        countdownStarted: payload?.countdown_started,
+        hasCountdownStarted,
+        requestId
+      });
+      markStateChanged('game:update-remaining-time-request', {
+        code: gameCode,
+        remaining: game.remainingTimeSeconds,
+        stateVersion,
+        requestId
+      });
+      send(socket, {
+        type: 'game:action-ack',
+        payload: {
+          action: 'update-remaining-time',
+          requestId,
+          stateVersion
+        }
+      });
+      return;
+    }
+
     if (type === 'game:update-remaining-time') {
       const gameCode = clientInfo?.gameCode;
       const remaining = payload?.remaining_time;
       if (gameCode && games.has(gameCode) && typeof remaining === 'number') {
         const game = games.get(gameCode);
         if (game && clientInfo?.clientId === game.hostId) {
-          game.remainingTimeSeconds = Math.max(0, Math.floor(remaining));
-          game.remainingTimeUpdatedAt = Date.now();
-          if (payload && 'countdown_started' in payload) {
-            game.remainingTimeCountdownActive = !!payload.countdown_started;
-          }
+          const stateVersion = applyGameRemainingTimeUpdate({
+            game,
+            remaining,
+            countdownStarted: payload?.countdown_started,
+            hasCountdownStarted: !!(payload && 'countdown_started' in payload)
+          });
+          markStateChanged('game:update-remaining-time', {
+            code: gameCode,
+            remaining: game.remainingTimeSeconds,
+            stateVersion
+          });
         }
       }
       return;
@@ -2100,30 +2322,76 @@ io.on('connection', (socket) => {
 
     if (type === 'state:sync') {
       const targetId = payload?.targetId;
-      const targetSocket = socketsById.get(targetId);
-      if (!targetSocket) {
-        log(`[ERREUR RESYNC] État sync vers ${targetId} échoué: destinataire introuvable`);
-        return;
-      }
       const gameCode = clientInfo?.gameCode;
       const inner = payload?.payload;
-      const remainingTime = inner?.gameDetails?.remaining_time;
       if (gameCode && games.has(gameCode)) {
         const game = games.get(gameCode);
         if (game && clientInfo?.clientId === game.hostId) {
-          if (typeof remainingTime === 'number') {
-            game.remainingTimeSeconds = remainingTime;
-            game.remainingTimeUpdatedAt = Date.now();
-          }
-          game.remainingTimeCountdownActive = !!(inner?.gameDetails?.started && inner?.gameDetails?.countdown_started);
-          game.lastHostState = inner || null;
-          game.lastHostStateAt = Date.now();
-          game.lastHostStateHostId = clientInfo.clientId;
+          const stateVersion = applyGameStateSync({
+            game,
+            hostId: clientInfo.clientId,
+            statePayload: inner,
+            targetId: targetId || null
+          });
+          markStateChanged('game:state-sync', { code: gameCode, stateVersion });
         }
       }
-      send(targetSocket, {
-        type: 'state:sync',
-        payload: inner
+      if (targetId && !socketsById.get(targetId)) {
+        log(`[ERREUR RESYNC] État sync vers ${targetId} échoué: destinataire introuvable`);
+      }
+      return;
+    }
+
+    if (type === 'game:state-sync-request') {
+      const gameCode = clientInfo?.gameCode;
+      const requestId = payload?.requestId || null;
+      const targetId = payload?.targetId || null;
+      const inner = payload?.payload || null;
+      if (inner && typeof inner === 'object') {
+        try {
+          log(
+            `[STATE_SYNC_REQUEST] ${clientId} -> ${gameCode} requestId=${requestId || 'n/a'} ` +
+              `props=${Array.isArray(inner.props) ? inner.props.length : 0} ` +
+              `players=${Array.isArray(inner.players) ? inner.players.length : 0}`
+          );
+          if (Array.isArray(inner.props)) {
+            log('[STATE_SYNC_REQUEST][props]', prettyInspect(inner.props));
+          }
+          if (Array.isArray(inner.players)) {
+            log('[STATE_SYNC_REQUEST][players]', prettyInspect(inner.players));
+          }
+        } catch (e) {
+          log('[STATE_SYNC_REQUEST][debug] failed to inspect payload', e?.message || e);
+        }
+      }
+      if (!gameCode || !games.has(gameCode)) {
+        sendGameActionRejected(socket, 'state-sync', requestId, 'Partie introuvable.');
+        return;
+      }
+      const game = games.get(gameCode);
+      if (!game || clientInfo?.clientId !== game.hostId) {
+        sendGameActionRejected(socket, 'state-sync', requestId, 'Seul le host peut synchroniser l etat.');
+        return;
+      }
+      const stateVersion = applyGameStateSync({
+        game,
+        hostId: clientInfo.clientId,
+        statePayload: inner,
+        targetId,
+        requestId
+      });
+      markStateChanged('game:state-sync-request', {
+        code: gameCode,
+        targetId,
+        stateVersion
+      });
+      send(socket, {
+        type: 'game:action-ack',
+        payload: {
+          action: 'state-sync',
+          requestId,
+          stateVersion
+        }
       });
       return;
     }
@@ -2178,39 +2446,17 @@ io.on('connection', (socket) => {
 
       log(`[JOUEUR QUITTE] Lobby: ${code}, Joueur: ${playerId}`);
 
-      // Si c'est le host qui quitte, fermer le lobby
+      // Si c'est le host qui quitte, transférer le host si possible
       if (lobby.hostId === playerId) {
-        log(`[HOST QUITTE] Code: ${code}, Host: ${playerId} - Fermeture du lobby`);
-        
-        // Annuler les timers si ils existent
-        if (disconnectedHosts.has(code)) {
-          const hostInfo = disconnectedHosts.get(code);
-          clearTimeout(hostInfo.timeoutId);
-          disconnectedHosts.delete(code);
-        }
-        if (awayHosts.has(code)) {
-          const awayInfo = awayHosts.get(code);
-          clearTimeout(awayInfo.timeoutId);
-          awayHosts.delete(code);
-        }
-        
-        // Notifier tous les joueurs que le lobby est fermé
-        lobby.players.forEach((player) => {
-          if (player.id !== playerId) {
-            const playerSocket = socketsById.get(player.id);
-            send(playerSocket, { 
-              type: 'lobby:closed', 
-              payload: { 
-                code, 
-                reason: 'Le host a quitté le lobby'
-              } 
-            });
-          }
+        lobby.players.delete(playerId);
+        const transferred = transferLobbyHost({
+          code,
+          oldHostId: playerId,
+          reason: 'Le host a quitté le lobby'
         });
-        
-        // Supprimer le lobby
-        lobbies.delete(code);
-      lobbySocketMessageCounts.delete(code);
+        if (!transferred) {
+          closeLobby(code, 'Le host a quitté le lobby');
+        }
       } else {
         // Joueur normal qui quitte
         lobby.players.delete(playerId);
@@ -2230,6 +2476,7 @@ io.on('connection', (socket) => {
       if (clientInfo) {
         clientInfo.lobbyCode = null;
       }
+      markStateChanged('lobby:leave', { code, playerId });
       
       return;
     }
@@ -2248,39 +2495,43 @@ io.on('connection', (socket) => {
       }
 
       if (game.hostId === playerId) {
-        const lastState = game.lastHostState;
-        const winnerType = lastState?.gameDetails?.winner_type || null;
-        persistToBdd('/api/game-sessions', 'POST', {
-          game_code: code,
-          ended_at: new Date().toISOString(),
-          winner_type: winnerType
-        });
-        game.players.forEach((player) => {
-          if (player.id !== playerId) {
-            const playerSocket = socketsById.get(player.id);
-            send(playerSocket, {
-              type: 'game:closed',
-              payload: { code, reason: 'Le host a quitté la partie' }
-            });
-          }
-        });
-        games.delete(code);
-        gameSocketMessageCounts.delete(code);
-      } else {
-        game.players.delete(playerId);
-        const hostSocket = socketsById.get(game.hostId);
-        if (hostSocket) {
-          send(hostSocket, {
-            type: 'game:peer-left',
-            payload: { playerId }
-          });
+        const leavingHost = game.players.get(playerId);
+        if (leavingHost) {
+          leavingHost.status = 'disconnected';
+          leavingHost.disconnectedAt = Date.now();
+          leavingHost.isHost = false;
         }
+        const transferred = transferGameHost({
+          code,
+          oldHostId: playerId,
+          reason: 'Le host a quitté la partie'
+        });
+        if (!transferred) {
+          closeGame(code, 'Le host a quitté la partie');
+        }
+      } else {
+        const leavingPlayer = game.players.get(playerId);
+        if (leavingPlayer) {
+          leavingPlayer.status = 'disconnected';
+          leavingPlayer.disconnectedAt = Date.now();
+        }
+        forEachConnectedGameRecipient(
+          game,
+          (s) => {
+            send(s, {
+              type: 'game:peer-left',
+              payload: { playerId }
+            });
+          },
+          { exceptId: playerId }
+        );
       }
 
       const clientInfo = clients.get(socket.id);
       if (clientInfo) {
         clientInfo.gameCode = null;
       }
+      markStateChanged('game:leave', { code, playerId });
       return;
     }
 
@@ -2291,6 +2542,16 @@ io.on('connection', (socket) => {
         const player = game.players.get(clientId);
         if (player) {
           player.status = payload?.status || 'active';
+          if ((player.status || '').toLowerCase() === 'disconnected') {
+            player.disconnectedAt = Date.now();
+          } else {
+            player.disconnectedAt = null;
+          }
+          markStateChanged('game:player-status-update', {
+            code: gameCode,
+            playerId: clientId,
+            status: player.status
+          });
         }
         return;
       }
@@ -2304,6 +2565,11 @@ io.on('connection', (socket) => {
         const oldStatus = player.status;
         player.status = payload?.status || 'active';
         log(`[STATUT JOUEUR] ${clientId} dans lobby ${lobbyCode}: ${player.status}`);
+        markStateChanged('lobby:player-status-update', {
+          code: lobbyCode,
+          playerId: clientId,
+          status: player.status
+        });
         
         // Si c'est le host qui change de statut
         if (clientId === lobby.hostId) {
@@ -2324,23 +2590,16 @@ io.on('connection', (socket) => {
                 
                 // Vérifier si le host est toujours absent
                 if (currentHostPlayer && currentHostPlayer.status === 'away') {
-                  log(`[LOBBY FERMÉ] Code: ${lobbyCode}, Host absent depuis trop longtemps (2 minutes)`);
-                  
-                  // Notifier tous les joueurs que le lobby est fermé
-                  currentLobby.players.forEach((p) => {
-                    const playerSocket = socketsById.get(p.id);
-                    send(playerSocket, { 
-                      type: 'lobby:closed', 
-                      payload: { 
-                        code: lobbyCode, 
-                        reason: 'Host absent depuis trop longtemps'
-                      } 
-                    });
+                  const oldHostId = currentLobby.hostId;
+                  currentLobby.players.delete(oldHostId);
+                  const transferred = transferLobbyHost({
+                    code: lobbyCode,
+                    oldHostId,
+                    reason: 'Host absent trop longtemps, transfert automatique'
                   });
-                  
-                  lobbies.delete(lobbyCode);
-                  lobbySocketMessageCounts.delete(lobbyCode);
-                  awayHosts.delete(lobbyCode);
+                  if (!transferred) {
+                    closeLobby(lobbyCode, 'Host absent depuis trop longtemps');
+                  }
                 }
               }
             }, 2 * 60 * 1000); // 2 minutes
@@ -2364,6 +2623,73 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'game:player-status-update-request') {
+      const { gameCode } = clients.get(socket.id) || {};
+      const requestId = payload?.requestId || null;
+      const targetId = payload?.playerId || clientId;
+      const requestedStatus = payload?.status;
+      const status = typeof requestedStatus === 'string' && requestedStatus.trim()
+        ? requestedStatus.trim()
+        : 'active';
+      if (!gameCode || !games.has(gameCode)) {
+        sendGameActionRejected(socket, 'player-status-update', requestId, 'Partie introuvable.');
+        return;
+      }
+      const game = games.get(gameCode);
+      const isHost = game.hostId === clientId;
+      if (!isHost && targetId !== clientId) {
+        sendGameActionRejected(
+          socket,
+          'player-status-update',
+          requestId,
+          'Seul le host peut modifier un autre joueur.'
+        );
+        return;
+      }
+      const player = game.players.get(targetId);
+      if (!player) {
+        sendGameActionRejected(socket, 'player-status-update', requestId, 'Joueur introuvable.');
+        return;
+      }
+      player.status = status;
+      if ((status || '').toLowerCase() === 'disconnected') {
+        player.disconnectedAt = Date.now();
+      } else {
+        player.disconnectedAt = null;
+      }
+      const stateVersion = bumpGameStateVersion(game);
+      game.players.forEach((p) => {
+        const s = socketsById.get(p.id);
+        if (s) {
+          send(s, {
+            type: 'game:player-updated',
+            payload: {
+              playerId: targetId,
+              changes: { status },
+              stateVersion,
+              requestId
+            }
+          });
+        }
+      });
+      markStateChanged('game:player-status-update-request', {
+        code: gameCode,
+        playerId: targetId,
+        status,
+        stateVersion,
+        requestId
+      });
+      send(socket, {
+        type: 'game:action-ack',
+        payload: {
+          action: 'player-status-update',
+          requestId,
+          stateVersion
+        }
+      });
+      return;
+    }
+
     if (type === 'lobby:chat') {
       const { lobbyCode } = clients.get(socket.id) || {};
       const text = typeof payload?.text === 'string' ? payload.text.trim().substring(0, 500) : '';
@@ -2384,6 +2710,7 @@ io.on('connection', (socket) => {
         const s = socketsById.get(p.id);
         if (s) send(s, { type: 'lobby:chat-message', payload: msg });
       });
+      markStateChanged('lobby:chat', { code: lobbyCode, playerId: clientId });
       return;
     }
 
@@ -2439,6 +2766,7 @@ io.on('connection', (socket) => {
       const { lobbyCode, gameCode } = clients.get(socket.id) || {};
       const targetId = payload?.playerId || clientId;
       const role = payload?.role ?? null;
+      const requestId = payload?.requestId || null;
 
       if (gameCode && games.has(gameCode)) {
         const game = games.get(gameCode);
@@ -2451,10 +2779,39 @@ io.on('connection', (socket) => {
 
       if (lobbyCode && lobbies.has(lobbyCode)) {
         const lobby = lobbies.get(lobbyCode);
-        const player = lobby.players.get(targetId);
-        if (player) {
-          player.role = role;
+        if (lobby.hostId !== clientId) {
+          send(socket, {
+            type: 'lobby:action-rejected',
+            payload: {
+              action: 'role-update',
+              requestId,
+              reason: 'Seul le host peut modifier les roles.'
+            }
+          });
+          return;
         }
+        const applied = applyLobbyRoleUpdate({
+          lobby,
+          targetId,
+          role,
+          requestId
+        });
+        if (!applied) {
+          send(socket, {
+            type: 'lobby:action-rejected',
+            payload: {
+              action: 'role-update',
+              requestId,
+              reason: 'Joueur cible introuvable.'
+            }
+          });
+          return;
+        }
+        markStateChanged('lobby:player-role-update', {
+          code: lobbyCode,
+          targetId,
+          role
+        });
       }
       return;
     }
@@ -2481,21 +2838,21 @@ io.on('connection', (socket) => {
           if (games.has(gameCode) && games.get(gameCode).hostId === clientInfo.clientId) {
             const currentGame = games.get(gameCode);
             if (currentGame) {
-              const lastState = currentGame.lastHostState;
-              const winnerType = lastState?.gameDetails?.winner_type || null;
-              persistToBdd('/api/game-sessions', 'POST', {
-                game_code: gameCode,
-                ended_at: new Date().toISOString(),
-                winner_type: winnerType
+              const hostPlayer = currentGame.players.get(clientInfo.clientId);
+              if (hostPlayer) {
+                hostPlayer.status = 'disconnected';
+                hostPlayer.disconnectedAt = Date.now();
+                hostPlayer.isHost = false;
+              }
+              const transferred = transferGameHost({
+                code: gameCode,
+                oldHostId: clientInfo.clientId,
+                reason: 'Host déconnecté, transfert automatique'
               });
-              currentGame.players.forEach((player) => {
-                const playerSocket = socketsById.get(player.id);
-                send(playerSocket, { type: 'game:closed', payload: { code: gameCode } });
-              });
+              if (!transferred) {
+                closeGame(gameCode, 'Timeout de reconnexion du host dépassé');
+              }
             }
-            games.delete(gameCode);
-            gameSocketMessageCounts.delete(gameCode);
-            disconnectedGameHosts.delete(gameCode);
           }
         }, 5 * 60 * 1000);
 
@@ -2505,11 +2862,21 @@ io.on('connection', (socket) => {
           disconnectedAt: Date.now()
         });
       } else {
-        // Ne pas supprimer le joueur de game.players : on garde rôle, etc. pour la reconnexion.
-        // On notifie le host qui marquera le joueur déconnecté ; au game:join avec oldPlayerId
-        // on remplacera l'entrée par le nouveau clientId.
-        const hostSocket = socketsById.get(game.hostId);
-        if (hostSocket) send(hostSocket, { type: 'game:peer-left', payload: { playerId: clientInfo.clientId } });
+        const player = game.players.get(clientInfo.clientId);
+        if (player) {
+          player.status = 'disconnected';
+          player.disconnectedAt = Date.now();
+        }
+        forEachConnectedGameRecipient(
+          game,
+          (s) => {
+            send(s, {
+              type: 'game:peer-left',
+              payload: { playerId: clientInfo.clientId }
+            });
+          },
+          { exceptId: clientInfo.clientId }
+        );
       }
     }
 
@@ -2533,20 +2900,18 @@ io.on('connection', (socket) => {
         // Marquer le lobby comme en attente de reconnexion
         const timeoutId = setTimeout(() => {
           if (lobbies.has(lobbyCode) && lobbies.get(lobbyCode).hostId === clientInfo.clientId) {
-            log(`[LOBBY FERMÉ] Code: ${lobbyCode}, Timeout de reconnexion dépassé`);
-            
             const currentLobby = lobbies.get(lobbyCode);
             if (currentLobby) {
-              // Notifier tous les joueurs que le lobby est fermé
-              currentLobby.players.forEach((player) => {
-                const playerSocket = socketsById.get(player.id);
-                send(playerSocket, { type: 'lobby:closed', payload: { code: lobbyCode } });
+              currentLobby.players.delete(clientInfo.clientId);
+              const transferred = transferLobbyHost({
+                code: lobbyCode,
+                oldHostId: clientInfo.clientId,
+                reason: 'Host déconnecté, transfert automatique'
               });
+              if (!transferred) {
+                closeLobby(lobbyCode, 'Timeout de reconnexion du host dépassé');
+              }
             }
-            
-            lobbies.delete(lobbyCode);
-            lobbySocketMessageCounts.delete(lobbyCode);
-            disconnectedHosts.delete(lobbyCode);
           }
         }, 5 * 60 * 1000); // 5 minutes
         
@@ -2568,6 +2933,89 @@ io.on('connection', (socket) => {
     socketsById.delete(clientInfo.clientId);
   });
 });
+
+await hydrateRuntimeState();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, lobby] of lobbies.entries()) {
+    if (typeof lobby.expiresAt === 'number' && lobby.expiresAt <= now) {
+      log(`[TTL] Fermeture lobby expiré: ${code}`);
+      closeLobby(code, 'Lobby expiré');
+      markStateChanged('lobby:expired', { code });
+    }
+  }
+  for (const [code, game] of games.entries()) {
+    const prunedPlayers = pruneDisconnectedGamePlayers(game, now);
+    if (prunedPlayers > 0) {
+      logDebug(`[TTL] Nettoyage joueurs disconnected: game=${code} removed=${prunedPlayers}`);
+      markStateChanged('game:disconnected-player-pruned', {
+        code,
+        removed: prunedPlayers
+      });
+    }
+
+    if (game.finishedAt) {
+      log(`[TTL] Fermeture immédiate partie terminée: ${code}`);
+      closeGame(code, 'Partie terminée', false);
+      markStateChanged('game:finished-immediate-sweep', { code });
+      continue;
+    }
+
+    if (!hasPresentPlayersInGame(game)) {
+      const lastActivityAt =
+        typeof game.lastActivityAt === 'number' ? game.lastActivityAt : now;
+      if (now - lastActivityAt >= EMPTY_GAME_TTL_MS) {
+        log(`[TTL] Fermeture partie inactive sans joueurs: ${code}`);
+        closeGame(code, 'Partie inactive sans joueurs');
+        markStateChanged('game:expired-empty', { code });
+        continue;
+      }
+    }
+
+    if (typeof game.expiresAt === 'number' && game.expiresAt <= now) {
+      log(`[TTL] Fermeture partie expirée: ${code}`);
+      closeGame(code, game.finishedAt ? 'Partie terminée' : 'Partie expirée');
+      markStateChanged('game:expired', { code, finished: !!game.finishedAt });
+    }
+  }
+}, 30000).unref();
+
+if (!MEMORY_ONLY_MODE) {
+  setInterval(() => {
+    schedulePersist('periodic');
+  }, 15000).unref();
+}
+
+const gracefulPersistAndExit = async (signal) => {
+  if (!MEMORY_ONLY_MODE) {
+    if (eventLogFlushTimer) {
+      clearTimeout(eventLogFlushTimer);
+      eventLogFlushTimer = null;
+    }
+    await flushRuntimeEvents();
+  }
+  if (!MEMORY_ONLY_MODE) {
+    log(`[PERSIST] Signal ${signal} reçu, sauvegarde de l'état runtime...`);
+    await persistRuntimeStateNow(`signal:${signal}`);
+  }
+  process.exit(0);
+};
+
+process.on('SIGINT', () => {
+  void gracefulPersistAndExit('SIGINT');
+});
+process.on('SIGTERM', () => {
+  void gracefulPersistAndExit('SIGTERM');
+});
+
+if (ENABLE_COST_METRICS) {
+  buildCostMetricsSample();
+  setInterval(() => {
+    const sample = buildCostMetricsSample();
+    log('[COST_METRICS]', sample);
+  }, COST_METRICS_INTERVAL_MS).unref();
+}
 
 server.listen(PORT, () => {
   const address = server.address();
