@@ -69,3 +69,18 @@ pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+#sessionsContainer {
+  margin-top: 12px;
+}
+
+.session-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}

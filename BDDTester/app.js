@@ -6,6 +6,7 @@ const resultEl = document.getElementById("result");
 const authStatusEl = document.getElementById("authStatus");
 const payloadEl = document.getElementById("payload");
 const configSummaryEl = document.getElementById("configSummary");
+const sessionsContainerEl = document.getElementById("sessionsContainer");
 
 function renderConfig() {
   configSummaryEl.innerHTML = `
@@ -155,12 +156,78 @@ async function callApi(endpoint, method = "GET") {
   resultEl.textContent = `HTTP ${response.status}\n\n${text}`;
 }
 
+async function loadConnectedUsers() {
+  const response = await fetch(`${config.apiBaseUrl}/api/admin/connected-users`);
+  const text = await response.text();
+  if (!response.ok) {
+    sessionsContainerEl.innerHTML = `<p>Erreur chargement sessions: ${text}</p>`;
+    return;
+  }
+
+  const data = JSON.parse(text);
+  const users = Array.isArray(data.users) ? data.users : [];
+  if (users.length === 0) {
+    sessionsContainerEl.innerHTML = "<p>Aucun utilisateur connecte.</p>";
+    return;
+  }
+
+  sessionsContainerEl.innerHTML = "";
+  users.forEach((user) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "session-item";
+
+    const info = document.createElement("div");
+    info.textContent = `${user.username || "(sans username)"} - ${user.email || "(sans email)"} - id ${user.id}`;
+
+    const button = document.createElement("button");
+    button.className = "secondary";
+    button.textContent = "Deconnecter";
+    button.addEventListener("click", async () => {
+      try {
+        const disconnectResponse = await fetch(
+          `${config.apiBaseUrl}/api/admin/connected-users/${user.id}`,
+          { method: "DELETE" }
+        );
+        const body = await disconnectResponse.text();
+        if (!disconnectResponse.ok) {
+          resultEl.textContent = `Echec deconnexion utilisateur ${user.id}: ${body}`;
+        } else {
+          resultEl.textContent = `Utilisateur ${user.id} deconnecte.`;
+          await loadConnectedUsers();
+        }
+      } catch (error) {
+        resultEl.textContent = `Erreur deconnexion: ${error.message}`;
+      }
+    });
+
+    wrapper.appendChild(info);
+    wrapper.appendChild(button);
+    sessionsContainerEl.appendChild(wrapper);
+  });
+}
+
 document.getElementById("loginBtn").addEventListener("click", loginWithCognito);
-document.getElementById("logoutBtn").addEventListener("click", () => {
+document.getElementById("logoutBtn").addEventListener("click", async () => {
+  const tokens = readTokens();
+  try {
+    if (tokens?.access_token) {
+      await fetch(`${config.apiBaseUrl}/api/auth/logout`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokens.access_token}`,
+          "Content-Type": "application/json",
+        },
+      });
+    }
+  } catch (_error) {
+    // Local logout still proceeds even if API call fails.
+  }
   clearTokens();
   updateAuthStatus();
-  resultEl.textContent = "Tokens supprimes localement.";
+  resultEl.textContent = "Utilisateur deconnecte localement et session BDD invalidee.";
+  await loadConnectedUsers();
 });
+document.getElementById("refreshSessionsBtn").addEventListener("click", loadConnectedUsers);
 
 document.querySelectorAll("button[data-endpoint]").forEach((btn) => {
   btn.addEventListener("click", async () => {
@@ -178,6 +245,7 @@ async function init() {
   renderConfig();
   await handleOAuthCallbackIfPresent();
   updateAuthStatus();
+  await loadConnectedUsers();
 }
 
 init();

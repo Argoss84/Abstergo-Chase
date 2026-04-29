@@ -153,4 +153,23 @@ class AccountApiService {
       );
     });
   }
+
+  Future<void> logout(String accessToken) async {
+    await _withBaseUrlFallback<void>((baseUrl) async {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/api/auth/logout'),
+            headers: {
+              'Authorization': 'Bearer $accessToken',
+              'Content-Type': 'application/json',
+            },
+          )
+          .timeout(_requestTimeout);
+      if (response.statusCode >= 400) {
+        throw Exception(
+          'Echec logout (${response.statusCode}): ${response.body}',
+        );
+      }
+    });
+  }
 }

@@ -33,6 +33,68 @@ export async function getByCognitoSub(cognitoSub) {
   return result.rows[0] ?? null;
 }
 
+export async function activateSessionIfAvailable(cognitoSub, accessTokenHash) {
+  const result = await pool.query(
+    `
+    WITH target_user AS (
+      SELECT id FROM users WHERE cognito_sub = $1
+    )
+    INSERT INTO user_active_sessions (user_id, access_token_hash)
+    SELECT id, $2 FROM target_user
+    ON CONFLICT (user_id)
+    DO UPDATE SET
+      updated_at = NOW()
+    WHERE user_active_sessions.access_token_hash = EXCLUDED.access_token_hash
+    RETURNING user_id, updated_at
+    `,
+    [cognitoSub, accessTokenHash]
+  );
+
+  return result.rowCount > 0;
+}
+
+export async function listConnectedUsers() {
+  const result = await pool.query(
+    `
+    SELECT
+      u.id,
+      u.username,
+      u.email,
+      s.updated_at AS last_seen_at
+    FROM user_active_sessions s
+    JOIN users u ON u.id = s.user_id
+    ORDER BY s.updated_at DESC
+    `
+  );
+  return result.rows;
+}
+
+export async function disconnectUserSession(userId) {
+  const result = await pool.query(
+    `
+    DELETE FROM user_active_sessions
+    WHERE user_id = $1
+    RETURNING user_id
+    `,
+    [userId]
+  );
+  return result.rowCount > 0;
+}
+
+export async function disconnectSessionByCognitoSub(cognitoSub) {
+  const result = await pool.query(
+    `
+    DELETE FROM user_active_sessions s
+    USING users u
+    WHERE u.id = s.user_id
+      AND u.cognito_sub = $1
+    RETURNING s.user_id
+    `,
+    [cognitoSub]
+  );
+  return result.rowCount > 0;
+}
+
 export async function upsertProfileByCognitoSub(cognitoSub, payload) {
   const user = await getByCognitoSub(cognitoSub);
   if (!user) {

@@ -1,20 +1,52 @@
 import { Router } from 'express';
-import { requireAuth } from '../../middleware/auth-cognito.js';
+import Joi from 'joi';
+import { requireAuth, requireAuthForSync } from '../../middleware/auth-cognito.js';
 import { validate } from '../../middleware/validate.js';
 import { HttpError } from '../../utils/http-error.js';
 import { syncUserSchema, updateProfileSchema } from './users.schemas.js';
-import { getByCognitoSub, upsertFromCognito, upsertProfileByCognitoSub } from './users.repository.js';
+import {
+  activateSessionIfAvailable,
+  disconnectSessionByCognitoSub,
+  disconnectUserSession,
+  getByCognitoSub,
+  listConnectedUsers,
+  upsertFromCognito,
+  upsertProfileByCognitoSub,
+} from './users.repository.js';
 
 export const usersRouter = Router();
+const connectedUserParamsSchema = Joi.object({
+  userId: Joi.number().integer().positive().required(),
+});
 
-usersRouter.post('/auth/sync', requireAuth, validate(syncUserSchema), async (req, res, next) => {
+usersRouter.post('/auth/sync', requireAuthForSync, validate(syncUserSchema), async (req, res, next) => {
   try {
+    const sessionActivated = await activateSessionIfAvailable(
+      req.auth.sub,
+      req.auth.accessTokenHash
+    );
+    if (!sessionActivated) {
+      throw new HttpError(
+        409,
+        'Compte déjà connecté sur un autre appareil, veuillez le déconnecter pour l\'utiliser ici'
+      );
+    }
+
     const user = await upsertFromCognito({
       cognitoSub: req.auth.sub,
       email: req.auth.email,
       username: req.body.username ?? req.auth.username,
     });
     res.status(200).json({ user });
+  } catch (error) {
+    next(error);
+  }
+});
+
+usersRouter.post('/auth/logout', requireAuthForSync, async (req, res, next) => {
+  try {
+    await disconnectSessionByCognitoSub(req.auth.sub);
+    res.json({ success: true });
   } catch (error) {
     next(error);
   }
@@ -46,3 +78,28 @@ usersRouter.patch('/users/me', requireAuth, validate(updateProfileSchema), async
     next(error);
   }
 });
+
+usersRouter.get('/admin/connected-users', async (_req, res, next) => {
+  try {
+    const users = await listConnectedUsers();
+    res.json({ users });
+  } catch (error) {
+    next(error);
+  }
+});
+
+usersRouter.delete(
+  '/admin/connected-users/:userId',
+  validate(connectedUserParamsSchema, 'params'),
+  async (req, res, next) => {
+    try {
+      const disconnected = await disconnectUserSession(req.params.userId);
+      if (!disconnected) {
+        throw new HttpError(404, 'Session utilisateur introuvable');
+      }
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
