@@ -15,6 +15,6 @@ services:
     environment:
       SIGNALING_PORT: 5174
       SOCKET_IO_PATH: /socket.io
-      # Par défaut pas de ServerBDD dans ce compose (évite des fetch vers localhost:5175 dans le conteneur)
-      DISABLE_BDD: ${DISABLE_BDD:-true}
-      BDD_URL: ${BDD_URL:-}
+      # Persistance activée par défaut vers ServerBDD exposé sur l'hôte.
+      DISABLE_BDD: ${DISABLE_BDD:-false}
+      BDD_URL: ${BDD_URL:-http://host.docker.internal:5175}

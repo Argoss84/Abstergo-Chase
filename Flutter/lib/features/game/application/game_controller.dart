@@ -359,6 +359,9 @@ class GameController extends ChangeNotifier {
         _beginGameNow();
         return;
       }
+      // Keep re-broadcasting pre-start countdown for clients that missed
+      // the first snapshot (e.g. transient network hiccup).
+      _pushSnapshotThrottled();
       notifyListeners();
     });
     _pushSnapshot();
@@ -1168,6 +1171,31 @@ class GameController extends ChangeNotifier {
     return bestId;
   }
 
+  bool _isRogueStillInRangeForObjective({
+    required String roguePlayerId,
+    required String objectiveId,
+  }) {
+    final p = players.where((player) => player.id == roguePlayerId).toList();
+    if (p.isEmpty) return false;
+    final rogue = p.first;
+    if ((rogue.role ?? '').toUpperCase() != 'ROGUE') return false;
+    final status = rogue.status.toUpperCase();
+    if (status == 'CAPTURED' || status == 'DISCONNECTED') return false;
+    if (rogue.latitude == null || rogue.longitude == null) return false;
+
+    final objective = objectives.where((o) => o.id == objectiveId).toList();
+    if (objective.isEmpty || objective.first.captured) return false;
+
+    final rangeMeters = _configuredRogueRangeMeters();
+    final distance = Geolocator.distanceBetween(
+      rogue.latitude!,
+      rogue.longitude!,
+      objective.first.point.latitude,
+      objective.first.point.longitude,
+    );
+    return distance <= rangeMeters;
+  }
+
   void _tickObjectiveCapturesIfHost() {
     if (!isHost || _objectiveCaptureEndAtMs.isEmpty) return;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -1177,10 +1205,11 @@ class GameController extends ChangeNotifier {
       final objectiveId = entry.key;
       final rogueId = _objectiveCaptureRogueByObjectiveId[objectiveId];
       if (rogueId == null || rogueId.isEmpty) continue;
-      final stillInRangeObjective = _nearestHackableObjectiveIdForPlayer(
-        rogueId,
+      final stillInRangeForCurrentObjective = _isRogueStillInRangeForObjective(
+        roguePlayerId: rogueId,
+        objectiveId: objectiveId,
       );
-      if (stillInRangeObjective != objectiveId) {
+      if (!stillInRangeForCurrentObjective) {
         interruptedIds.add(objectiveId);
       }
     }

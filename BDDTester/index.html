@@ -48,6 +48,27 @@
         </div>
         <div id="sessionsContainer"></div>
       </section>
+
+      <section class="card">
+        <h2>4) Visualisation games</h2>
+        <div class="row wrap">
+          <input id="gameCodeInput" type="text" placeholder="Code game (ex: ABC123)" />
+          <button id="loadRecentGamesBtn" class="secondary">Lister games persistes</button>
+          <button id="loadGameBtn">Charger game</button>
+          <button id="loadGameEventsBtn" class="secondary">Charger events</button>
+          <button id="loadGameResultsBtn" class="secondary">Charger resultats</button>
+          <button id="loadGameReplayBtn" class="secondary">Charger replay</button>
+        </div>
+        <div id="gamesListContainer"></div>
+        <h3>Etat game</h3>
+        <pre id="gameStateResult">En attente...</pre>
+        <h3>Events timeline</h3>
+        <pre id="gameEventsResult">En attente...</pre>
+        <h3>Resultats</h3>
+        <pre id="gameResultsResult">En attente...</pre>
+        <h3>Replay snapshots</h3>
+        <pre id="gameReplayResult">En attente...</pre>
+      </section>
     </main>
 
     <script src="./config"></script>

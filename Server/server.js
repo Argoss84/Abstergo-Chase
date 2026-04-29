@@ -107,6 +107,17 @@ const persistToBdd = async (path, method, body) => {
   }
 };
 
+const persistGamePlayerToBdd = (gameCode, player) => {
+  persistToBdd(`/api/games/${gameCode}/players`, 'POST', {
+    player_external_id: player.id,
+    display_name_snapshot: player.name || 'Joueur',
+    role: player.role ?? null,
+    team: null,
+    is_host: !!player.isHost,
+    status: player.status || 'active'
+  });
+};
+
 const formatRemainingTime = (seconds) => {
   if (seconds === null || seconds === undefined || Number.isNaN(seconds)) {
     return 'n/a';
@@ -403,6 +414,34 @@ const closeLobby = (code, reason = 'Lobby expiré', notify = true) => {
 const closeGame = (code, reason = 'Partie expirée', notify = true) => {
   const game = games.get(code);
   if (!game) return false;
+  const winnerType = game?.lastHostState?.gameDetails?.winner_type || null;
+  const playerResults = Array.from(game.players.values()).map((player) => ({
+    player_external_id: player.id,
+    display_name_snapshot: player.name || 'Joueur',
+    role: player.role ?? null,
+    team: null,
+    score: 0,
+    kills: 0,
+    deaths: 0,
+    objectives_completed: 0,
+    reward_xp: winnerType && String(player.role || '').toUpperCase() === String(winnerType).toUpperCase()
+      ? 150
+      : 50,
+    is_winner: winnerType
+      ? String(player.role || '').toUpperCase() === String(winnerType).toUpperCase()
+      : false
+  }));
+
+  persistToBdd(`/api/games/${code}/end`, 'POST', {
+    winner_side: winnerType,
+    end_reason: reason
+  });
+  persistToBdd(`/api/games/${code}/results`, 'POST', {
+    winning_side: winnerType,
+    end_reason: reason,
+    player_results: playerResults
+  });
+
   if (notify) {
     game.players.forEach((player) => {
       const playerSocket = socketsById.get(player.id);
@@ -1006,6 +1045,23 @@ const applyLobbyRoleUpdate = ({
   }
   player.role = role;
   lobby.stateVersion = (lobby.stateVersion || 1) + 1;
+  persistToBdd(`/api/games/${lobby.code}/players`, 'POST', {
+    player_external_id: player.id,
+    display_name_snapshot: player.name || 'Joueur',
+    role: role ?? null,
+    team: null,
+    is_host: !!player.isHost,
+    status: player.status || 'active'
+  });
+  persistToBdd(`/api/games/${lobby.code}/events`, 'POST', {
+    events: [
+      {
+        event_type: 'lobby:role-updated',
+        actor_external_id: targetId,
+        payload_json: { role: role ?? null }
+      }
+    ]
+  });
   lobby.players.forEach((p) => {
     const s = socketsById.get(p.id);
     if (s) {
@@ -1228,6 +1284,24 @@ const tryStartGameFromLobby = ({
   games.set(code, game);
   gameSocketMessageCounts.set(code, gameSocketMessageCounts.get(code) || 0);
   markStateChanged('game:create', { code, hostId: clientId });
+  persistToBdd('/api/games', 'POST', {
+    game_code: code,
+    host_player_id: clientId,
+    config_json: lobby.config || null
+  });
+  persistToBdd(`/api/games/${code}/start`, 'POST', {});
+  game.players.forEach((player) => {
+    persistGamePlayerToBdd(code, player);
+  });
+  persistToBdd(`/api/games/${code}/events`, 'POST', {
+    events: [
+      {
+        event_type: 'game:created-from-lobby',
+        actor_external_id: clientId,
+        payload_json: { lobby_code: code }
+      }
+    ]
+  });
   persistToBdd('/api/game-sessions', 'POST', { game_code: code });
 
   lobby.players.forEach((player) => {
@@ -1468,6 +1542,28 @@ io.on('connection', (socket) => {
       log(`[LOBBY CRÉÉ] Code: ${code}, Host: ${clientId}, Nom: ${payload?.playerName || 'Host'}`);
       incrementLobbySocketMessages(code);
       markStateChanged('lobby:create', { code, hostId: clientId });
+      persistToBdd('/api/games', 'POST', {
+        game_code: code,
+        host_player_id: clientId,
+        config_json: payload?.gameConfig || null
+      });
+      persistToBdd(`/api/games/${code}/players`, 'POST', {
+        player_external_id: clientId,
+        display_name_snapshot: payload?.playerName || 'Host',
+        role: null,
+        team: null,
+        is_host: true,
+        status: 'active'
+      });
+      persistToBdd(`/api/games/${code}/events`, 'POST', {
+        events: [
+          {
+            event_type: 'lobby:created',
+            actor_external_id: clientId,
+            payload_json: { code }
+          }
+        ]
+      });
 
       send(socket, {
         type: 'lobby:created',
@@ -1610,6 +1706,23 @@ io.on('connection', (socket) => {
 
       log(`[LOBBY REJOINT] Code: ${code}, Joueur: ${clientId}, Nom: ${payload?.playerName || 'Joueur'}`);
       markStateChanged('lobby:join', { code, playerId: clientId });
+      persistToBdd(`/api/games/${code}/players`, 'POST', {
+        player_external_id: clientId,
+        display_name_snapshot: payload?.playerName || 'Joueur',
+        role: null,
+        team: null,
+        is_host: false,
+        status: 'active'
+      });
+      persistToBdd(`/api/games/${code}/events`, 'POST', {
+        events: [
+          {
+            event_type: 'lobby:joined',
+            actor_external_id: clientId,
+            payload_json: { code }
+          }
+        ]
+      });
 
       send(socket, {
         type: 'lobby:joined',
@@ -2271,35 +2384,6 @@ io.on('connection', (socket) => {
       const game = games.get(gameCode);
       if (!game || game.hostId !== clientId) return;
       const gd = state.gameDetails || {};
-      const players = state.players || [];
-      const props = state.props || [];
-      let gamePhase = 'converging';
-      if (gd.winner_type) gamePhase = 'ended';
-      else if (gd.started && gd.countdown_started) gamePhase = 'running';
-      const playersForReplay = players.map((p) => ({
-        id_player: p.id_player,
-        role: p.role,
-        latitude: p.latitude,
-        longitude: p.longitude,
-        status: p.status,
-        displayName: p.displayName || p.name
-      }));
-      const propsForReplay = props.map((pr) => ({
-        id_prop: pr.id_prop,
-        state: pr.state,
-        visible: pr.visible,
-        latitude: pr.latitude,
-        longitude: pr.longitude,
-        name: pr.name
-      }));
-      persistToBdd('/api/game-replay/snapshot', 'POST', {
-        game_code: gameCode,
-        snapshot_timestamp: new Date().toISOString(),
-        remaining_time_seconds: gd.remaining_time ?? null,
-        game_phase: gamePhase,
-        players_json: playersForReplay,
-        props_json: propsForReplay
-      });
       persistToBdd('/api/game-sessions', 'POST', {
         game_code: gameCode,
         config_json: gd.id_game ? {
@@ -2317,6 +2401,7 @@ io.on('connection', (socket) => {
           agent_range: gd.agent_range
         } : null
       });
+      // No recurrent /api/game-replay/snapshot call.
       return;
     }
 
@@ -2334,6 +2419,20 @@ io.on('connection', (socket) => {
             targetId: targetId || null
           });
           markStateChanged('game:state-sync', { code: gameCode, stateVersion });
+          persistToBdd(`/api/games/${gameCode}/events`, 'POST', {
+            events: [
+              {
+                event_type: 'game:state-sync',
+                actor_external_id: clientInfo.clientId,
+                payload_json: {
+                  stateVersion,
+                  targetId: targetId || null,
+                  winner_type: inner?.gameDetails?.winner_type || null,
+                  remaining_time: inner?.gameDetails?.remaining_time ?? null
+                }
+              }
+            ]
+          });
         }
       }
       if (targetId && !socketsById.get(targetId)) {

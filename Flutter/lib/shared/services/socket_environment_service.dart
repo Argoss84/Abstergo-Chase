@@ -18,7 +18,8 @@ class SocketEnvironmentService {
 
   Future<bool> useProduction() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_useProductionKey) ?? true;
+    // Default to development for local/docker test workflows.
+    return prefs.getBool(_useProductionKey) ?? false;
   }
 
   Future<void> setUseProduction(bool value) async {

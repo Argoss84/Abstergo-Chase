@@ -4,6 +4,7 @@ import { notFoundHandler, errorHandler } from './middleware/errors.js';
 import { usersRouter } from './modules/users/users.routes.js';
 import { socialRouter } from './modules/social/social.routes.js';
 import { progressionRouter } from './modules/progression/progression.routes.js';
+import { gamesRouter } from './modules/games/games.routes.js';
 
 export const app = express();
 
@@ -39,6 +40,7 @@ app.get('/health', async (_req, res, next) => {
 app.use('/api', usersRouter);
 app.use('/api', socialRouter);
 app.use('/api', progressionRouter);
+app.use('/api', gamesRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

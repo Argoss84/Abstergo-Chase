@@ -64,6 +64,15 @@ pre {
   padding: 10px;
 }
 
+input[type="text"] {
+  min-width: 260px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #dbeafe;
+  padding: 10px;
+}
+
 pre {
   min-height: 180px;
   white-space: pre-wrap;

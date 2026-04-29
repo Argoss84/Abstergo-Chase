@@ -21,6 +21,12 @@ const connectedUserParamsSchema = Joi.object({
 
 usersRouter.post('/auth/sync', requireAuthForSync, validate(syncUserSchema), async (req, res, next) => {
   try {
+    const user = await upsertFromCognito({
+      cognitoSub: req.auth.sub,
+      email: req.auth.email,
+      username: req.body.username ?? req.auth.username,
+    });
+
     const sessionActivated = await activateSessionIfAvailable(
       req.auth.sub,
       req.auth.accessTokenHash
@@ -31,12 +37,6 @@ usersRouter.post('/auth/sync', requireAuthForSync, validate(syncUserSchema), asy
         'Compte déjà connecté sur un autre appareil, veuillez le déconnecter pour l\'utiliser ici'
       );
     }
-
-    const user = await upsertFromCognito({
-      cognitoSub: req.auth.sub,
-      email: req.auth.email,
-      username: req.body.username ?? req.auth.username,
-    });
     res.status(200).json({ user });
   } catch (error) {
     next(error);

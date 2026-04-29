@@ -7,6 +7,12 @@ const authStatusEl = document.getElementById("authStatus");
 const payloadEl = document.getElementById("payload");
 const configSummaryEl = document.getElementById("configSummary");
 const sessionsContainerEl = document.getElementById("sessionsContainer");
+const gameCodeInputEl = document.getElementById("gameCodeInput");
+const gameStateResultEl = document.getElementById("gameStateResult");
+const gameEventsResultEl = document.getElementById("gameEventsResult");
+const gameResultsResultEl = document.getElementById("gameResultsResult");
+const gameReplayResultEl = document.getElementById("gameReplayResult");
+const gamesListContainerEl = document.getElementById("gamesListContainer");
 
 function renderConfig() {
   configSummaryEl.innerHTML = `
@@ -206,6 +212,118 @@ async function loadConnectedUsers() {
   });
 }
 
+function getSelectedGameCode() {
+  return (gameCodeInputEl?.value || "").trim().toUpperCase();
+}
+
+function pretty(data) {
+  return JSON.stringify(data, null, 2);
+}
+
+async function fetchJson(path) {
+  const response = await fetch(`${config.apiBaseUrl}${path}`);
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} - ${text}`);
+  }
+  return text ? JSON.parse(text) : {};
+}
+
+async function loadGameState() {
+  const code = getSelectedGameCode();
+  if (!code) {
+    gameStateResultEl.textContent = "Renseigne un code game.";
+    return;
+  }
+  gameStateResultEl.textContent = "Chargement...";
+  try {
+    const data = await fetchJson(`/api/games/${encodeURIComponent(code)}`);
+    gameStateResultEl.textContent = pretty(data);
+  } catch (error) {
+    gameStateResultEl.textContent = `Erreur: ${error.message}`;
+  }
+}
+
+async function loadGameEvents() {
+  const code = getSelectedGameCode();
+  if (!code) {
+    gameEventsResultEl.textContent = "Renseigne un code game.";
+    return;
+  }
+  gameEventsResultEl.textContent = "Chargement...";
+  try {
+    const data = await fetchJson(`/api/games/${encodeURIComponent(code)}/events?limit=300`);
+    gameEventsResultEl.textContent = pretty(data);
+  } catch (error) {
+    gameEventsResultEl.textContent = `Erreur: ${error.message}`;
+  }
+}
+
+async function loadGameResults() {
+  const code = getSelectedGameCode();
+  if (!code) {
+    gameResultsResultEl.textContent = "Renseigne un code game.";
+    return;
+  }
+  gameResultsResultEl.textContent = "Chargement...";
+  try {
+    const data = await fetchJson(`/api/games/${encodeURIComponent(code)}/results`);
+    gameResultsResultEl.textContent = pretty(data);
+  } catch (error) {
+    gameResultsResultEl.textContent = `Erreur: ${error.message}`;
+  }
+}
+
+async function loadGameReplay() {
+  const code = getSelectedGameCode();
+  if (!code) {
+    gameReplayResultEl.textContent = "Renseigne un code game.";
+    return;
+  }
+  gameReplayResultEl.textContent = "Chargement...";
+  try {
+    const data = await fetchJson(`/api/game-replay/${encodeURIComponent(code)}`);
+    gameReplayResultEl.textContent = pretty(data);
+  } catch (error) {
+    gameReplayResultEl.textContent = `Erreur: ${error.message}`;
+  }
+}
+
+async function loadRecentGames() {
+  gamesListContainerEl.innerHTML = "<p>Chargement des games...</p>";
+  try {
+    const data = await fetchJson("/api/games?limit=50");
+    const games = Array.isArray(data.games) ? data.games : [];
+    if (games.length === 0) {
+      gamesListContainerEl.innerHTML = "<p>Aucune game persistée.</p>";
+      return;
+    }
+
+    gamesListContainerEl.innerHTML = "";
+    games.forEach((game) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "session-item";
+
+      const info = document.createElement("div");
+      info.textContent = `${game.code} - ${game.status} - maj ${game.updated_at}`;
+
+      const button = document.createElement("button");
+      button.className = "secondary";
+      button.textContent = "Utiliser ce code";
+      button.addEventListener("click", () => {
+        gameCodeInputEl.value = game.code;
+      });
+
+      wrapper.appendChild(info);
+      wrapper.appendChild(button);
+      gamesListContainerEl.appendChild(wrapper);
+    });
+  } catch (error) {
+    gamesListContainerEl.innerHTML = `<p>Erreur chargement games: ${error.message}</p>`;
+  }
+}
+
+
 document.getElementById("loginBtn").addEventListener("click", loginWithCognito);
 document.getElementById("logoutBtn").addEventListener("click", async () => {
   const tokens = readTokens();
@@ -228,6 +346,11 @@ document.getElementById("logoutBtn").addEventListener("click", async () => {
   await loadConnectedUsers();
 });
 document.getElementById("refreshSessionsBtn").addEventListener("click", loadConnectedUsers);
+document.getElementById("loadGameBtn").addEventListener("click", loadGameState);
+document.getElementById("loadGameEventsBtn").addEventListener("click", loadGameEvents);
+document.getElementById("loadGameResultsBtn").addEventListener("click", loadGameResults);
+document.getElementById("loadGameReplayBtn").addEventListener("click", loadGameReplay);
+document.getElementById("loadRecentGamesBtn").addEventListener("click", loadRecentGames);
 
 document.querySelectorAll("button[data-endpoint]").forEach((btn) => {
   btn.addEventListener("click", async () => {
@@ -246,6 +369,7 @@ async function init() {
   await handleOAuthCallbackIfPresent();
   updateAuthStatus();
   await loadConnectedUsers();
+  await loadRecentGames();
 }
 
 init();
