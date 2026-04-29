@@ -1,4 +1,5 @@
 import 'package:abstergo_chase/app/providers.dart';
+import 'package:abstergo_chase/features/account/presentation/account_page.dart';
 import 'package:abstergo_chase/features/create_lobby/presentation/create_lobby_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -51,6 +52,10 @@ class BootstrapPage extends ConsumerWidget {
               ListTile(
                 title: const Text('Paramètres'),
                 onTap: () => context.push(HomeMenuPage.settingsPath),
+              ),
+              ListTile(
+                title: const Text('Mon compte'),
+                onTap: () => context.push(AccountPage.routePath),
               ),
             ],
           ),

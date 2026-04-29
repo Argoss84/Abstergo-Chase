@@ -165,6 +165,11 @@ class CognitoAuthService {
     await prefs.remove(_kExpiresAt);
   }
 
+  Future<String?> getAccessToken() async {
+    final session = await restoreSession();
+    return session?.accessToken;
+  }
+
   Future<void> _saveSession(CognitoAuthSession session) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kUsername, session.username);

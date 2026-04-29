@@ -5,6 +5,7 @@ export const syncUserSchema = Joi.object({
 });
 
 export const updateProfileSchema = Joi.object({
+  username: Joi.string().trim().min(3).max(32).optional(),
   display_name: Joi.string().trim().min(2).max(40).optional(),
   avatar_url: Joi.string().uri().optional().allow(null, ''),
   bio: Joi.string().trim().max(280).optional().allow(''),

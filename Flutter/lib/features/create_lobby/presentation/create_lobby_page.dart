@@ -1,45 +1,44 @@
+import 'package:abstergo_chase/app/providers.dart';
+import 'package:abstergo_chase/features/account/data/account_api_service.dart';
 import 'package:abstergo_chase/features/create_lobby/application/create_lobby_controller.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:abstergo_chase/features/create_lobby/presentation/widgets/create_lobby_details_sheet.dart';
 import 'package:abstergo_chase/features/create_lobby/presentation/widgets/create_lobby_map.dart';
-import 'package:abstergo_chase/features/lobby/data/player_name_store.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
 import 'package:abstergo_chase/features/lobby/presentation/lobby_page.dart';
 import 'package:abstergo_chase/shared/services/socket_environment_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-class CreateLobbyPage extends StatefulWidget {
+class CreateLobbyPage extends ConsumerStatefulWidget {
   const CreateLobbyPage({super.key});
 
   static const String routePath = '/create-lobby';
   static const String routeName = 'create-lobby';
 
   @override
-  State<CreateLobbyPage> createState() => _CreateLobbyPageState();
+  ConsumerState<CreateLobbyPage> createState() => _CreateLobbyPageState();
 }
 
-class _CreateLobbyPageState extends State<CreateLobbyPage> {
+class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
   late final CreateLobbyController _controller;
-  late final TextEditingController _nameController;
-  final PlayerNameStore _playerNameStore = PlayerNameStore();
+  final AccountApiService _accountApiService = AccountApiService();
   final SocketEnvironmentService _socketEnvironmentService =
       SocketEnvironmentService();
-  bool _isRestoringPlayerName = true;
+  bool _isLoadingAccountUsername = true;
 
   @override
   void initState() {
     super.initState();
     _controller = CreateLobbyController();
-    _nameController = TextEditingController();
     _controller.loadCurrentPosition();
-    _restorePlayerName();
+    _loadAccountUsername();
     _restoreSocketEnvironment();
   }
 
   @override
   void dispose() {
-    _nameController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -56,17 +55,30 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
     }
   }
 
-  Future<void> _restorePlayerName() async {
-    final saved = await _playerNameStore.load();
+  Future<void> _loadAccountUsername() async {
     if (!mounted) {
       return;
     }
-    if (saved != null) {
-      _nameController.text = saved;
-      _controller.setDisplayName(saved);
+    try {
+      final auth = ref.read(authControllerProvider);
+      final token = await auth.getAccessToken();
+      if (token == null || token.isEmpty) {
+        throw Exception('Session invalide, reconnectez-vous.');
+      }
+      await _accountApiService.syncUser(token, username: auth.username);
+      final profile = await _accountApiService.getMyProfile(token);
+      final username = profile.username?.trim() ?? '';
+      if (username.isEmpty) {
+        throw Exception(
+          'Username manquant. Configurez-le dans "Mon compte" avant de creer une partie.',
+        );
+      }
+      _controller.setDisplayName(username);
+    } catch (error) {
+      _controller.lastError = error.toString();
     }
     setState(() {
-      _isRestoringPlayerName = false;
+      _isLoadingAccountUsername = false;
     });
   }
 
@@ -101,21 +113,21 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      if (_isRestoringPlayerName)
+                      if (_isLoadingAccountUsername)
                         const Padding(
                           padding: EdgeInsets.symmetric(vertical: 10),
                           child: LinearProgressIndicator(minHeight: 2),
                         )
                       else
-                        TextField(
-                          controller: _nameController,
-                          maxLength: CreateLobbyDefaults.maxPlayerNameLength,
-                          decoration: const InputDecoration(
-                            border: OutlineInputBorder(),
-                            labelText: 'Votre nom',
-                            hintText: 'Entrez votre nom',
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.person),
+                          title: const Text('Joueur connecte'),
+                          subtitle: Text(
+                            _controller.displayName.isEmpty
+                                ? 'Username non configure (Mon compte)'
+                                : _controller.displayName,
                           ),
-                          onChanged: _controller.setDisplayName,
                         ),
                       const SizedBox(height: 12),
                       FilledButton.tonal(
@@ -210,12 +222,6 @@ class _CreateLobbyPageState extends State<CreateLobbyPage> {
                                     return;
                                   }
                                   if (_controller.createdLobbyCode != null) {
-                                    await _playerNameStore.save(
-                                      _controller.displayName,
-                                    );
-                                    if (!mounted) {
-                                      return;
-                                    }
                                     final session =
                                         _controller.createdLobbySession;
                                     final bootstrap = LobbyBootstrapData(

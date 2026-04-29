@@ -1,17 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
-import 'package:abstergo_chase/features/lobby/data/player_name_store.dart';
+import 'package:abstergo_chase/app/providers.dart';
+import 'package:abstergo_chase/features/account/data/account_api_service.dart';
 import 'package:abstergo_chase/features/lobby/data/player_session_store.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
 import 'package:abstergo_chase/features/lobby/presentation/lobby_page.dart';
 import 'package:abstergo_chase/shared/services/socket_environment_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:qr_code_scanner_plus/qr_code_scanner_plus.dart';
 
-class JoinLobbyPage extends StatefulWidget {
+class JoinLobbyPage extends ConsumerStatefulWidget {
   const JoinLobbyPage({super.key, this.initialCode});
 
   static const String routePath = '/join-lobby';
@@ -20,53 +21,61 @@ class JoinLobbyPage extends StatefulWidget {
   final String? initialCode;
 
   @override
-  State<JoinLobbyPage> createState() => _JoinLobbyPageState();
+  ConsumerState<JoinLobbyPage> createState() => _JoinLobbyPageState();
 }
 
-class _JoinLobbyPageState extends State<JoinLobbyPage> {
-  late final TextEditingController _nameController;
+class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
   late final TextEditingController _codeController;
-  final PlayerNameStore _playerNameStore = PlayerNameStore();
+  final AccountApiService _accountApiService = AccountApiService();
   final PlayerSessionStore _playerSessionStore = PlayerSessionStore();
   final SocketEnvironmentService _socketEnvironmentService =
       SocketEnvironmentService();
-  bool _isRestoringPlayerName = true;
+  bool _isLoadingAccountUsername = true;
+  String _accountUsername = '';
 
   @override
   void initState() {
     super.initState();
-    _nameController = TextEditingController();
     _codeController = TextEditingController(
       text: (widget.initialCode ?? '').trim().toUpperCase(),
     );
-    _restorePlayerName();
+    _loadAccountUsername();
   }
 
   @override
   void dispose() {
-    _nameController.dispose();
     _codeController.dispose();
     super.dispose();
   }
 
-  Future<void> _restorePlayerName() async {
-    final saved = await _playerNameStore.load();
+  Future<void> _loadAccountUsername() async {
+    try {
+      final auth = ref.read(authControllerProvider);
+      final token = await auth.getAccessToken();
+      if (token == null || token.isEmpty) {
+        throw Exception('Session invalide, reconnectez-vous.');
+      }
+      await _accountApiService.syncUser(token, username: auth.username);
+      final profile = await _accountApiService.getMyProfile(token);
+      _accountUsername = profile.username?.trim() ?? '';
+    } catch (_) {
+      _accountUsername = '';
+    }
     if (!mounted) {
       return;
     }
-    if (saved != null) {
-      _nameController.text = saved;
-    }
     setState(() {
-      _isRestoringPlayerName = false;
+      _isLoadingAccountUsername = false;
     });
   }
 
   Future<void> _joinLobby() async {
-    final displayName = _nameController.text.trim();
+    final displayName = _accountUsername.trim();
     final code = _codeController.text.trim().toUpperCase();
     if (displayName.isEmpty) {
-      _showError('Veuillez entrer un nom de joueur');
+      _showError(
+        'Username manquant. Ouvrez "Mon compte" pour le definir avant de rejoindre.',
+      );
       return;
     }
     if (code.isEmpty) {
@@ -78,7 +87,6 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
       return;
     }
 
-    await _playerNameStore.save(displayName);
     final previousPlayerId = await _playerSessionStore.loadPlayerIdForCode(
       code,
     );
@@ -95,8 +103,8 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
   }
 
   Future<void> _openQrScanner() async {
-    if (_nameController.text.trim().isEmpty) {
-      _showError('Renseignez votre nom avant de scanner un QR.');
+    if (_accountUsername.trim().isEmpty) {
+      _showError('Definissez un username dans "Mon compte" avant de scanner.');
       return;
     }
     QRViewController? scannerController;
@@ -227,7 +235,7 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
   @override
   Widget build(BuildContext context) {
     final code = _codeController.text.trim().toUpperCase();
-    final canJoin = code.length == 6 && _nameController.text.trim().isNotEmpty;
+    final canJoin = code.length == 6 && _accountUsername.trim().isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Rejoindre une partie')),
@@ -245,21 +253,21 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
                     style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 16),
-                  if (_isRestoringPlayerName)
+                  if (_isLoadingAccountUsername)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 10),
                       child: LinearProgressIndicator(minHeight: 2),
                     )
                   else
-                    TextField(
-                      controller: _nameController,
-                      maxLength: CreateLobbyDefaults.maxPlayerNameLength,
-                      decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
-                        labelText: 'Votre nom',
-                        hintText: 'Entrez votre nom',
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.person),
+                      title: const Text('Joueur connecte'),
+                      subtitle: Text(
+                        _accountUsername.isEmpty
+                            ? 'Username non configure (Mon compte)'
+                            : _accountUsername,
                       ),
-                      onChanged: (_) => setState(() {}),
                     ),
                   const SizedBox(height: 10),
                   TextField(
@@ -283,7 +291,7 @@ class _JoinLobbyPageState extends State<JoinLobbyPage> {
                     },
                   ),
                   const SizedBox(height: 8),
-                  if (_nameController.text.trim().isNotEmpty) ...[
+                  if (_accountUsername.trim().isNotEmpty) ...[
                     Align(
                       alignment: Alignment.centerLeft,
                       child: FilledButton.tonalIcon(

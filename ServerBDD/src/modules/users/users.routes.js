@@ -40,6 +40,9 @@ usersRouter.patch('/users/me', requireAuth, validate(updateProfileSchema), async
     }
     res.json({ user });
   } catch (error) {
+    if (error?.code === '23505') {
+      return next(new HttpError(409, 'Username deja utilise'));
+    }
     next(error);
   }
 });

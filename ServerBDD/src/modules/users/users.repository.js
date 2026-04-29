@@ -39,6 +39,17 @@ export async function upsertProfileByCognitoSub(cognitoSub, payload) {
     return null;
   }
 
+  if (payload.username != null && payload.username.trim() !== '') {
+    await pool.query(
+      `
+      UPDATE users
+      SET username = $1, updated_at = NOW()
+      WHERE id = $2
+      `,
+      [payload.username.trim(), user.id]
+    );
+  }
+
   await pool.query(
     `
     INSERT INTO player_profiles (user_id, display_name, avatar_url, bio, region, preferences_json)

@@ -90,4 +90,8 @@ class CognitoAuthController extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  Future<String?> getAccessToken() {
+    return _authService.getAccessToken();
+  }
 }

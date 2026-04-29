@@ -1,4 +1,5 @@
 import 'package:abstergo_chase/features/auth/application/cognito_auth_controller.dart';
+import 'package:abstergo_chase/features/account/presentation/account_page.dart';
 import 'package:abstergo_chase/features/auth/presentation/login_page.dart';
 import 'package:abstergo_chase/features/bootstrap/presentation/bootstrap_page.dart';
 import 'package:abstergo_chase/features/create_lobby/presentation/create_lobby_page.dart';
@@ -70,6 +71,11 @@ GoRouter buildAppRouter(CognitoAuthController authController) {
         path: SettingsPage.routePath,
         name: SettingsPage.routeName,
         builder: (context, state) => const SettingsPage(),
+      ),
+      GoRoute(
+        path: AccountPage.routePath,
+        name: AccountPage.routeName,
+        builder: (context, state) => const AccountPage(),
       ),
     ],
   );
