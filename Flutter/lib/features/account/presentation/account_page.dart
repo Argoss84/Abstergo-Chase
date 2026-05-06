@@ -65,6 +65,12 @@ class _AccountPageState extends ConsumerState<AccountPage> {
       _bioController.text = profile.bio ?? '';
       _regionController.text = profile.region ?? '';
     } catch (e) {
+      if (e is SessionInvalidatedException) {
+        await ref
+            .read(authControllerProvider)
+            .handleSessionInvalidated(e.message);
+        return;
+      }
       _error = 'Chargement profil impossible: $e';
     } finally {
       if (mounted) {
@@ -103,6 +109,12 @@ class _AccountPageState extends ConsumerState<AccountPage> {
       _regionController.text = profile.region ?? '';
       _success = 'Profil mis a jour.';
     } catch (e) {
+      if (e is SessionInvalidatedException) {
+        await ref
+            .read(authControllerProvider)
+            .handleSessionInvalidated(e.message);
+        return;
+      }
       _error = 'Mise a jour impossible: $e';
     } finally {
       if (mounted) {

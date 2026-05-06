@@ -43,8 +43,8 @@ export async function activateSessionIfAvailable(cognitoSub, accessTokenHash) {
     SELECT id, $2 FROM target_user
     ON CONFLICT (user_id)
     DO UPDATE SET
+      access_token_hash = EXCLUDED.access_token_hash,
       updated_at = NOW()
-    WHERE user_active_sessions.access_token_hash = EXCLUDED.access_token_hash
     RETURNING user_id, updated_at
     `,
     [cognitoSub, accessTokenHash]

@@ -1,7 +1,6 @@
 import 'package:abstergo_chase/app/providers.dart';
 import 'package:abstergo_chase/features/account/data/account_api_service.dart';
 import 'package:abstergo_chase/features/create_lobby/application/create_lobby_controller.dart';
-import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:abstergo_chase/features/create_lobby/presentation/widgets/create_lobby_details_sheet.dart';
 import 'package:abstergo_chase/features/create_lobby/presentation/widgets/create_lobby_map.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
@@ -75,6 +74,12 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
       }
       _controller.setDisplayName(username);
     } catch (error) {
+      if (error is SessionInvalidatedException) {
+        await ref
+            .read(authControllerProvider)
+            .handleSessionInvalidated(error.message);
+        return;
+      }
       _controller.lastError = error.toString();
     }
     setState(() {

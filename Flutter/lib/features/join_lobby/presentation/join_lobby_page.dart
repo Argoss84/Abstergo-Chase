@@ -58,7 +58,13 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
       await _accountApiService.syncUser(token, username: auth.username);
       final profile = await _accountApiService.getMyProfile(token);
       _accountUsername = profile.username?.trim() ?? '';
-    } catch (_) {
+    } catch (error) {
+      if (error is SessionInvalidatedException) {
+        await ref
+            .read(authControllerProvider)
+            .handleSessionInvalidated(error.message);
+        return;
+      }
       _accountUsername = '';
     }
     if (!mounted) {

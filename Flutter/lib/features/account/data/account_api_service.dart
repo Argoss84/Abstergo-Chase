@@ -5,6 +5,15 @@ import 'dart:io';
 import 'package:abstergo_chase/app/config/app_runtime_config.dart';
 import 'package:http/http.dart' as http;
 
+class SessionInvalidatedException implements Exception {
+  SessionInvalidatedException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class PlayerAccountProfile {
   const PlayerAccountProfile({
     required this.id,
@@ -58,6 +67,21 @@ class AccountApiService {
         error is http.ClientException;
   }
 
+  Never _throwIfSessionInvalidated(http.Response response) {
+    final body = response.body;
+    if (response.statusCode == 401 &&
+        (body.contains('Session invalidee') ||
+            body.contains('Session applicative absente') ||
+            body.contains('Token invalide ou expir'))) {
+      throw SessionInvalidatedException(
+        'Votre session a été déconnectée car ce compte a été utilisé sur un autre appareil.',
+      );
+    }
+    throw Exception(
+      'Echec API (${response.statusCode}): ${response.body}',
+    );
+  }
+
   Future<T> _withBaseUrlFallback<T>(
     Future<T> Function(String baseUrl) action,
   ) async {
@@ -88,9 +112,7 @@ class AccountApiService {
           )
           .timeout(_requestTimeout);
       if (response.statusCode >= 400) {
-        throw Exception(
-          'Echec sync utilisateur (${response.statusCode}): ${response.body}',
-        );
+        _throwIfSessionInvalidated(response);
       }
     });
   }
@@ -106,9 +128,7 @@ class AccountApiService {
           )
           .timeout(_requestTimeout);
       if (response.statusCode >= 400) {
-        throw Exception(
-          'Echec chargement profil (${response.statusCode}): ${response.body}',
-        );
+        _throwIfSessionInvalidated(response);
       }
       final decoded = jsonDecode(response.body);
       return PlayerAccountProfile.fromJson(
@@ -143,9 +163,7 @@ class AccountApiService {
           )
           .timeout(_requestTimeout);
       if (response.statusCode >= 400) {
-        throw Exception(
-          'Echec mise a jour profil (${response.statusCode}): ${response.body}',
-        );
+        _throwIfSessionInvalidated(response);
       }
       final decoded = jsonDecode(response.body);
       return PlayerAccountProfile.fromJson(
@@ -166,9 +184,7 @@ class AccountApiService {
           )
           .timeout(_requestTimeout);
       if (response.statusCode >= 400) {
-        throw Exception(
-          'Echec logout (${response.statusCode}): ${response.body}',
-        );
+        _throwIfSessionInvalidated(response);
       }
     });
   }

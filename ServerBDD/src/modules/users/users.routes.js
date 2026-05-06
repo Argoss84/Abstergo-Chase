@@ -32,10 +32,7 @@ usersRouter.post('/auth/sync', requireAuthForSync, validate(syncUserSchema), asy
       req.auth.accessTokenHash
     );
     if (!sessionActivated) {
-      throw new HttpError(
-        409,
-        'Compte déjà connecté sur un autre appareil, veuillez le déconnecter pour l\'utiliser ici'
-      );
+      throw new HttpError(500, 'Impossible d\'activer la session utilisateur');
     }
     res.status(200).json({ user });
   } catch (error) {
