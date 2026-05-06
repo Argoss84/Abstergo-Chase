@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:abstergo_chase/app/providers.dart';
 import 'package:abstergo_chase/features/account/data/account_api_service.dart';
+import 'package:abstergo_chase/features/auth/application/cognito_auth_controller.dart';
 import 'package:abstergo_chase/features/create_lobby/application/create_lobby_controller.dart';
 import 'package:abstergo_chase/features/create_lobby/presentation/widgets/create_lobby_details_sheet.dart';
 import 'package:abstergo_chase/features/create_lobby/presentation/widgets/create_lobby_map.dart';
@@ -59,40 +62,37 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
       return;
     }
     final auth = ref.read(authControllerProvider);
+    final fallbackUsername = auth.username?.trim() ?? '';
+    _controller.setDisplayName(fallbackUsername);
+    _controller.lastError = null;
+    setState(() {
+      _isLoadingAccountUsername = false;
+    });
+    unawaited(_refreshAccountUsernameFromApi(auth));
+  }
+
+  Future<void> _refreshAccountUsernameFromApi(CognitoAuthController auth) async {
     try {
       final token = await auth.getAccessToken();
       if (token == null || token.isEmpty) {
-        throw Exception('Session invalide, reconnectez-vous.');
+        return;
       }
       await _accountApiService.syncUser(token, username: auth.username);
       final profile = await _accountApiService.getMyProfile(token);
-      _controller.cognitoSub = await auth.getCurrentUserSub();
       final username =
           profile.username?.trim() ?? auth.username?.trim() ?? '';
-      if (username.isEmpty) {
-        throw Exception(
-          'Username manquant. Configurez-le dans "Mon compte" avant de creer une partie.',
-        );
+      _controller.cognitoSub = await auth.getCurrentUserSub();
+      if (username.isNotEmpty) {
+        _controller.setDisplayName(username);
       }
-      _controller.setDisplayName(username);
+      _controller.lastError = null;
     } catch (error) {
       if (error is SessionInvalidatedException) {
         await ref
             .read(authControllerProvider)
             .handleSessionInvalidated(error.message);
-        return;
-      }
-      final fallbackUsername = auth.username?.trim() ?? '';
-      if (fallbackUsername.isNotEmpty) {
-        _controller.setDisplayName(fallbackUsername);
-        _controller.lastError = null;
-      } else {
-        _controller.lastError = error.toString();
       }
     }
-    setState(() {
-      _isLoadingAccountUsername = false;
-    });
   }
 
   Future<void> _restoreSocketEnvironment() async {

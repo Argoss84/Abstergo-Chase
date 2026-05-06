@@ -4,6 +4,8 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+import java.text.SimpleDateFormat
+
 android {
     namespace "com.abstergo.chase"
     compileSdk = flutter.compileSdkVersion
@@ -51,6 +53,26 @@ android {
             enableSplit = true
         }
     }
+}
+
+tasks.register("renameReleaseApk") {
+    doLast {
+        def flutterApkDir = file("$rootDir/../build/app/outputs/flutter-apk")
+        def releaseApk = file("$flutterApkDir/app-release.apk")
+        if (!releaseApk.exists()) {
+            return
+        }
+        def timestamp = new SimpleDateFormat("yyyyMMddHHmmss").format(new Date())
+        copy {
+            from releaseApk
+            into flutterApkDir
+            rename { "AbstergoChase-${timestamp}.apk" }
+        }
+    }
+}
+
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    finalizedBy("renameReleaseApk")
 }
 
 flutter {

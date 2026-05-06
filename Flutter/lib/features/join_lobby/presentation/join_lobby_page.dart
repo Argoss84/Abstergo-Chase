@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:abstergo_chase/app/providers.dart';
 import 'package:abstergo_chase/features/account/data/account_api_service.dart';
+import 'package:abstergo_chase/features/auth/application/cognito_auth_controller.dart';
 import 'package:abstergo_chase/features/lobby/data/player_session_store.dart';
 import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
 import 'package:abstergo_chase/features/lobby/presentation/lobby_page.dart';
@@ -51,31 +52,42 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
 
   Future<void> _loadAccountUsername() async {
     final auth = ref.read(authControllerProvider);
-    try {
-      final token = await auth.getAccessToken();
-      if (token == null || token.isEmpty) {
-        throw Exception('Session invalide, reconnectez-vous.');
-      }
-      await _accountApiService.syncUser(token, username: auth.username);
-      final profile = await _accountApiService.getMyProfile(token);
-      _accountUsername = profile.username?.trim() ?? auth.username?.trim() ?? '';
-      _accountCognitoSub = await auth.getCurrentUserSub();
-    } catch (error) {
-      if (error is SessionInvalidatedException) {
-        await ref
-            .read(authControllerProvider)
-            .handleSessionInvalidated(error.message);
-        return;
-      }
-      _accountUsername = auth.username?.trim() ?? '';
-      _accountCognitoSub = await auth.getCurrentUserSub();
-    }
+    _accountUsername = auth.username?.trim() ?? '';
+    _accountCognitoSub = await auth.getCurrentUserSub();
     if (!mounted) {
       return;
     }
     setState(() {
       _isLoadingAccountUsername = false;
     });
+    unawaited(_refreshAccountUsernameFromApi(auth));
+  }
+
+  Future<void> _refreshAccountUsernameFromApi(CognitoAuthController auth) async {
+    try {
+      final token = await auth.getAccessToken();
+      if (token == null || token.isEmpty) {
+        return;
+      }
+      await _accountApiService.syncUser(token, username: auth.username);
+      final profile = await _accountApiService.getMyProfile(token);
+      final username = profile.username?.trim();
+      if (username == null || username.isEmpty) {
+        return;
+      }
+      _accountUsername = username;
+      _accountCognitoSub = await auth.getCurrentUserSub();
+      if (!mounted) {
+        return;
+      }
+      setState(() {});
+    } catch (error) {
+      if (error is SessionInvalidatedException) {
+        await ref
+            .read(authControllerProvider)
+            .handleSessionInvalidated(error.message);
+      }
+    }
   }
 
   Future<void> _joinLobby() async {

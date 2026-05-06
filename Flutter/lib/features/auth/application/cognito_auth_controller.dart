@@ -58,13 +58,15 @@ class CognitoAuthController extends ChangeNotifier {
         username: username,
         password: password,
       );
-      await _enforceSingleDevicePolicy(
-        accessToken: session.accessToken,
-        username: session.username,
-      );
       this.username = session.username;
       isAuthenticated = true;
       _startSessionGuard();
+      unawaited(
+        _enforceSingleDevicePolicy(
+          accessToken: session.accessToken,
+          username: session.username,
+        ).catchError(_handleBackgroundSyncError),
+      );
       return true;
     } catch (e) {
       error = e.toString();
@@ -109,13 +111,15 @@ class CognitoAuthController extends ChangeNotifier {
     notifyListeners();
     try {
       final session = await _authService.signInWithGoogle();
-      await _enforceSingleDevicePolicy(
-        accessToken: session.accessToken,
-        username: session.username,
-      );
       username = session.username;
       isAuthenticated = true;
       _startSessionGuard();
+      unawaited(
+        _enforceSingleDevicePolicy(
+          accessToken: session.accessToken,
+          username: session.username,
+        ).catchError(_handleBackgroundSyncError),
+      );
       return true;
     } catch (e) {
       error = e.toString();
@@ -145,15 +149,19 @@ class CognitoAuthController extends ChangeNotifier {
     } on BackendUnavailableException {
       // Allow Cognito login when ServerBDD is temporarily unreachable.
       return;
-    } catch (error) {
+    } on SessionInvalidatedException {
       await _authService.clearSession();
+      rethrow;
+    } catch (error) {
       final message = error.toString();
       if (message.contains('Compte déjà connecté sur un autre appareil')) {
+        await _authService.clearSession();
         throw Exception(
           'Compte déjà connecté sur un autre appareil, veuillez le déconnecter pour l\'utiliser ici',
         );
       }
-      throw Exception('Connexion refusée: $message');
+      // Do not reject Cognito authentication on backend sync errors.
+      return;
     }
   }
 
@@ -184,5 +192,18 @@ class CognitoAuthController extends ChangeNotifier {
   void _stopSessionGuard() {
     _sessionGuardTimer?.cancel();
     _sessionGuardTimer = null;
+  }
+
+  Future<void> _handleBackgroundSyncError(Object error) async {
+    if (error is SessionInvalidatedException) {
+      await handleSessionInvalidated(error.message);
+      return;
+    }
+    final message = error.toString();
+    if (message.contains('Compte déjà connecté sur un autre appareil')) {
+      await handleSessionInvalidated(
+        'Votre session a été déconnectée car ce compte a été utilisé sur un autre appareil.',
+      );
+    }
   }
 }
