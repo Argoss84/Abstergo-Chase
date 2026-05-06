@@ -49,8 +49,8 @@ class _AccountPageState extends ConsumerState<AccountPage> {
       _error = null;
       _success = null;
     });
+    final auth = ref.read(authControllerProvider);
     try {
-      final auth = ref.read(authControllerProvider);
       final token = await auth.getAccessToken();
       if (token == null || token.isEmpty) {
         throw Exception('Session invalide, reconnectez-vous.');
@@ -71,7 +71,11 @@ class _AccountPageState extends ConsumerState<AccountPage> {
             .handleSessionInvalidated(e.message);
         return;
       }
-      _error = 'Chargement profil impossible: $e';
+      final fallbackUsername = auth.username?.trim() ?? '';
+      _usernameController.text = fallbackUsername;
+      _error = fallbackUsername.isEmpty
+          ? 'Chargement profil impossible: $e'
+          : 'BDD inaccessible: username Cognito utilise temporairement.';
     } finally {
       if (mounted) {
         setState(() {

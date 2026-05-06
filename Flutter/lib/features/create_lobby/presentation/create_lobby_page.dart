@@ -58,8 +58,8 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
     if (!mounted) {
       return;
     }
+    final auth = ref.read(authControllerProvider);
     try {
-      final auth = ref.read(authControllerProvider);
       final token = await auth.getAccessToken();
       if (token == null || token.isEmpty) {
         throw Exception('Session invalide, reconnectez-vous.');
@@ -67,7 +67,8 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
       await _accountApiService.syncUser(token, username: auth.username);
       final profile = await _accountApiService.getMyProfile(token);
       _controller.cognitoSub = await auth.getCurrentUserSub();
-      final username = profile.username?.trim() ?? '';
+      final username =
+          profile.username?.trim() ?? auth.username?.trim() ?? '';
       if (username.isEmpty) {
         throw Exception(
           'Username manquant. Configurez-le dans "Mon compte" avant de creer une partie.',
@@ -81,7 +82,13 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
             .handleSessionInvalidated(error.message);
         return;
       }
-      _controller.lastError = error.toString();
+      final fallbackUsername = auth.username?.trim() ?? '';
+      if (fallbackUsername.isNotEmpty) {
+        _controller.setDisplayName(fallbackUsername);
+        _controller.lastError = null;
+      } else {
+        _controller.lastError = error.toString();
+      }
     }
     setState(() {
       _isLoadingAccountUsername = false;

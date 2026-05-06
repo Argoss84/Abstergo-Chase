@@ -50,15 +50,15 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
   }
 
   Future<void> _loadAccountUsername() async {
+    final auth = ref.read(authControllerProvider);
     try {
-      final auth = ref.read(authControllerProvider);
       final token = await auth.getAccessToken();
       if (token == null || token.isEmpty) {
         throw Exception('Session invalide, reconnectez-vous.');
       }
       await _accountApiService.syncUser(token, username: auth.username);
       final profile = await _accountApiService.getMyProfile(token);
-      _accountUsername = profile.username?.trim() ?? '';
+      _accountUsername = profile.username?.trim() ?? auth.username?.trim() ?? '';
       _accountCognitoSub = await auth.getCurrentUserSub();
     } catch (error) {
       if (error is SessionInvalidatedException) {
@@ -67,7 +67,8 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
             .handleSessionInvalidated(error.message);
         return;
       }
-      _accountUsername = '';
+      _accountUsername = auth.username?.trim() ?? '';
+      _accountCognitoSub = await auth.getCurrentUserSub();
     }
     if (!mounted) {
       return;
