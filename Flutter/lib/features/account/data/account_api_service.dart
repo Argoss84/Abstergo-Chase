@@ -14,6 +14,15 @@ class SessionInvalidatedException implements Exception {
   String toString() => message;
 }
 
+class BackendUnavailableException implements Exception {
+  BackendUnavailableException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class PlayerAccountProfile {
   const PlayerAccountProfile({
     required this.id,
@@ -97,24 +106,33 @@ class AccountApiService {
   }
 
   Future<void> syncUser(String accessToken, {String? username}) async {
-    await _withBaseUrlFallback<void>((baseUrl) async {
-      final response = await http
-          .post(
-            Uri.parse('$baseUrl/api/auth/sync'),
-            headers: {
-              'Authorization': 'Bearer $accessToken',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({
-              if (username != null && username.trim().isNotEmpty)
-                'username': username.trim(),
-            }),
-          )
-          .timeout(_requestTimeout);
-      if (response.statusCode >= 400) {
-        _throwIfSessionInvalidated(response);
+    try {
+      await _withBaseUrlFallback<void>((baseUrl) async {
+        final response = await http
+            .post(
+              Uri.parse('$baseUrl/api/auth/sync'),
+              headers: {
+                'Authorization': 'Bearer $accessToken',
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode({
+                if (username != null && username.trim().isNotEmpty)
+                  'username': username.trim(),
+              }),
+            )
+            .timeout(_requestTimeout);
+        if (response.statusCode >= 400) {
+          _throwIfSessionInvalidated(response);
+        }
+      });
+    } catch (error) {
+      if (_isTransportFailure(error)) {
+        throw BackendUnavailableException(
+          'Connexion a la BDD impossible pour le moment.',
+        );
       }
-    });
+      rethrow;
+    }
   }
 
   Future<PlayerAccountProfile> getMyProfile(String accessToken) async {

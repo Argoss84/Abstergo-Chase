@@ -142,6 +142,9 @@ class CognitoAuthController extends ChangeNotifier {
   }) async {
     try {
       await _accountApiService.syncUser(accessToken, username: username);
+    } on BackendUnavailableException {
+      // Allow Cognito login when ServerBDD is temporarily unreachable.
+      return;
     } catch (error) {
       await _authService.clearSession();
       final message = error.toString();
