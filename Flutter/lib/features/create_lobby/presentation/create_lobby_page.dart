@@ -66,6 +66,7 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
       }
       await _accountApiService.syncUser(token, username: auth.username);
       final profile = await _accountApiService.getMyProfile(token);
+      _controller.cognitoSub = await auth.getCurrentUserSub();
       final username = profile.username?.trim() ?? '';
       if (username.isEmpty) {
         throw Exception(
@@ -235,6 +236,7 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
                                       socketPath: _controller.socketPath,
                                       playerName: _controller.displayName
                                           .trim(),
+                                      cognitoSub: _controller.cognitoSub,
                                       previousPlayerId: session?.playerId,
                                       reconnectAsHost: true,
                                       form: _controller.form,

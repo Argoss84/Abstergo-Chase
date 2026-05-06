@@ -136,10 +136,11 @@ class CognitoAuthService {
       ),
     );
 
-    if (result == null ||
-        result.idToken == null ||
-        result.accessToken == null ||
-        result.accessTokenExpirationDateTime == null) {
+    if (result.idToken == null || result.accessToken == null) {
+      throw Exception('Echec de la connexion Google via Cognito.');
+    }
+    final expiry = result.accessTokenExpirationDateTime;
+    if (expiry == null) {
       throw Exception('Echec de la connexion Google via Cognito.');
     }
 
@@ -149,8 +150,7 @@ class CognitoAuthService {
       idToken: result.idToken!,
       accessToken: result.accessToken!,
       refreshToken: result.refreshToken ?? '',
-      expiresAtEpochSeconds:
-          result.accessTokenExpirationDateTime!.millisecondsSinceEpoch ~/ 1000,
+      expiresAtEpochSeconds: expiry.millisecondsSinceEpoch ~/ 1000,
     );
     await _saveSession(session);
     return session;
@@ -168,6 +168,12 @@ class CognitoAuthService {
   Future<String?> getAccessToken() async {
     final session = await restoreSession();
     return session?.accessToken;
+  }
+
+  Future<String?> getCurrentUserSub() async {
+    final session = await restoreSession();
+    if (session == null) return null;
+    return _extractSubjectFromIdToken(session.idToken);
   }
 
   Future<void> _saveSession(CognitoAuthSession session) async {
@@ -220,6 +226,23 @@ class CognitoAuthService {
         return subject;
       }
       return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? _extractSubjectFromIdToken(String jwt) {
+    try {
+      final parts = jwt.split('.');
+      if (parts.length < 2) return null;
+      final payload = parts[1];
+      final normalized = base64Url.normalize(payload);
+      final decoded = utf8.decode(base64Url.decode(normalized));
+      final json = jsonDecode(decoded);
+      if (json is! Map) return null;
+      final subject = json['sub']?.toString().trim();
+      if (subject == null || subject.isEmpty) return null;
+      return subject;
     } catch (_) {
       return null;
     }

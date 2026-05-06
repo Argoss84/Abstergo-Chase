@@ -32,6 +32,7 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
       SocketEnvironmentService();
   bool _isLoadingAccountUsername = true;
   String _accountUsername = '';
+  String? _accountCognitoSub;
 
   @override
   void initState() {
@@ -58,6 +59,7 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
       await _accountApiService.syncUser(token, username: auth.username);
       final profile = await _accountApiService.getMyProfile(token);
       _accountUsername = profile.username?.trim() ?? '';
+      _accountCognitoSub = await auth.getCurrentUserSub();
     } catch (error) {
       if (error is SessionInvalidatedException) {
         await ref
@@ -102,6 +104,7 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
       serverUrl: socketConfig.serverUrl,
       socketPath: socketConfig.socketPath,
       playerName: displayName,
+      cognitoSub: _accountCognitoSub,
       previousPlayerId: previousPlayerId,
     );
     if (!mounted) return;

@@ -1535,6 +1535,11 @@ io.on('connection', (socket) => {
       };
 
       lobby.players.set(clientId, { id: clientId, name: payload?.playerName || 'Host', isHost: true });
+      const hostPlayer = lobby.players.get(clientId);
+      if (hostPlayer) {
+        hostPlayer.cognitoSub = payload?.cognitoSub || null;
+        lobby.players.set(clientId, hostPlayer);
+      }
       lobbies.set(code, lobby);
       lobbySocketMessageCounts.set(code, lobbySocketMessageCounts.get(code) || 0);
       clients.get(socket.id).lobbyCode = code;
@@ -1597,12 +1602,25 @@ io.on('connection', (socket) => {
 
     if (type === 'lobby:join') {
       const code = payload?.code?.toUpperCase();
-      const oldPlayerId = payload?.oldPlayerId; // Pour reconnexion
+      let oldPlayerId = payload?.oldPlayerId; // Pour reconnexion
+      const cognitoSub = payload?.cognitoSub || null;
       const lobby = lobbies.get(code);
       if (!lobby) {
         log(`[ERREUR LOBBY] Client ${clientId} tente de rejoindre un lobby inexistant: ${code}`);
         send(socket, { type: 'lobby:error', payload: { message: 'Lobby introuvable.' } });
         return;
+      }
+
+      if (cognitoSub) {
+        const bySubCandidate = Array.from(lobby.players.values()).find((player) => {
+          if (!player?.id) return false;
+          if ((player.cognitoSub || null) !== cognitoSub) return false;
+          const existingSocket = socketsById.get(player.id);
+          return !existingSocket || !existingSocket.connected;
+        });
+        if (bySubCandidate?.id) {
+          oldPlayerId = bySubCandidate.id;
+        }
       }
 
       // Vérifier si c'est une reconnexion (avec oldPlayerId)
@@ -1617,7 +1635,10 @@ io.on('connection', (socket) => {
         lobby.players.set(clientId, { 
           id: clientId,
           name: payload?.playerName || existingPlayer?.name || 'Joueur',
-          isHost: existingPlayer?.isHost || false
+          isHost: existingPlayer?.isHost || false,
+          role: existingPlayer?.role ?? null,
+          status: existingPlayer?.status || 'active',
+          cognitoSub: existingPlayer?.cognitoSub || payload?.cognitoSub || null
         });
         
         // Si c'était le host, mettre à jour le hostId
@@ -1701,7 +1722,18 @@ io.on('connection', (socket) => {
       }
 
       // Nouveau joueur
-      lobby.players.set(clientId, { id: clientId, name: payload?.playerName || 'Joueur', isHost: false });
+      lobby.players.set(clientId, {
+        id: clientId,
+        name: payload?.playerName || 'Joueur',
+        isHost: false,
+        role: null,
+        status: 'active'
+      });
+      const joinedLobbyPlayer = lobby.players.get(clientId);
+      if (joinedLobbyPlayer) {
+        joinedLobbyPlayer.cognitoSub = payload?.cognitoSub || null;
+        lobby.players.set(clientId, joinedLobbyPlayer);
+      }
       clients.get(socket.id).lobbyCode = code;
 
       log(`[LOBBY REJOINT] Code: ${code}, Joueur: ${clientId}, Nom: ${payload?.playerName || 'Joueur'}`);
@@ -1776,13 +1808,19 @@ io.on('connection', (socket) => {
           lobby.players.set(clientId, { 
             id: clientId,
             name: payload?.playerName || oldPlayer.name || 'Host',
-            isHost: true 
+            isHost: true,
+            role: oldPlayer.role ?? null,
+            status: oldPlayer.status || 'active',
+            cognitoSub: oldPlayer.cognitoSub || payload?.cognitoSub || null
           });
         } else {
           lobby.players.set(clientId, { 
             id: clientId, 
             name: payload?.playerName || 'Host', 
-            isHost: true 
+            isHost: true,
+            role: null,
+            status: 'active',
+            cognitoSub: payload?.cognitoSub || null
           });
         }
         
@@ -1973,11 +2011,41 @@ io.on('connection', (socket) => {
 
     if (type === 'game:join') {
       const code = payload?.code?.toUpperCase();
-      const oldPlayerId = payload?.oldPlayerId;
+      let oldPlayerId = payload?.oldPlayerId;
+      const cognitoSub = payload?.cognitoSub || null;
       const game = games.get(code);
       if (!game) {
         send(socket, { type: 'game:error', payload: { message: 'Partie introuvable.' } });
         return;
+      }
+
+      // Defensive fallback: if the client cannot provide oldPlayerId, attempt
+      // reconnection by matching player name to an offline slot.
+      if (cognitoSub) {
+        const bySubCandidate = Array.from(game.players.values()).find((player) => {
+          if (!player?.id) return false;
+          if ((player.cognitoSub || null) !== cognitoSub) return false;
+          const existingSocket = socketsById.get(player.id);
+          return !existingSocket || !existingSocket.connected;
+        });
+        if (bySubCandidate?.id) {
+          oldPlayerId = bySubCandidate.id;
+        }
+      }
+
+      if (!oldPlayerId) {
+        const requestedName = (payload?.playerName || '').toString().trim().toLowerCase();
+        if (requestedName) {
+          const byNameCandidate = Array.from(game.players.values()).find((player) => {
+            const sameName = (player?.name || '').toString().trim().toLowerCase() === requestedName;
+            if (!sameName) return false;
+            const existingSocket = socketsById.get(player.id);
+            return !existingSocket || !existingSocket.connected;
+          });
+          if (byNameCandidate?.id) {
+            oldPlayerId = byNameCandidate.id;
+          }
+        }
       }
 
       if (oldPlayerId && game.players.has(oldPlayerId)) {
@@ -1988,7 +2056,8 @@ io.on('connection', (socket) => {
           name: payload?.playerName || existingPlayer?.name || 'Joueur',
           isHost: existingPlayer?.isHost || false,
           status: 'active',
-          role: existingPlayer?.role ?? undefined
+          role: existingPlayer?.role ?? undefined,
+          cognitoSub: existingPlayer?.cognitoSub || cognitoSub
         });
 
         if (game.hostId === oldPlayerId) {
@@ -2093,7 +2162,8 @@ io.on('connection', (socket) => {
             name: payload?.playerName || oldHostPlayer.name || 'Host',
             isHost: true,
             status: oldHostPlayer.status || 'active',
-            role: oldHostPlayer.role ?? undefined
+            role: oldHostPlayer.role ?? undefined,
+            cognitoSub: oldHostPlayer.cognitoSub || cognitoSub
           });
           game.hostId = clientId;
           if (!game.reconnectedPlayerIds) game.reconnectedPlayerIds = {};
@@ -2126,7 +2196,12 @@ io.on('connection', (socket) => {
         }
       }
 
-      game.players.set(clientId, { id: clientId, name: payload?.playerName || 'Joueur', isHost: false });
+      game.players.set(clientId, {
+        id: clientId,
+        name: payload?.playerName || 'Joueur',
+        isHost: false,
+        cognitoSub
+      });
       clients.get(socket.id).gameCode = code;
       clients.get(socket.id).lobbyCode = null;
 

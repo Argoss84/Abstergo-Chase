@@ -81,6 +81,7 @@ class CreateLobbyService {
     required String playerName,
     required Uri serverUrl,
     required String socketPath,
+    String? cognitoSub,
     Map<String, dynamic>? gameConfig,
     Duration timeout = const Duration(seconds: 12),
   }) async {
@@ -139,6 +140,7 @@ class CreateLobbyService {
       'type': 'lobby:create',
       'payload': <String, dynamic>{
         'playerName': playerName,
+        if (cognitoSub != null && cognitoSub.isNotEmpty) 'cognitoSub': cognitoSub,
         if (gameConfig != null) 'gameConfig': gameConfig,
       },
       'meta': <String, dynamic>{'clientVersion': _clientVersion},

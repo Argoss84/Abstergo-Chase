@@ -96,6 +96,7 @@ class GameSocketService {
   void joinGame({
     required String code,
     required String playerName,
+    String? cognitoSub,
     String? previousPlayerId,
   }) {
     _emit(<String, dynamic>{
@@ -103,6 +104,7 @@ class GameSocketService {
       'payload': <String, dynamic>{
         'code': code.toUpperCase(),
         'playerName': playerName,
+        if (cognitoSub != null && cognitoSub.isNotEmpty) 'cognitoSub': cognitoSub,
         if (previousPlayerId != null && previousPlayerId.isNotEmpty)
           'oldPlayerId': previousPlayerId,
       },

@@ -56,6 +56,7 @@ class LobbyBootstrapData {
     required this.serverUrl,
     required this.socketPath,
     required this.playerName,
+    this.cognitoSub,
     this.previousPlayerId,
     this.reconnectAsHost = false,
     this.form,
@@ -69,6 +70,7 @@ class LobbyBootstrapData {
   final String serverUrl;
   final String socketPath;
   final String playerName;
+  final String? cognitoSub;
   final String? previousPlayerId;
   final bool reconnectAsHost;
   final CreateLobbyFormData? form;
@@ -82,6 +84,7 @@ class LobbyBootstrapData {
     String? serverUrl,
     String? socketPath,
     String? playerName,
+    Object? cognitoSub = _noChange,
     Object? previousPlayerId = _noChange,
     bool? reconnectAsHost,
     Object? form = _noChange,
@@ -95,6 +98,9 @@ class LobbyBootstrapData {
       serverUrl: serverUrl ?? this.serverUrl,
       socketPath: socketPath ?? this.socketPath,
       playerName: playerName ?? this.playerName,
+      cognitoSub: identical(cognitoSub, _noChange)
+          ? this.cognitoSub
+          : cognitoSub as String?,
       previousPlayerId: identical(previousPlayerId, _noChange)
           ? this.previousPlayerId
           : previousPlayerId as String?,

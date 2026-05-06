@@ -31,6 +31,7 @@ class CreateLobbyController extends ChangeNotifier {
 
   CreateLobbyFormData form = CreateLobbyFormData.initial();
   String displayName = '';
+  String? cognitoSub;
   String serverUrl = CreateLobbyDefaults.serverUrl;
   String socketPath = CreateLobbyDefaults.socketPath;
   bool isSubmitting = false;
@@ -206,6 +207,7 @@ class CreateLobbyController extends ChangeNotifier {
         socketPath: socketPath.trim().isEmpty
             ? '/socket.io'
             : socketPath.trim(),
+        cognitoSub: cognitoSub,
         gameConfig: <String, dynamic>{
           'objectif_number': form.objectiveNumber,
           'duration': safeDuration,

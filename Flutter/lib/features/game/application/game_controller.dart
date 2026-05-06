@@ -1325,6 +1325,7 @@ class GameController extends ChangeNotifier {
     _socketService.joinGame(
       code: code,
       playerName: data.lobby.playerName,
+      cognitoSub: data.lobby.cognitoSub,
       previousPlayerId: (playerId != null && playerId!.isNotEmpty)
           ? playerId
           : data.lobby.previousPlayerId,
@@ -1898,6 +1899,9 @@ class GameController extends ChangeNotifier {
         })
         .toList(growable: false);
     if (relevant.isEmpty) return false;
+    final agents = relevant.where((p) => (p.role ?? '').toUpperCase() == 'AGENT').length;
+    final rogues = relevant.where((p) => (p.role ?? '').toUpperCase() == 'ROGUE').length;
+    if (agents < 1 || rogues < 1) return false;
     return relevant.every(isPlayerInStartZone);
   }
 

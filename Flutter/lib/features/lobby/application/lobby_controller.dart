@@ -90,6 +90,7 @@ class LobbyController extends ChangeNotifier {
       final joined = await _socketService.joinLobby(
         code: bootstrap.code,
         playerName: bootstrap.playerName,
+        cognitoSub: bootstrap.cognitoSub,
         previousPlayerId: bootstrap.previousPlayerId,
         reconnectAsHost: bootstrap.reconnectAsHost,
       );
@@ -399,6 +400,7 @@ class LobbyController extends ChangeNotifier {
       final joined = await _socketService.joinLobby(
         code: bootstrap.code,
         playerName: bootstrap.playerName,
+        cognitoSub: bootstrap.cognitoSub,
         previousPlayerId: playerId ?? bootstrap.previousPlayerId,
         reconnectAsHost: isHost,
       );

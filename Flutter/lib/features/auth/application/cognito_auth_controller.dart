@@ -132,6 +132,10 @@ class CognitoAuthController extends ChangeNotifier {
     return _authService.getAccessToken();
   }
 
+  Future<String?> getCurrentUserSub() {
+    return _authService.getCurrentUserSub();
+  }
+
   Future<void> _enforceSingleDevicePolicy({
     required String accessToken,
     required String username,
