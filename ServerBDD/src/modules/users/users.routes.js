@@ -42,7 +42,7 @@ usersRouter.post('/auth/sync', requireAuthForSync, validate(syncUserSchema), asy
 
 usersRouter.post('/auth/logout', requireAuthForSync, async (req, res, next) => {
   try {
-    await disconnectSessionByCognitoSub(req.auth.sub);
+    await disconnectSessionByCognitoSub(req.auth.sub, req.auth.accessTokenHash);
     res.json({ success: true });
   } catch (error) {
     next(error);

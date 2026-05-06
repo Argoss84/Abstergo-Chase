@@ -80,20 +80,22 @@ class CognitoAuthController extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
-    try {
-      final token = await _authService.getAccessToken();
-      if (token != null && token.isNotEmpty) {
-        await _accountApiService.logout(token);
-      }
-    } catch (_) {
-      // Keep logout resilient: always clear local session.
-    }
+    final token = await _authService.getAccessToken();
     await _authService.clearSession();
     isAuthenticated = false;
     username = null;
     error = null;
     _stopSessionGuard();
     notifyListeners();
+
+    if (token == null || token.isEmpty) {
+      return;
+    }
+    try {
+      unawaited(_accountApiService.logout(token));
+    } catch (_) {
+      // Logout API is best-effort and must not block UI navigation.
+    }
   }
 
   Future<void> handleSessionInvalidated(String message) async {

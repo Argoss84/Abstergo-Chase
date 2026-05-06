@@ -81,16 +81,17 @@ export async function disconnectUserSession(userId) {
   return result.rowCount > 0;
 }
 
-export async function disconnectSessionByCognitoSub(cognitoSub) {
+export async function disconnectSessionByCognitoSub(cognitoSub, accessTokenHash = null) {
   const result = await pool.query(
     `
     DELETE FROM user_active_sessions s
     USING users u
     WHERE u.id = s.user_id
       AND u.cognito_sub = $1
+      AND ($2::text IS NULL OR s.access_token_hash = $2)
     RETURNING s.user_id
     `,
-    [cognitoSub]
+    [cognitoSub, accessTokenHash]
   );
   return result.rowCount > 0;
 }
