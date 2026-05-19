@@ -1,4 +1,5 @@
 aws_region  = "eu-west-3"
+# Keep legacy prefix for SG resource name (renaming would replace the security group).
 name_prefix = "abstergo-turn"
 
 vpc_id    = "vpc-0491c73c129269107"
@@ -20,4 +21,4 @@ common_tags = {
   Stack       = "voice-turn"
 }
 
-vpc_name_tag = "abstergo-shared-vpc"
+vpc_name_tag = "broken-veil-protocol-shared-vpc"

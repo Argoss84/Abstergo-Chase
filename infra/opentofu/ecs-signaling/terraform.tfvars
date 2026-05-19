@@ -42,4 +42,5 @@ common_tags = {
   Stack       = "ecs-signaling"
 }
 
-vpc_name_tag = "abstergo-shared-vpc"
+name_tag_prefix = "broken-veil-protocol-signaling"
+vpc_name_tag    = "broken-veil-protocol-shared-vpc"

@@ -1,7 +1,7 @@
 resource "aws_eip" "nlb_public" {
   domain = "vpc"
   tags = {
-    Name = "${var.ecs_service_name}-nlb-eip"
+    Name = "${var.name_tag_prefix}-nlb-eip"
   }
 }
 

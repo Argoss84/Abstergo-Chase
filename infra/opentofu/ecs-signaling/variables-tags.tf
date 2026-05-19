@@ -13,3 +13,9 @@ variable "vpc_name_tag" {
   type        = string
   default     = ""
 }
+
+variable "name_tag_prefix" {
+  description = "Prefix for AWS Name tags (display only; does not rename resources)."
+  type        = string
+  default     = "broken-veil-protocol-signaling"
+}

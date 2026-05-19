@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "name_prefix" {
   description = "Prefix used for created resources."
   type        = string
-  default     = "abstergo-turn"
+  default     = "broken-veil-protocol-turn"
 }
 
 variable "subnet_id" {
