@@ -1,0 +1,5 @@
+FROM nginx:1.27-alpine
+
+COPY Docker/bddtester/nginx.conf /etc/nginx/conf.d/default.conf
+
+COPY BDDTester/ /usr/share/nginx/html/

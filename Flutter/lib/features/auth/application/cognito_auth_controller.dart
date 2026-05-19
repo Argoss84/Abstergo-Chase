@@ -1,4 +1,6 @@
+import 'package:abstergo_chase/features/account/data/account_api_service.dart';
 import 'package:abstergo_chase/features/auth/data/cognito_auth_service.dart';
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 class CognitoAuthController extends ChangeNotifier {
@@ -6,6 +8,9 @@ class CognitoAuthController extends ChangeNotifier {
     : _authService = authService ?? CognitoAuthService();
 
   final CognitoAuthService _authService;
+  final AccountApiService _accountApiService = AccountApiService();
+  Timer? _sessionGuardTimer;
+  bool _sessionGuardInFlight = false;
 
   bool isInitializing = true;
   bool isAuthenticated = false;
@@ -25,9 +30,11 @@ class CognitoAuthController extends ChangeNotifier {
       if (session != null) {
         isAuthenticated = true;
         username = session.username;
+        _startSessionGuard();
       } else {
         isAuthenticated = false;
         username = null;
+        _stopSessionGuard();
       }
     } catch (e) {
       isAuthenticated = false;
@@ -53,10 +60,18 @@ class CognitoAuthController extends ChangeNotifier {
       );
       this.username = session.username;
       isAuthenticated = true;
+      _startSessionGuard();
+      unawaited(
+        _enforceSingleDevicePolicy(
+          accessToken: session.accessToken,
+          username: session.username,
+        ).catchError(_handleBackgroundSyncError),
+      );
       return true;
     } catch (e) {
       error = e.toString();
       isAuthenticated = false;
+      _stopSessionGuard();
       return false;
     } finally {
       isSubmitting = false;
@@ -65,10 +80,30 @@ class CognitoAuthController extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
+    final token = await _authService.getAccessToken();
     await _authService.clearSession();
     isAuthenticated = false;
     username = null;
     error = null;
+    _stopSessionGuard();
+    notifyListeners();
+
+    if (token == null || token.isEmpty) {
+      return;
+    }
+    try {
+      unawaited(_accountApiService.logout(token));
+    } catch (_) {
+      // Logout API is best-effort and must not block UI navigation.
+    }
+  }
+
+  Future<void> handleSessionInvalidated(String message) async {
+    await _authService.clearSession();
+    isAuthenticated = false;
+    username = null;
+    error = message;
+    _stopSessionGuard();
     notifyListeners();
   }
 
@@ -80,14 +115,97 @@ class CognitoAuthController extends ChangeNotifier {
       final session = await _authService.signInWithGoogle();
       username = session.username;
       isAuthenticated = true;
+      _startSessionGuard();
+      unawaited(
+        _enforceSingleDevicePolicy(
+          accessToken: session.accessToken,
+          username: session.username,
+        ).catchError(_handleBackgroundSyncError),
+      );
       return true;
     } catch (e) {
       error = e.toString();
       isAuthenticated = false;
+      _stopSessionGuard();
       return false;
     } finally {
       isSubmitting = false;
       notifyListeners();
+    }
+  }
+
+  Future<String?> getAccessToken() {
+    return _authService.getAccessToken();
+  }
+
+  Future<String?> getCurrentUserSub() {
+    return _authService.getCurrentUserSub();
+  }
+
+  Future<void> _enforceSingleDevicePolicy({
+    required String accessToken,
+    required String username,
+  }) async {
+    try {
+      await _accountApiService.syncUser(accessToken, username: username);
+    } on BackendUnavailableException {
+      // Allow Cognito login when ServerBDD is temporarily unreachable.
+      return;
+    } on SessionInvalidatedException {
+      await _authService.clearSession();
+      rethrow;
+    } catch (error) {
+      final message = error.toString();
+      if (message.contains('Compte déjà connecté sur un autre appareil')) {
+        await _authService.clearSession();
+        throw Exception(
+          'Compte déjà connecté sur un autre appareil, veuillez le déconnecter pour l\'utiliser ici',
+        );
+      }
+      // Do not reject Cognito authentication on backend sync errors.
+      return;
+    }
+  }
+
+  void _startSessionGuard() {
+    _sessionGuardTimer?.cancel();
+    _sessionGuardTimer = Timer.periodic(const Duration(seconds: 8), (_) async {
+      if (!isAuthenticated || _sessionGuardInFlight) {
+        return;
+      }
+      _sessionGuardInFlight = true;
+      try {
+        final token = await _authService.getAccessToken();
+        if (token == null || token.isEmpty) {
+          await handleSessionInvalidated('Session expirée, reconnectez-vous.');
+          return;
+        }
+        await _accountApiService.getMyProfile(token);
+      } catch (error) {
+        if (error is SessionInvalidatedException) {
+          await handleSessionInvalidated(error.message);
+        }
+      } finally {
+        _sessionGuardInFlight = false;
+      }
+    });
+  }
+
+  void _stopSessionGuard() {
+    _sessionGuardTimer?.cancel();
+    _sessionGuardTimer = null;
+  }
+
+  Future<void> _handleBackgroundSyncError(Object error) async {
+    if (error is SessionInvalidatedException) {
+      await handleSessionInvalidated(error.message);
+      return;
+    }
+    final message = error.toString();
+    if (message.contains('Compte déjà connecté sur un autre appareil')) {
+      await handleSessionInvalidated(
+        'Votre session a été déconnectée car ce compte a été utilisé sur un autre appareil.',
+      );
     }
   }
 }

@@ -103,6 +103,7 @@ class LobbySocketService {
   Future<JoinLobbyResult> joinLobby({
     required String code,
     required String playerName,
+    String? cognitoSub,
     String? previousPlayerId,
     bool reconnectAsHost = false,
     Duration timeout = const Duration(seconds: 12),
@@ -146,6 +147,7 @@ class LobbySocketService {
               'code': code.toUpperCase(),
               'playerName': playerName,
               'playerId': previousPlayerId,
+              if (cognitoSub != null && cognitoSub.isNotEmpty) 'cognitoSub': cognitoSub,
             },
           }
         : <String, dynamic>{
@@ -153,6 +155,7 @@ class LobbySocketService {
             'payload': <String, dynamic>{
               'code': code.toUpperCase(),
               'playerName': playerName,
+              if (cognitoSub != null && cognitoSub.isNotEmpty) 'cognitoSub': cognitoSub,
               if (previousPlayerId != null && previousPlayerId.isNotEmpty)
                 'oldPlayerId': previousPlayerId,
             },

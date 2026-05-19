@@ -1,43 +1,31 @@
-# Déploiement ServerBDD sur O2Switch
+# Déploiement ServerBDD (PostgreSQL + Cognito)
 
-## 1. Créer le sous-domaine
+## Variables requises
 
-Dans cPanel > Sous-domaines :
-- Sous-domaine : `bdd`
-- Domaine : `abstergochase.fr`
-- Document racine : `/bdd.abstergochase.fr` (ou laisser par défaut)
+- `PORT`
+- `DATABASE_HOST`
+- `DATABASE_PORT`
+- `DATABASE_NAME`
+- `DATABASE_USER`
+- `DATABASE_PASSWORD`
+- `DATABASE_SSL` (`true` ou `false`)
+- `COGNITO_ISSUER` (ex: `https://cognito-idp.<region>.amazonaws.com/<user-pool-id>`)
+- `COGNITO_AUDIENCE` (App Client ID Cognito)
 
-## 2. Créer l'application Node.js
+## Commandes
 
-Dans cPanel > Setup Node.js App :
-- Version Node.js : 18 ou 20
-- Mode : Production
-- Application root : chemin vers le dossier ServerBDD (ex. `~/serverbdd`)
-- Application URL : `bdd.abstergochase.fr` (ou le sous-domaine créé)
-- Application startup file : `server.js`
-
-## 3. Variables d'environnement
-
-Dans l'interface Node.js App, ajouter :
-- `DATABASE_HOST` = localhost
-- `DATABASE_PORT` = 3306
-- `DATABASE_NAME` = nite8495_AbstergoBase
-- `DATABASE_USER` = nite8495
-- `DATABASE_PASSWORD` = (votre mot de passe)
-
-## 4. Adapter server.js pour Passenger
-
-Passenger ne utilise pas le port 5175. Le fichier `server.js` utilise déjà `process.env.PORT` ; Passenger définit cette variable automatiquement.
-
-## 5. Rebuild et restart
-
-Après déploiement, cliquer sur "Restart" dans Setup Node.js App.
-
-## 6. Lab - Build de production
-
-Dans `Lab/.env` avant le build :
-```
-VITE_API_URL=https://bdd.abstergochase.fr
+```bash
+npm ci
+npm run migrate
+npm start
 ```
 
-Puis `npm run build` et déployer le contenu de `dist/`.
+## Vérification rapide
+
+- Healthcheck API: `GET /health`
+- Les endpoints métier `/api/*` exigent un JWT Cognito (`Authorization: Bearer ...`)
+
+## Sécurité
+
+- Ne pas exposer PostgreSQL publiquement.
+- Restreindre l’API aux appels de l’application Android uniquement.

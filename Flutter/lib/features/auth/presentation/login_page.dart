@@ -16,6 +16,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _isSubmittingLocal = false;
+  String? _lastShownAuthError;
 
   void _showInfo(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -64,6 +65,16 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   Widget build(BuildContext context) {
     final auth = ref.watch(authControllerProvider);
     final isSubmitting = _isSubmittingLocal || auth.isSubmitting;
+    if (!isSubmitting &&
+        auth.error != null &&
+        auth.error!.isNotEmpty &&
+        auth.error != _lastShownAuthError) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _showInfo(auth.error!);
+      });
+      _lastShownAuthError = auth.error;
+    }
     final viewInsetsBottom = MediaQuery.of(context).viewInsets.bottom;
     return Scaffold(
       appBar: AppBar(title: const Text('Connexion')),

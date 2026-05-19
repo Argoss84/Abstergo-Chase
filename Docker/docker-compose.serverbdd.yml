@@ -1,0 +1,43 @@
+# Stack ServerBDD privée pour application Android
+# Usage: docker compose -f docker-compose.serverbdd.yml --env-file env.serverbdd.example up --build
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-abstergo}
+      POSTGRES_USER: ${POSTGRES_USER:-abstergo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD}
+    volumes:
+      - serverbdd_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-abstergo} -d ${POSTGRES_DB:-abstergo}']
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  serverbdd:
+    build:
+      context: ..
+      dockerfile: Docker/Dockerfile.serverbdd
+    restart: unless-stopped
+    ports:
+      - '${SERVERBDD_PUBLISH_PORT:-5175}:5175'
+    environment:
+      PORT: 5175
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${POSTGRES_DB:-abstergo}
+      DATABASE_USER: ${POSTGRES_USER:-abstergo}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD}
+      DATABASE_SSL: 'false'
+      COGNITO_ISSUER: ${COGNITO_ISSUER:?define COGNITO_ISSUER}
+      COGNITO_AUDIENCE: ${COGNITO_AUDIENCE:?define COGNITO_AUDIENCE}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  serverbdd_pg_data:

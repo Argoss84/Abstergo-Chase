@@ -47,4 +47,14 @@ class AppRuntimeConfig {
     'VOICE_STUN_URL',
     defaultValue: 'stun:35.181.228.185:3478',
   );
+
+  // ServerBDD profile API configuration.
+  static const String serverBddProductionUrl = String.fromEnvironment(
+    'SERVERBDD_PRODUCTION_URL',
+    defaultValue: 'http://35.181.228.185:5175',
+  );
+  static const String serverBddDevelopmentUrl = String.fromEnvironment(
+    'SERVERBDD_DEVELOPMENT_URL',
+    defaultValue: 'http://10.0.2.2:5175',
+  );
 }

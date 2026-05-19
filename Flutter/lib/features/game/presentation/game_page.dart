@@ -55,6 +55,7 @@ class _GamePageState extends State<GamePage>
   int? _lastCountdownSecondVibrated;
   int _lastOutOfZoneVibrationMs = 0;
   bool _hasSpokenJoinTts = false;
+  bool _compassModeEnabled = false;
 
   @override
   void initState() {
@@ -70,6 +71,7 @@ class _GamePageState extends State<GamePage>
     _compassSub = FlutterCompass.events?.listen((event) {
       // heading is degrees, clockwise from north
       _headingDeg.value = event.heading;
+      _applyCompassRotation(event.heading);
     });
   }
 
@@ -183,6 +185,15 @@ class _GamePageState extends State<GamePage>
             ),
             title: Text((_controller.playerRole ?? 'N/A').toUpperCase()),
             actions: [
+              IconButton(
+                tooltip: _compassModeEnabled
+                    ? 'Désactiver mode boussole'
+                    : 'Activer mode boussole',
+                onPressed: _toggleCompassMode,
+                icon: Icon(
+                  _compassModeEnabled ? Icons.explore : Icons.explore_off,
+                ),
+              ),
               IconButton(
                 tooltip: _controller.isVoiceChatEnabled
                     ? 'Désactiver vocal'
@@ -1071,6 +1082,23 @@ class _GamePageState extends State<GamePage>
       return;
     }
     _mapController.move(LatLng(target.latitude, target.longitude), 16.5);
+  }
+
+  void _toggleCompassMode() {
+    setState(() {
+      _compassModeEnabled = !_compassModeEnabled;
+    });
+    if (!_compassModeEnabled) {
+      _mapController.rotate(0);
+      return;
+    }
+    _applyCompassRotation(_headingDeg.value);
+  }
+
+  void _applyCompassRotation(double? heading) {
+    if (!_compassModeEnabled || heading == null) return;
+    // Keep player forward direction at top of screen.
+    _mapController.rotate(-heading);
   }
 
   Future<void> _openVitalityQr() async {

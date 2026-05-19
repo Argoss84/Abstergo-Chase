@@ -1,3 +1,4 @@
+import 'package:abstergo_chase/app/providers.dart';
 import 'package:abstergo_chase/features/lobby/application/lobby_controller.dart';
 import 'package:abstergo_chase/features/create_lobby/presentation/widgets/create_lobby_details_sheet.dart';
 import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
@@ -9,10 +10,11 @@ import 'package:abstergo_chase/features/lobby/presentation/widgets/lobby_map_pre
 import 'package:abstergo_chase/shared/services/socket_environment_service.dart';
 import 'package:abstergo_chase/shared/services/vibration_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
-class LobbyPage extends StatefulWidget {
+class LobbyPage extends ConsumerStatefulWidget {
   const LobbyPage({super.key, this.initialCode, this.bootstrapData});
 
   static const String routePath = '/lobby';
@@ -22,7 +24,7 @@ class LobbyPage extends StatefulWidget {
   final LobbyBootstrapData? bootstrapData;
 
   @override
-  State<LobbyPage> createState() => _LobbyPageState();
+  ConsumerState<LobbyPage> createState() => _LobbyPageState();
 }
 
 /// Texte sur bulles claires : le thème sombre impose une couleur de corps claire,
@@ -38,7 +40,7 @@ const TextStyle _kChatBubbleBodyStyle = TextStyle(
   color: Color(0xFF0F172A),
 );
 
-class _LobbyPageState extends State<LobbyPage> with WidgetsBindingObserver {
+class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserver {
   late final LobbyController _controller;
   late final TextEditingController _chatController;
   int _lastReadCount = 0;
@@ -72,6 +74,7 @@ class _LobbyPageState extends State<LobbyPage> with WidgetsBindingObserver {
   Future<void> _initializeFromCode(String code) async {
     final socketConfig = await _socketEnvironmentService.loadConfig();
     final savedName = await _playerNameStore.load();
+    final cognitoSub = await ref.read(authControllerProvider).getCurrentUserSub();
     if (!mounted) return;
     _controller.initialize(
       bootstrap: LobbyBootstrapData(
@@ -81,6 +84,7 @@ class _LobbyPageState extends State<LobbyPage> with WidgetsBindingObserver {
         playerName: (savedName == null || savedName.trim().isEmpty)
             ? 'Joueur'
             : savedName.trim(),
+        cognitoSub: cognitoSub,
       ),
     );
   }

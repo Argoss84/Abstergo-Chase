@@ -1,6 +1,7 @@
 # Déploiement Docker
 
 Ce dossier décrit la stack **MariaDB**, **ServerBDD** (API), **signaling** (Socket.IO) et le **frontend** (build statique + nginx).
+Pour la refonte actuelle de `ServerBDD` (PostgreSQL + Cognito, API privée Android), utiliser le compose dédié `docker-compose.serverbdd.yml`.
 
 Pour un déploiement **ECR / ECS** (signaling + monitor + application) :  
 - Guide **console** : [AWS-ECS-Console.md](AWS-ECS-Console.md)  
@@ -48,6 +49,10 @@ docker compose build --no-cache web && docker compose up -d
 | `Dockerfile.signaling` | Image Node pour `Server/server.js` |
 | `Dockerfile.serverbdd` | Image Node pour `ServerBDD/server.js` |
 | `Dockerfile.web` | Build Vite + nginx pour l’`Application` |
+| `docker-compose.serverbdd.yml` | Stack dédiée `ServerBDD + PostgreSQL` (nouvelle version) |
+| `docker-compose.bddtester.yml` | Interface web de test BDD (Cognito + appels API) |
+| `env.serverbdd.example` | Variables d’environnement pour la stack ServerBDD dédiée |
+| `env.bddtester.example` | Variables d’environnement pour l’interface BDD tester |
 | `nginx.conf` | SPA React : `try_files` + cache assets |
 | `env.example` | Modèle pour `.env` local |
 | `env.application.example` | Modèle pour le compose Application seule |
@@ -60,7 +65,29 @@ docker compose -f docker-compose.application.yml up --build
 
 Puis `http://localhost:8080` (ou `APPLICATION_PUBLISH_PORT`).
 
-Le script SQL `ServerBDD/scripts/create_game_replay_tables.sql` est monté dans MariaDB au premier démarrage du volume `db_data`.
+## ServerBDD refondu (PostgreSQL + Cognito)
+
+```bash
+cp env.serverbdd.example .env.serverbdd
+docker compose -f docker-compose.serverbdd.yml --env-file .env.serverbdd up --build
+```
+
+- API: `http://localhost:5175`
+- DB PostgreSQL non exposée (accès interne Docker uniquement)
+- Tous les endpoints `/api/*` sont protégés par JWT Cognito (hors `/health`)
+
+## Interface de test BDD (Cognito d'abord)
+
+```bash
+cp env.bddtester.example .env.bddtester
+docker compose -f docker-compose.bddtester.yml --env-file .env.bddtester up --build -d
+```
+
+- UI de test: `http://localhost:8081`
+- Etapes:
+  1) Clique sur "Se connecter avec Cognito"
+  2) Reviens sur l'UI apres login
+  3) Lance les appels `/health`, `/api/auth/sync`, `/api/users/me`, `/api/progression/me`
 
 ## Fichier `.dockerignore` (racine du dépôt)
 
