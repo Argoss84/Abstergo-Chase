@@ -37,7 +37,7 @@ security_group_ids = [
 ]
 
 common_tags = {
-  Project     = "abstergo-chase"
+  Project     = "Broken Veil Protocol"
   Environment = "dev"
   ManagedBy   = "opentofu"
   Owner       = "alexandre"

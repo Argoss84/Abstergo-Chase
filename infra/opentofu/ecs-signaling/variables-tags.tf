@@ -2,7 +2,7 @@ variable "common_tags" {
   description = "Common tags applied to all taggable AWS resources."
   type        = map(string)
   default = {
-    Project   = "abstergo-chase"
+    Project   = "Broken Veil Protocol"
     Component = "signaling"
     ManagedBy = "opentofu"
   }

@@ -13,7 +13,7 @@ relay_max_port         = 49200
 turn_secret = "STfSxH3/J1y7JPiivIQWvmzUIkgEb80KksLLj1FvrC+K0lcBqe41uiPJa0c7//vK"
 
 common_tags = {
-  Project     = "abstergo-chase"
+  Project     = "Broken Veil Protocol"
   Environment = "dev"
   ManagedBy   = "opentofu"
   Owner       = "alexandre"
