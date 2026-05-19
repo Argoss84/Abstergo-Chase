@@ -25,11 +25,9 @@ signaling_listener_port  = 80
 nlb_subnet_id            = "subnet-0547ed2467da2d42a"
 turn_backend_instance_id = "i-07babea06c00eeab9"
 
-# Auto-populated from AWS CLI (default VPC in eu-west-3).
+# Mono-AZ NLB: tasks must run in the same AZ as nlb_subnet_id.
 subnet_ids = [
-  "subnet-0547ed2467da2d42a",
-  "subnet-08484844af60e5cda",
-  "subnet-0f11c3bc8d02082f3"
+  "subnet-0547ed2467da2d42a"
 ]
 
 security_group_ids = [
