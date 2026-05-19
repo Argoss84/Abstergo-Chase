@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:abstergo_chase/app/config/app_runtime_config.dart';
+import 'package:broken_veil_protocol/app/config/app_runtime_config.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 typedef VoiceSignalSender = Future<void> Function(

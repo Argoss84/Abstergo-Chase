@@ -1,4 +1,4 @@
-import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
+import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
 import 'package:geolocator/geolocator.dart';
 
 class LocationService {

@@ -1,4 +1,4 @@
-import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_form_data.dart';
+import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_form_data.dart';
 import 'package:flutter/material.dart';
 
 class CreateLobbyDetailsSheet extends StatefulWidget {

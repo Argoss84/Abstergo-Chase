@@ -1,5 +1,5 @@
-import 'package:abstergo_chase/app/providers.dart';
-import 'package:abstergo_chase/features/account/data/account_api_service.dart';
+import 'package:broken_veil_protocol/app/providers.dart';
+import 'package:broken_veil_protocol/features/account/data/account_api_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:abstergo_chase/app/config/app_runtime_config.dart';
+import 'package:broken_veil_protocol/app/config/app_runtime_config.dart';
 import 'package:http/http.dart' as http;
 
 class SessionInvalidatedException implements Exception {

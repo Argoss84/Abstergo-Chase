@@ -1,4 +1,4 @@
-import 'package:abstergo_chase/app/config/app_runtime_config.dart';
+import 'package:broken_veil_protocol/app/config/app_runtime_config.dart';
 
 class CreateLobbyDefaults {
   const CreateLobbyDefaults._();

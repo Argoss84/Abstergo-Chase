@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.abstergo" "\0"
-            VALUE "FileDescription", "abstergo_chase" "\0"
+            VALUE "CompanyName", "Broken Veil Protocol" "\0"
+            VALUE "FileDescription", "Broken Veil Protocol" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "abstergo_chase" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.abstergo. All rights reserved." "\0"
-            VALUE "OriginalFilename", "abstergo_chase.exe" "\0"
-            VALUE "ProductName", "abstergo_chase" "\0"
+            VALUE "InternalName", "broken_veil_protocol" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Broken Veil Protocol. All rights reserved." "\0"
+            VALUE "OriginalFilename", "broken_veil_protocol.exe" "\0"
+            VALUE "ProductName", "Broken Veil Protocol" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

@@ -1,4 +1,4 @@
-import 'package:abstergo_chase/core/logging/app_logger.dart';
+import 'package:broken_veil_protocol/core/logging/app_logger.dart';
 import 'package:flutter/foundation.dart';
 
 class GlobalErrorHandler {

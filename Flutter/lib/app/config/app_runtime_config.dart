@@ -23,11 +23,11 @@ class AppRuntimeConfig {
   );
   static const String cognitoRedirectUri = String.fromEnvironment(
     'COGNITO_REDIRECT_URI',
-    defaultValue: 'com.abstergo.chase://oauth/callback',
+    defaultValue: 'com.brokenveilprotocol.app://oauth/callback',
   );
   static const String cognitoLogoutRedirectUri = String.fromEnvironment(
     'COGNITO_LOGOUT_REDIRECT_URI',
-    defaultValue: 'com.abstergo.chase://oauth/signout',
+    defaultValue: 'com.brokenveilprotocol.app://oauth/signout',
   );
 
   // Signaling + voice network configuration.

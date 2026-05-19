@@ -1,6 +1,6 @@
 import 'dart:math';
 
-import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
+import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart';
 
