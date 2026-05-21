@@ -6,6 +6,12 @@ plugins {
 
 import java.text.SimpleDateFormat
 
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace "com.brokenveilprotocol.app"
     compileSdk = flutter.compileSdkVersion
@@ -25,6 +31,15 @@ android {
         main.java.srcDirs += 'src/main/kotlin'
     }
 
+    signingConfigs {
+        release {
+            keyAlias = keystoreProperties["keyAlias"]
+            keyPassword = keystoreProperties["keyPassword"]
+            storeFile = keystorePropertiesFile.exists() ? rootProject.file(keystoreProperties["storeFile"]) : null
+            storePassword = keystoreProperties["storePassword"]
+        }
+    }
+
     defaultConfig {
         applicationId "com.brokenveilprotocol.app"
         minSdk = flutter.minSdkVersion
@@ -39,9 +54,7 @@ android {
 
     buildTypes {
         release {
-            // Keep debug signing for local release tests; replace with production
-            // signing config in CI/release pipeline.
-            signingConfig signingConfigs.debug
+            signingConfig keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
