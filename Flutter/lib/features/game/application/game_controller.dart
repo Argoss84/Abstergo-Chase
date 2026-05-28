@@ -1364,8 +1364,9 @@ class GameController extends ChangeNotifier {
     if (!isVoiceChatEnabled) return false;
     if (player.id == playerId) return false;
     final statusUpper = player.status.toUpperCase();
-    if (statusUpper == 'CAPTURED' || statusUpper == 'DISCONNECTED')
+    if (statusUpper == 'CAPTURED' || statusUpper == 'DISCONNECTED') {
       return false;
+    }
     final me = (playerRole ?? '').toUpperCase();
     final targetRole = (player.role ?? '').toUpperCase();
     if (canListenOtherRoles) return true;

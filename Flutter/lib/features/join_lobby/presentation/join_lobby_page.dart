@@ -178,7 +178,7 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.55),
+                      color: Colors.black.withValues(alpha: 0.55),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Text(

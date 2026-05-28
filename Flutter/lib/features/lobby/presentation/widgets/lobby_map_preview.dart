@@ -137,7 +137,7 @@ class LobbyMapPreview extends StatelessWidget {
                     point: centerLatLng,
                     radius: mapRadiusMeters.toDouble(),
                     useRadiusInMeter: true,
-                    color: Colors.blue.withOpacity(0.1),
+                    color: Colors.blue.withValues(alpha: 0.1),
                     borderStrokeWidth: 2,
                     borderColor: Colors.blue,
                   ),
@@ -147,7 +147,7 @@ class LobbyMapPreview extends StatelessWidget {
                       point: point,
                       radius: objectiveZoneRadiusMeters.toDouble(),
                       useRadiusInMeter: true,
-                      color: Colors.red.withOpacity(0.08),
+                      color: Colors.red.withValues(alpha: 0.08),
                       borderStrokeWidth: 1,
                       borderColor: Colors.red,
                     ),
@@ -160,12 +160,12 @@ class LobbyMapPreview extends StatelessWidget {
                       point: point,
                       radius: highlightObjectiveZoneRadiusMeters.toDouble(),
                       useRadiusInMeter: true,
-                      color: Colors.orange.withOpacity(
-                        0.18 + (highlightObjectivePulse * 0.30),
+                      color: Colors.orange.withValues(
+                        alpha: 0.18 + (highlightObjectivePulse * 0.30),
                       ),
                       borderStrokeWidth: 2 + (highlightObjectivePulse * 1.4),
-                      borderColor: Colors.deepOrangeAccent.withOpacity(
-                        0.65 + (highlightObjectivePulse * 0.35),
+                      borderColor: Colors.deepOrangeAccent.withValues(
+                        alpha: 0.65 + (highlightObjectivePulse * 0.35),
                       ),
                     ),
                   ),
@@ -181,8 +181,8 @@ class LobbyMapPreview extends StatelessWidget {
                       useRadiusInMeter: true,
                       color: Colors.transparent,
                       borderStrokeWidth: 1.8 - (highlightObjectivePulse * 1.0),
-                      borderColor: Colors.deepOrangeAccent.withOpacity(
-                        0.65 - (highlightObjectivePulse * 0.55),
+                      borderColor: Colors.deepOrangeAccent.withValues(
+                        alpha: 0.65 - (highlightObjectivePulse * 0.55),
                       ),
                     ),
                   ),
@@ -191,7 +191,7 @@ class LobbyMapPreview extends StatelessWidget {
                     point: agentLatLng,
                     radius: startZoneRadiusMeters.toDouble(),
                     useRadiusInMeter: true,
-                    color: Colors.blue.withOpacity(0.1),
+                    color: Colors.blue.withValues(alpha: 0.1),
                     borderStrokeWidth: 1.5,
                     borderColor: Colors.blue,
                   ),
@@ -200,7 +200,7 @@ class LobbyMapPreview extends StatelessWidget {
                     point: rogueLatLng,
                     radius: startZoneRadiusMeters.toDouble(),
                     useRadiusInMeter: true,
-                    color: Colors.green.withOpacity(0.1),
+                    color: Colors.green.withValues(alpha: 0.1),
                     borderStrokeWidth: 1.5,
                     borderColor: Colors.green,
                   ),
@@ -211,7 +211,7 @@ class LobbyMapPreview extends StatelessWidget {
                 polygons: [
                   Polygon(
                     points: contourLatLng,
-                    color: Colors.blue.withOpacity(0.12),
+                    color: Colors.blue.withValues(alpha: 0.12),
                     borderColor: Colors.blue,
                     borderStrokeWidth: 2.5,
                   ),
@@ -223,15 +223,15 @@ class LobbyMapPreview extends StatelessWidget {
                   Polyline(
                     points: guidanceLatLng,
                     strokeWidth: 9 + (guidanceNeonPulse * 3),
-                    color: guidancePathColor.withOpacity(
-                      0.20 + (guidanceNeonPulse * 0.35),
+                    color: guidancePathColor.withValues(
+                      alpha: 0.20 + (guidanceNeonPulse * 0.35),
                     ),
                   ),
                   Polyline(
                     points: guidanceLatLng,
                     strokeWidth: 4,
-                    color: guidancePathColor.withOpacity(
-                      0.80 + (guidanceNeonPulse * 0.20),
+                    color: guidancePathColor.withValues(
+                      alpha: 0.80 + (guidanceNeonPulse * 0.20),
                     ),
                   ),
                 ],
@@ -332,7 +332,7 @@ class _PlayerGpsPin extends StatelessWidget {
                   shape: BoxShape.circle,
                   boxShadow: <BoxShadow>[
                     BoxShadow(
-                      color: auraColor.withOpacity(0.85),
+                      color: auraColor.withValues(alpha: 0.85),
                       blurRadius: 14,
                       spreadRadius: 4,
                     ),
@@ -349,7 +349,7 @@ class _PlayerGpsPin extends StatelessWidget {
               markerAsset,
               fit: BoxFit.contain,
               filterQuality: FilterQuality.high,
-              errorBuilder: (_, __, ___) => Icon(
+              errorBuilder: (_, _, _) => Icon(
                 Icons.location_on,
                 color: isAgent ? Colors.cyanAccent : Colors.deepOrangeAccent,
                 size: 34,

@@ -141,7 +141,7 @@ class CreateLobbyService {
       'payload': <String, dynamic>{
         'playerName': playerName,
         if (cognitoSub != null && cognitoSub.isNotEmpty) 'cognitoSub': cognitoSub,
-        if (gameConfig != null) 'gameConfig': gameConfig,
+        'gameConfig': ?gameConfig,
       },
       'meta': <String, dynamic>{'clientVersion': _clientVersion},
     });

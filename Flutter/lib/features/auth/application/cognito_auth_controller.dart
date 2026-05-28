@@ -10,7 +10,6 @@ class CognitoAuthController extends ChangeNotifier {
   final CognitoAuthService _authService;
   final AccountApiService _accountApiService = AccountApiService();
   Timer? _sessionGuardTimer;
-  bool _sessionGuardInFlight = false;
 
   bool isInitializing = true;
   bool isAuthenticated = false;

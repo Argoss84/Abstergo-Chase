@@ -171,10 +171,10 @@ class _GamePageState extends State<GamePage>
                 filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
                 child: Container(
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.22),
+                    color: Colors.black.withValues(alpha: 0.22),
                     border: Border(
                       bottom: BorderSide(
-                        color: Colors.white.withOpacity(0.14),
+                        color: Colors.white.withValues(alpha: 0.14),
                         width: 1,
                       ),
                     ),
@@ -432,7 +432,7 @@ class _GamePageState extends State<GamePage>
                                     vertical: 12,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: Colors.black.withOpacity(0.65),
+                                    color: Colors.black.withValues(alpha: 0.65),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: const Text(
@@ -452,7 +452,7 @@ class _GamePageState extends State<GamePage>
                           Positioned.fill(
                             child: IgnorePointer(
                               child: Container(
-                                color: Colors.black.withOpacity(0.55),
+                                color: Colors.black.withValues(alpha: 0.55),
                                 child: Center(
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(
@@ -460,7 +460,7 @@ class _GamePageState extends State<GamePage>
                                       vertical: 16,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.95),
+                                      color: Colors.white.withValues(alpha: 0.95),
                                       borderRadius: BorderRadius.circular(14),
                                     ),
                                     child: Column(
@@ -512,7 +512,7 @@ class _GamePageState extends State<GamePage>
                                 vertical: 10,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.orange.shade800.withOpacity(0.9),
+                                color: Colors.orange.shade800.withValues(alpha: 0.9),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: const Row(
@@ -546,7 +546,7 @@ class _GamePageState extends State<GamePage>
                                 child: Container(
                                   width: 260,
                                   padding: const EdgeInsets.all(8),
-                                  color: Colors.black.withOpacity(0.08),
+                                  color: Colors.black.withValues(alpha: 0.08),
                                   child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
@@ -613,7 +613,7 @@ class _GamePageState extends State<GamePage>
                                 child: Container(
                                   width: 260,
                                   padding: const EdgeInsets.all(8),
-                                  color: Colors.black.withOpacity(0.08),
+                                  color: Colors.black.withValues(alpha: 0.08),
                                   child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
@@ -632,8 +632,8 @@ class _GamePageState extends State<GamePage>
                                           ),
                                           decoration: BoxDecoration(
                                             color: activeVoice
-                                                ? Colors.cyanAccent.withOpacity(
-                                                    0.18,
+                                                ? Colors.cyanAccent.withValues(
+                                                    alpha: 0.18,
                                                   )
                                                 : Colors.transparent,
                                             borderRadius: BorderRadius.circular(
@@ -642,8 +642,8 @@ class _GamePageState extends State<GamePage>
                                             border: Border.all(
                                               color: activeVoice
                                                   ? Colors.cyanAccent
-                                                  : Colors.white.withOpacity(
-                                                      0.1,
+                                                  : Colors.white.withValues(
+                                                      alpha: 0.1,
                                                     ),
                                               width: 1,
                                             ),
@@ -698,7 +698,7 @@ class _GamePageState extends State<GamePage>
               if (winnerType != null)
                 Positioned.fill(
                   child: Container(
-                    color: Colors.black.withOpacity(0.72),
+                    color: Colors.black.withValues(alpha: 0.72),
                     child: Center(
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 420),
@@ -801,8 +801,8 @@ class _GamePageState extends State<GamePage>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
-        border: Border.all(color: color.withOpacity(0.45)),
+        color: color.withValues(alpha: 0.15),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
@@ -834,11 +834,11 @@ class _GamePageState extends State<GamePage>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.red.shade700.withOpacity(0.88),
+        color: Colors.red.shade700.withValues(alpha: 0.88),
         borderRadius: BorderRadius.circular(10),
         boxShadow: <BoxShadow>[
           BoxShadow(
-            color: Colors.redAccent.withOpacity(0.45),
+            color: Colors.redAccent.withValues(alpha: 0.45),
             blurRadius: 14,
             spreadRadius: 1,
           ),
@@ -875,7 +875,7 @@ class _GamePageState extends State<GamePage>
             child: LinearProgressIndicator(
               minHeight: 8,
               value: clampedProgress,
-              backgroundColor: Colors.white.withOpacity(0.25),
+              backgroundColor: Colors.white.withValues(alpha: 0.25),
               valueColor: const AlwaysStoppedAnimation<Color>(
                 Colors.orangeAccent,
               ),
@@ -1043,8 +1043,8 @@ class _GamePageState extends State<GamePage>
         boxShadow: pulseAura
             ? <BoxShadow>[
                 BoxShadow(
-                  color: Colors.redAccent.withOpacity(
-                    0.35 + (pulseValue * 0.45),
+                  color: Colors.redAccent.withValues(
+                    alpha: 0.35 + (pulseValue * 0.45),
                   ),
                   blurRadius: 8 + (pulseValue * 14),
                   spreadRadius: 1 + (pulseValue * 4),
@@ -1190,7 +1190,7 @@ class _GamePageState extends State<GamePage>
               builder: (context, _) {
                 return ValueListenableBuilder<double?>(
                   valueListenable: _headingDeg,
-                  builder: (context, heading, __) {
+                  builder: (context, heading, _) {
                     final targeting = _controller.getRogueTargetForHeading(
                       heading,
                     );
@@ -1218,8 +1218,8 @@ class _GamePageState extends State<GamePage>
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
                             color: targeting.isValid
-                                ? Colors.green.withOpacity(0.15)
-                                : Colors.orange.withOpacity(0.15),
+                                ? Colors.green.withValues(alpha: 0.15)
+                                : Colors.orange.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
                               color: targeting.isValid
@@ -1441,7 +1441,7 @@ class _GamePageState extends State<GamePage>
                             hintStyle: TextStyle(
                               color: Theme.of(
                                 context,
-                              ).colorScheme.onSurface.withOpacity(0.55),
+                              ).colorScheme.onSurface.withValues(alpha: 0.55),
                             ),
                           ),
                         ),
@@ -1879,9 +1879,9 @@ class _FpsCompassBar extends StatelessWidget {
     return Container(
       height: _height,
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.45),
+        color: Colors.black.withValues(alpha: 0.45),
         border: Border(
-          bottom: BorderSide(color: Colors.white.withOpacity(0.12)),
+          bottom: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
         ),
       ),
       child: LayoutBuilder(
@@ -1924,7 +1924,7 @@ class _FpsCompassBar extends StatelessWidget {
                 child: Icon(
                   Icons.arrow_drop_down,
                   size: 18,
-                  color: Colors.white.withOpacity(0.95),
+                  color: Colors.white.withValues(alpha: 0.95),
                 ),
               ),
               Positioned(
@@ -1935,7 +1935,7 @@ class _FpsCompassBar extends StatelessWidget {
                   heading.round().toString().padLeft(3, '0'),
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withValues(alpha: 0.9),
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 1,
@@ -1991,7 +1991,7 @@ class _FpsCompassBar extends StatelessWidget {
           Text(
             meters > 0 ? '${meters}m' : '',
             style: TextStyle(
-              color: Colors.white.withOpacity(0.85),
+              color: Colors.white.withValues(alpha: 0.85),
               fontSize: 9,
               fontWeight: FontWeight.w600,
             ),
@@ -2042,14 +2042,14 @@ class _FpsCompassPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final tickPaint = Paint()
-      ..color = Colors.white.withOpacity(0.65)
+      ..color = Colors.white.withValues(alpha: 0.65)
       ..strokeWidth = 1;
     final minorPaint = Paint()
-      ..color = Colors.white.withOpacity(0.35)
+      ..color = Colors.white.withValues(alpha: 0.35)
       ..strokeWidth = 1;
 
     final textStyle = TextStyle(
-      color: Colors.white.withOpacity(0.9),
+      color: Colors.white.withValues(alpha: 0.9),
       fontSize: 10,
       fontWeight: FontWeight.w700,
       letterSpacing: 0.5,
