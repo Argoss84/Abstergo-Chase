@@ -1,4 +1,4 @@
-package com.abstergo.chase
+package com.brokenveilprotocol.app
 
 import io.flutter.embedding.android.FlutterActivity
 

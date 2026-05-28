@@ -1,15 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:abstergo_chase/app/config/app_runtime_config.dart';
-import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
-import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
-import 'package:abstergo_chase/features/game/data/game_socket_service.dart';
-import 'package:abstergo_chase/features/game/domain/game_models.dart';
-import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
-import 'package:abstergo_chase/features/lobby/data/player_session_store.dart';
-import 'package:abstergo_chase/shared/services/voice_chat_service.dart';
-import 'package:abstergo_chase/shared/services/voice_settings_service.dart';
+import 'package:broken_veil_protocol/app/config/app_runtime_config.dart';
+import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_defaults.dart';
+import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
+import 'package:broken_veil_protocol/features/game/data/game_socket_service.dart';
+import 'package:broken_veil_protocol/features/game/domain/game_models.dart';
+import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
+import 'package:broken_veil_protocol/features/lobby/data/player_session_store.dart';
+import 'package:broken_veil_protocol/shared/services/voice_chat_service.dart';
+import 'package:broken_veil_protocol/shared/services/voice_settings_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 

@@ -1,6 +1,6 @@
-import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_form_data.dart';
-import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
-import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
+import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_form_data.dart';
+import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_defaults.dart';
+import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
 
 class LobbyPlayer {
   static const Object _noRoleChange = Object();

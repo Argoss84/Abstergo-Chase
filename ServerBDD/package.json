@@ -1,7 +1,7 @@
 {
-  "name": "abstergo-chase-serverbdd",
+  "name": "broken-veil-protocol-serverbdd",
   "version": "1.0.0",
-  "description": "Serveur API PostgreSQL privé pour application Android (Abstergo Chase)",
+  "description": "Serveur API PostgreSQL privé pour application Android (Broken Veil Protocol)",
   "type": "module",
   "main": "src/server.js",
   "scripts": {

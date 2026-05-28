@@ -1,5 +1,5 @@
-import 'package:abstergo_chase/app/router/app_router.dart';
-import 'package:abstergo_chase/features/auth/application/cognito_auth_controller.dart';
+import 'package:broken_veil_protocol/app/router/app_router.dart';
+import 'package:broken_veil_protocol/features/auth/application/cognito_auth_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 

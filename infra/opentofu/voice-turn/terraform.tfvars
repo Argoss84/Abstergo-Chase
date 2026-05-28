@@ -1,4 +1,5 @@
 aws_region  = "eu-west-3"
+# Keep legacy prefix for SG resource name (renaming would replace the security group).
 name_prefix = "abstergo-turn"
 
 vpc_id    = "vpc-0491c73c129269107"
@@ -13,11 +14,11 @@ relay_max_port         = 49200
 turn_secret = "STfSxH3/J1y7JPiivIQWvmzUIkgEb80KksLLj1FvrC+K0lcBqe41uiPJa0c7//vK"
 
 common_tags = {
-  Project     = "abstergo-chase"
+  Project     = "Broken Veil Protocol"
   Environment = "dev"
   ManagedBy   = "opentofu"
   Owner       = "alexandre"
   Stack       = "voice-turn"
 }
 
-vpc_name_tag = "abstergo-shared-vpc"
+vpc_name_tag = "broken-veil-protocol-shared-vpc"

@@ -1,5 +1,5 @@
-import 'package:abstergo_chase/features/account/data/account_api_service.dart';
-import 'package:abstergo_chase/features/auth/data/cognito_auth_service.dart';
+import 'package:broken_veil_protocol/features/account/data/account_api_service.dart';
+import 'package:broken_veil_protocol/features/auth/data/cognito_auth_service.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 

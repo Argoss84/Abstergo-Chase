@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:math';
 
-import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_form_data.dart';
-import 'package:abstergo_chase/features/lobby/data/lobby_socket_service.dart';
-import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
-import 'package:abstergo_chase/shared/services/voice_chat_service.dart';
-import 'package:abstergo_chase/shared/services/voice_settings_service.dart';
+import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_form_data.dart';
+import 'package:broken_veil_protocol/features/lobby/data/lobby_socket_service.dart';
+import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
+import 'package:broken_veil_protocol/shared/services/voice_chat_service.dart';
+import 'package:broken_veil_protocol/shared/services/voice_settings_service.dart';
 import 'package:flutter/foundation.dart';
 
 class LobbyController extends ChangeNotifier {

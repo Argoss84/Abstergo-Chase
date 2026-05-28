@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:abstergo_chase/app/config/app_runtime_config.dart';
+import 'package:broken_veil_protocol/app/config/app_runtime_config.dart';
 import 'package:amazon_cognito_identity_dart_2/cognito.dart';
 import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:shared_preferences/shared_preferences.dart';

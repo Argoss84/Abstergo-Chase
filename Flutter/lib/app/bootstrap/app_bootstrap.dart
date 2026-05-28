@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:abstergo_chase/app/app.dart';
-import 'package:abstergo_chase/core/errors/global_error_handler.dart';
+import 'package:broken_veil_protocol/app/app.dart';
+import 'package:broken_veil_protocol/core/errors/global_error_handler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -12,7 +12,7 @@ void bootstrapApp() {
       GlobalErrorHandler.initialize();
       runApp(
         const ProviderScope(
-          child: AbstergoChaseApp(),
+          child: BrokenVeilProtocolApp(),
         ),
       );
     },

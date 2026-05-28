@@ -1,14 +1,14 @@
 import 'dart:async';
 
-import 'package:abstergo_chase/app/providers.dart';
-import 'package:abstergo_chase/features/account/data/account_api_service.dart';
-import 'package:abstergo_chase/features/auth/application/cognito_auth_controller.dart';
-import 'package:abstergo_chase/features/create_lobby/application/create_lobby_controller.dart';
-import 'package:abstergo_chase/features/create_lobby/presentation/widgets/create_lobby_details_sheet.dart';
-import 'package:abstergo_chase/features/create_lobby/presentation/widgets/create_lobby_map.dart';
-import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
-import 'package:abstergo_chase/features/lobby/presentation/lobby_page.dart';
-import 'package:abstergo_chase/shared/services/socket_environment_service.dart';
+import 'package:broken_veil_protocol/app/providers.dart';
+import 'package:broken_veil_protocol/features/account/data/account_api_service.dart';
+import 'package:broken_veil_protocol/features/auth/application/cognito_auth_controller.dart';
+import 'package:broken_veil_protocol/features/create_lobby/application/create_lobby_controller.dart';
+import 'package:broken_veil_protocol/features/create_lobby/presentation/widgets/create_lobby_details_sheet.dart';
+import 'package:broken_veil_protocol/features/create_lobby/presentation/widgets/create_lobby_map.dart';
+import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
+import 'package:broken_veil_protocol/features/lobby/presentation/lobby_page.dart';
+import 'package:broken_veil_protocol/shared/services/socket_environment_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';

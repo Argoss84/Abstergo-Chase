@@ -1,17 +1,17 @@
-import 'package:abstergo_chase/app/providers.dart';
-import 'package:abstergo_chase/shared/services/screen_awake_service.dart';
-import 'package:abstergo_chase/shared/theme/app_theme.dart';
+import 'package:broken_veil_protocol/app/providers.dart';
+import 'package:broken_veil_protocol/shared/services/screen_awake_service.dart';
+import 'package:broken_veil_protocol/shared/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class AbstergoChaseApp extends ConsumerStatefulWidget {
-  const AbstergoChaseApp({super.key});
+class BrokenVeilProtocolApp extends ConsumerStatefulWidget {
+  const BrokenVeilProtocolApp({super.key});
 
   @override
-  ConsumerState<AbstergoChaseApp> createState() => _AbstergoChaseAppState();
+  ConsumerState<BrokenVeilProtocolApp> createState() => _BrokenVeilProtocolAppState();
 }
 
-class _AbstergoChaseAppState extends ConsumerState<AbstergoChaseApp>
+class _BrokenVeilProtocolAppState extends ConsumerState<BrokenVeilProtocolApp>
     with WidgetsBindingObserver {
   final ScreenAwakeService _screenAwakeService = ScreenAwakeService.instance;
 
@@ -40,7 +40,7 @@ class _AbstergoChaseAppState extends ConsumerState<AbstergoChaseApp>
     final router = ref.watch(appRouterProvider);
 
     return MaterialApp.router(
-      title: 'AbstergoChase',
+      title: 'Broken Veil Protocol',
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
       themeMode: ThemeMode.system,

@@ -1,7 +1,7 @@
 {
-  "name": "abstergo-chase-server",
+  "name": "broken-veil-protocol-server",
   "version": "1.0.0",
-  "description": "Serveur de signalisation WebRTC pour Abstergo Chase",
+  "description": "Serveur de signalisation WebRTC pour Broken Veil Protocol",
   "type": "module",
   "main": "server.js",
   "scripts": {

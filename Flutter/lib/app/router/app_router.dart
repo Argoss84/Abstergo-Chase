@@ -1,15 +1,15 @@
-import 'package:abstergo_chase/features/auth/application/cognito_auth_controller.dart';
-import 'package:abstergo_chase/features/account/presentation/account_page.dart';
-import 'package:abstergo_chase/features/auth/presentation/login_page.dart';
-import 'package:abstergo_chase/features/bootstrap/presentation/bootstrap_page.dart';
-import 'package:abstergo_chase/features/create_lobby/presentation/create_lobby_page.dart';
-import 'package:abstergo_chase/features/game/domain/game_models.dart';
-import 'package:abstergo_chase/features/game/presentation/game_page.dart';
-import 'package:abstergo_chase/features/home/presentation/home_menu_page.dart';
-import 'package:abstergo_chase/features/join_lobby/presentation/join_lobby_page.dart';
-import 'package:abstergo_chase/features/lobby/domain/lobby_models.dart';
-import 'package:abstergo_chase/features/lobby/presentation/lobby_page.dart';
-import 'package:abstergo_chase/features/settings/presentation/vibration_settings_page.dart';
+import 'package:broken_veil_protocol/features/auth/application/cognito_auth_controller.dart';
+import 'package:broken_veil_protocol/features/account/presentation/account_page.dart';
+import 'package:broken_veil_protocol/features/auth/presentation/login_page.dart';
+import 'package:broken_veil_protocol/features/bootstrap/presentation/bootstrap_page.dart';
+import 'package:broken_veil_protocol/features/create_lobby/presentation/create_lobby_page.dart';
+import 'package:broken_veil_protocol/features/game/domain/game_models.dart';
+import 'package:broken_veil_protocol/features/game/presentation/game_page.dart';
+import 'package:broken_veil_protocol/features/home/presentation/home_menu_page.dart';
+import 'package:broken_veil_protocol/features/join_lobby/presentation/join_lobby_page.dart';
+import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
+import 'package:broken_veil_protocol/features/lobby/presentation/lobby_page.dart';
+import 'package:broken_veil_protocol/features/settings/presentation/vibration_settings_page.dart';
 import 'package:go_router/go_router.dart';
 
 GoRouter buildAppRouter(CognitoAuthController authController) {

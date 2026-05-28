@@ -1,8 +1,8 @@
-import 'package:abstergo_chase/shared/services/vibration_service.dart';
-import 'package:abstergo_chase/shared/services/socket_environment_service.dart';
-import 'package:abstergo_chase/shared/services/screen_awake_service.dart';
-import 'package:abstergo_chase/shared/services/tts_service.dart';
-import 'package:abstergo_chase/shared/services/voice_settings_service.dart';
+import 'package:broken_veil_protocol/shared/services/vibration_service.dart';
+import 'package:broken_veil_protocol/shared/services/socket_environment_service.dart';
+import 'package:broken_veil_protocol/shared/services/screen_awake_service.dart';
+import 'package:broken_veil_protocol/shared/services/tts_service.dart';
+import 'package:broken_veil_protocol/shared/services/voice_settings_service.dart';
 import 'package:flutter/material.dart';
 
 class SettingsPage extends StatefulWidget {

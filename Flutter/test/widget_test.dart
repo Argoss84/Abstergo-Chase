@@ -7,14 +7,14 @@
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:abstergo_chase/app/app.dart';
+import 'package:broken_veil_protocol/app/app.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 void main() {
   testWidgets('Home actions are displayed', (WidgetTester tester) async {
     await tester.pumpWidget(
       const ProviderScope(
-        child: AbstergoChaseApp(),
+        child: BrokenVeilProtocolApp(),
       ),
     );
 

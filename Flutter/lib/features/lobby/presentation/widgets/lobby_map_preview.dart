@@ -1,5 +1,5 @@
-import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
-import 'package:abstergo_chase/features/create_lobby/domain/geo_point.dart';
+import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_defaults.dart';
+import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -127,7 +127,7 @@ class LobbyMapPreview extends StatelessWidget {
           children: [
             TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.abstergo.chase',
+              userAgentPackageName: 'com.brokenveilprotocol.app',
               maxNativeZoom: _kOsmMaxNativeZoom,
               maxZoom: _kOsmMaxZoom,
             ),

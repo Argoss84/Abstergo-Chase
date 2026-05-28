@@ -1,4 +1,4 @@
-import 'package:abstergo_chase/features/create_lobby/domain/create_lobby_defaults.dart';
+import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SocketEnvironmentConfig {

@@ -1,10 +1,10 @@
-import 'package:abstergo_chase/app/providers.dart';
-import 'package:abstergo_chase/features/account/presentation/account_page.dart';
-import 'package:abstergo_chase/features/create_lobby/presentation/create_lobby_page.dart';
+import 'package:broken_veil_protocol/app/providers.dart';
+import 'package:broken_veil_protocol/features/account/presentation/account_page.dart';
+import 'package:broken_veil_protocol/features/create_lobby/presentation/create_lobby_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:abstergo_chase/features/home/presentation/home_menu_page.dart';
+import 'package:broken_veil_protocol/features/home/presentation/home_menu_page.dart';
 
 class BootstrapPage extends ConsumerWidget {
   const BootstrapPage({super.key});
@@ -16,7 +16,7 @@ class BootstrapPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AbstergoChase'),
+        title: const Text('Broken Veil Protocol'),
         actions: [
           IconButton(
             tooltip: 'Déconnexion',

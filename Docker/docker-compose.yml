@@ -3,22 +3,20 @@
 
 services:
   db:
-    image: mariadb:11
+    image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?define MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-abstergo}
-      MYSQL_USER: ${MYSQL_USER:-abstergo}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?define MYSQL_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-abstergo}
+      POSTGRES_USER: ${POSTGRES_USER:-abstergo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD}
     volumes:
-      - db_data:/var/lib/mysql
-      - ../ServerBDD/scripts/create_game_replay_tables.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-abstergo} -d ${POSTGRES_DB:-abstergo}']
       interval: 5s
       timeout: 5s
       retries: 15
-      start_period: 20s
+      start_period: 10s
 
   serverbdd:
     build:
@@ -30,10 +28,13 @@ services:
     environment:
       PORT: 5175
       DATABASE_HOST: db
-      DATABASE_PORT: 3306
-      DATABASE_NAME: ${MYSQL_DATABASE:-abstergo}
-      DATABASE_USER: ${MYSQL_USER:-abstergo}
-      DATABASE_PASSWORD: ${MYSQL_PASSWORD:?define MYSQL_PASSWORD}
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${POSTGRES_DB:-abstergo}
+      DATABASE_USER: ${POSTGRES_USER:-abstergo}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD}
+      DATABASE_SSL: 'false'
+      COGNITO_ISSUER: ${COGNITO_ISSUER:?define COGNITO_ISSUER}
+      COGNITO_AUDIENCE: ${COGNITO_AUDIENCE:?define COGNITO_AUDIENCE}
     depends_on:
       db:
         condition: service_healthy
