@@ -11,7 +11,7 @@ import 'package:broken_veil_protocol/shared/services/socket_environment_service.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:qr_code_dart_scan/qr_code_dart_scan.dart';
 
 class JoinLobbyPage extends ConsumerStatefulWidget {
   const JoinLobbyPage({super.key, this.initialCode});
@@ -129,9 +129,7 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
       _showError('Definissez un username dans "Mon compte" avant de scanner.');
       return;
     }
-    final scannerController = MobileScannerController(
-      detectionSpeed: DetectionSpeed.noDuplicates,
-    );
+    final scannerController = QRCodeDartScanController();
     ValueNotifier<bool> flashEnabled = ValueNotifier<bool>(false);
     var handled = false;
 
@@ -147,15 +145,12 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                MobileScanner(
+                QRCodeDartScanView(
                   key: qrKey,
                   controller: scannerController,
-                  onDetect: (capture) async {
+                  onCapture: (capture) async {
                     if (handled) return;
-                    final code = capture.barcodes.isEmpty
-                        ? null
-                        : capture.barcodes.first.rawValue;
-                    final raw = (code ?? '').trim();
+                    final raw = capture.text.trim();
                     if (raw.isEmpty) return;
                     final parsedCode = _extractLobbyCodeFromQr(raw);
                     if (parsedCode == null) {
@@ -198,8 +193,8 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
                           return FloatingActionButton.small(
                             heroTag: 'join-qr-flash',
                             onPressed: () async {
-                              await scannerController.toggleTorch();
-                              flashEnabled.value = !flashEnabled.value;
+                              await scannerController.toggleFlash();
+                              flashEnabled.value = scannerController.isFlashOn;
                             },
                             child: Icon(
                               enabled ? Icons.flash_on : Icons.flash_off,
@@ -217,7 +212,7 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
       },
     );
 
-    await scannerController.dispose();
+    await scannerController.stopScan();
     flashEnabled.dispose();
   }
 
