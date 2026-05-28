@@ -119,10 +119,9 @@ class LobbyMapPreview extends StatelessWidget {
         child: FlutterMap(
           mapController: mapController,
           options: MapOptions(
-            center: centerLatLng,
-            zoom: 15.5,
+            initialCenter: centerLatLng,
+            initialZoom: 15.5,
             maxZoom: _kOsmMaxZoom,
-            interactiveFlags: InteractiveFlag.drag | InteractiveFlag.pinchZoom,
           ),
           children: [
             TileLayer(
@@ -215,7 +214,6 @@ class LobbyMapPreview extends StatelessWidget {
                     color: Colors.blue.withOpacity(0.12),
                     borderColor: Colors.blue,
                     borderStrokeWidth: 2.5,
-                    isFilled: true,
                   ),
                 ],
               ),
@@ -228,7 +226,6 @@ class LobbyMapPreview extends StatelessWidget {
                     color: guidancePathColor.withOpacity(
                       0.20 + (guidanceNeonPulse * 0.35),
                     ),
-                    isDotted: false,
                   ),
                   Polyline(
                     points: guidanceLatLng,
@@ -236,7 +233,6 @@ class LobbyMapPreview extends StatelessWidget {
                     color: guidancePathColor.withOpacity(
                       0.80 + (guidanceNeonPulse * 0.20),
                     ),
-                    isDotted: guidancePathDotted,
                   ),
                 ],
               ),
@@ -245,7 +241,7 @@ class LobbyMapPreview extends StatelessWidget {
                 if (showCenterMarker)
                   Marker(
                     point: centerLatLng,
-                    builder: (_) => const Icon(
+                    child: const Icon(
                       Icons.location_on,
                       color: Colors.red,
                       size: 34,
@@ -255,7 +251,7 @@ class LobbyMapPreview extends StatelessWidget {
                   ...objectiveLatLng.map(
                     (point) => Marker(
                       point: point,
-                      builder: (_) => Icon(
+                      child: Icon(
                         objectiveMarkerIcon,
                         color: objectiveMarkerColor,
                         size: objectiveMarkerSize,
@@ -265,7 +261,7 @@ class LobbyMapPreview extends StatelessWidget {
                 if (agentLatLng != null)
                   Marker(
                     point: agentLatLng,
-                    builder: (_) => const Icon(
+                    child: const Icon(
                       Icons.trip_origin,
                       color: Colors.blue,
                       size: 20,
@@ -274,7 +270,7 @@ class LobbyMapPreview extends StatelessWidget {
                 if (rogueLatLng != null)
                   Marker(
                     point: rogueLatLng,
-                    builder: (_) => const Icon(
+                    child: const Icon(
                       Icons.trip_origin,
                       color: Colors.green,
                       size: 20,
@@ -288,8 +284,7 @@ class LobbyMapPreview extends StatelessWidget {
                       player.point.latitude,
                       player.point.longitude,
                     ),
-                    anchorPos: AnchorPos.align(AnchorAlign.center),
-                    builder: (_) => _PlayerGpsPin(
+                    child: _PlayerGpsPin(
                       isAgent: player.isAgent,
                       aura: player.aura,
                     ),

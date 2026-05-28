@@ -62,6 +62,12 @@ class AccountApiService {
   AccountApiService();
   static const Duration _requestTimeout = Duration(seconds: 12);
 
+  bool _isMultiConnectionRejectionBody(String body) {
+    return body.contains('Session invalidee') ||
+        body.contains('Session applicative absente') ||
+        body.contains('Compte déjà connecté sur un autre appareil');
+  }
+
   Future<(String preferred, String fallback)> _resolveBaseUrls() async {
     // Mon compte est temporairement force en environnement DEV uniquement.
     return (
@@ -78,13 +84,8 @@ class AccountApiService {
 
   Never _throwIfSessionInvalidated(http.Response response) {
     final body = response.body;
-    if (response.statusCode == 401 &&
-        (body.contains('Session invalidee') ||
-            body.contains('Session applicative absente') ||
-            body.contains('Token invalide ou expir'))) {
-      throw SessionInvalidatedException(
-        'Votre session a été déconnectée car ce compte a été utilisé sur un autre appareil.',
-      );
+    if (response.statusCode == 401 && _isMultiConnectionRejectionBody(body)) {
+      throw Exception('Session backend ignorée: ${response.body}');
     }
     throw Exception(
       'Echec API (${response.statusCode}): ${response.body}',

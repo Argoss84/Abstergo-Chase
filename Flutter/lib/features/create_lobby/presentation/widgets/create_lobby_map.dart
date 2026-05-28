@@ -42,8 +42,11 @@ class CreateLobbyMap extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         child: FlutterMap(
           options: MapOptions(
-            center: LatLng(currentPosition.latitude, currentPosition.longitude),
-            zoom: 16,
+            initialCenter: LatLng(
+              currentPosition.latitude,
+              currentPosition.longitude,
+            ),
+            initialZoom: 16,
             maxZoom: _kOsmMaxZoom,
             onTap: (_, point) {
               onTap(
@@ -65,7 +68,7 @@ class CreateLobbyMap extends StatelessWidget {
                     currentPosition.latitude,
                     currentPosition.longitude,
                   ),
-                  builder: (_) => const Icon(
+                  child: const Icon(
                     Icons.my_location,
                     color: Colors.blue,
                     size: 32,
@@ -77,7 +80,7 @@ class CreateLobbyMap extends StatelessWidget {
                       selectedPosition!.latitude,
                       selectedPosition!.longitude,
                     ),
-                    builder: (_) => const Icon(
+                    child: const Icon(
                       Icons.location_on,
                       color: Colors.red,
                       size: 36,
@@ -86,8 +89,7 @@ class CreateLobbyMap extends StatelessWidget {
                 ...objectives.map(
                   (point) => Marker(
                     point: LatLng(point.latitude, point.longitude),
-                    builder: (_) =>
-                        const Icon(Icons.adjust, color: Colors.red, size: 20),
+                    child: const Icon(Icons.adjust, color: Colors.red, size: 20),
                   ),
                 ),
                 if (agentStartZone != null)
@@ -96,7 +98,7 @@ class CreateLobbyMap extends StatelessWidget {
                       agentStartZone!.latitude,
                       agentStartZone!.longitude,
                     ),
-                    builder: (_) => const Icon(
+                    child: const Icon(
                       Icons.trip_origin,
                       color: Colors.blue,
                       size: 22,
@@ -108,7 +110,7 @@ class CreateLobbyMap extends StatelessWidget {
                       rogueStartZone!.latitude,
                       rogueStartZone!.longitude,
                     ),
-                    builder: (_) => const Icon(
+                    child: const Icon(
                       Icons.trip_origin,
                       color: Colors.green,
                       size: 22,
@@ -191,7 +193,6 @@ class CreateLobbyMap extends StatelessWidget {
                     color: Colors.blue.withOpacity(0.12),
                     borderColor: Colors.blue,
                     borderStrokeWidth: 2.5,
-                    isFilled: true,
                   ),
                 ],
               ),

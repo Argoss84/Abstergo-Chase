@@ -11,7 +11,7 @@ import 'package:broken_veil_protocol/shared/services/socket_environment_service.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:qr_code_scanner_plus/qr_code_scanner_plus.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 class JoinLobbyPage extends ConsumerStatefulWidget {
   const JoinLobbyPage({super.key, this.initialCode});
@@ -129,9 +129,10 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
       _showError('Definissez un username dans "Mon compte" avant de scanner.');
       return;
     }
-    QRViewController? scannerController;
+    final scannerController = MobileScannerController(
+      detectionSpeed: DetectionSpeed.noDuplicates,
+    );
     ValueNotifier<bool> flashEnabled = ValueNotifier<bool>(false);
-    StreamSubscription<Barcode>? scanSubscription;
     var handled = false;
 
     await showDialog<void>(
@@ -146,28 +147,26 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                QRView(
+                MobileScanner(
                   key: qrKey,
-                  onQRViewCreated: (controller) {
-                    scannerController = controller;
-                    scanSubscription?.cancel();
-                    scanSubscription = controller.scannedDataStream.listen((
-                      scan,
-                    ) async {
-                      if (handled) return;
-                      final raw = (scan.code ?? '').trim();
-                      if (raw.isEmpty) return;
-                      final parsedCode = _extractLobbyCodeFromQr(raw);
-                      if (parsedCode == null) {
-                        _showError('QR invalide pour rejoindre une partie.');
-                        return;
-                      }
-                      handled = true;
-                      _codeController.text = parsedCode;
-                      if (mounted) setState(() {});
-                      Navigator.of(dialogContext).pop();
-                      await _joinLobby();
-                    });
+                  controller: scannerController,
+                  onDetect: (capture) async {
+                    if (handled) return;
+                    final code = capture.barcodes.isEmpty
+                        ? null
+                        : capture.barcodes.first.rawValue;
+                    final raw = (code ?? '').trim();
+                    if (raw.isEmpty) return;
+                    final parsedCode = _extractLobbyCodeFromQr(raw);
+                    if (parsedCode == null) {
+                      _showError('QR invalide pour rejoindre une partie.');
+                      return;
+                    }
+                    handled = true;
+                    _codeController.text = parsedCode;
+                    if (mounted) setState(() {});
+                    Navigator.of(dialogContext).pop();
+                    await _joinLobby();
                   },
                 ),
                 Align(
@@ -199,11 +198,8 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
                           return FloatingActionButton.small(
                             heroTag: 'join-qr-flash',
                             onPressed: () async {
-                              final ctrl = scannerController;
-                              if (ctrl == null) return;
-                              await ctrl.toggleFlash();
-                              final status = await ctrl.getFlashStatus();
-                              flashEnabled.value = status ?? false;
+                              await scannerController.toggleTorch();
+                              flashEnabled.value = !flashEnabled.value;
                             },
                             child: Icon(
                               enabled ? Icons.flash_on : Icons.flash_off,
@@ -221,8 +217,7 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
       },
     );
 
-    await scanSubscription?.cancel();
-    scannerController?.dispose();
+    await scannerController.dispose();
     flashEnabled.dispose();
   }
 

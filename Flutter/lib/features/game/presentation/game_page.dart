@@ -15,7 +15,6 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:qr_code_scanner_plus/qr_code_scanner_plus.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -1169,76 +1168,6 @@ class _GamePageState extends State<GamePage>
     });
   }
 
-  Future<void> _openAgentCaptureScanner() async {
-    setState(() => _isActionFabOpen = false);
-    if ((_controller.playerRole ?? '').toUpperCase() != 'AGENT') {
-      _showFabPlaceholder('Action réservée agent');
-      return;
-    }
-    if (!_controller.gameStarted) {
-      _showFabPlaceholder('Partie non démarrée');
-      return;
-    }
-    QRViewController? scannerController;
-    StreamSubscription<Barcode>? scanSubscription;
-    var handled = false;
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      builder: (dialogContext) {
-        final qrKey = GlobalKey(debugLabel: 'agent-capture-qr');
-        return Dialog(
-          insetPadding: const EdgeInsets.all(12),
-          child: AspectRatio(
-            aspectRatio: 3 / 4,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                QRView(
-                  key: qrKey,
-                  onQRViewCreated: (controller) {
-                    scannerController = controller;
-                    scanSubscription?.cancel();
-                    scanSubscription = controller.scannedDataStream.listen((
-                      scan,
-                    ) {
-                      if (handled) return;
-                      final raw = scan.code?.trim() ?? '';
-                      if (raw.isEmpty) return;
-                      handled = true;
-                      Navigator.of(dialogContext).pop();
-                      _handleScannedCaptureQr(raw);
-                    });
-                  },
-                ),
-                Align(
-                  alignment: Alignment.topCenter,
-                  child: Container(
-                    margin: const EdgeInsets.only(top: 12),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.55),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Text(
-                      'Scannez le QR Vitalité du Rogue',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-    scanSubscription?.cancel();
-    scannerController?.dispose();
-  }
-
   Future<void> _openAgentTargetCaptureModal() async {
     setState(() => _isActionFabOpen = false);
     if ((_controller.playerRole ?? '').toUpperCase() != 'AGENT') {
@@ -1374,13 +1303,6 @@ class _GamePageState extends State<GamePage>
         );
       },
     );
-  }
-
-  void _handleScannedCaptureQr(String rawQr) {
-    final feedback = _controller.triggerAgentCaptureFromQr(rawQr);
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(feedback)));
   }
 
   GeoPoint? _resolveCenter() {
