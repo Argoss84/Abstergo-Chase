@@ -77,6 +77,7 @@ class GameBootstrapData {
     required this.players,
     this.gameConfig,
     this.codeOverride,
+    this.fromCodeLookupFallback = false,
   });
 
   final LobbyBootstrapData lobby;
@@ -84,4 +85,5 @@ class GameBootstrapData {
   final List<LobbyPlayer> players;
   final LobbyGameConfig? gameConfig;
   final String? codeOverride;
+  final bool fromCodeLookupFallback;
 }

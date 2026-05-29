@@ -68,6 +68,10 @@ class LobbyController extends ChangeNotifier {
     'Salle des serveurs',
     'Point de chute',
   ];
+  static const List<String> _lobbyNotFoundMarkers = <String>[
+    'lobby introuvable',
+    'lobby not found',
+  ];
 
   Future<void> initialize({required LobbyBootstrapData bootstrap}) async {
     bootstrapData = bootstrap;
@@ -316,10 +320,8 @@ class LobbyController extends ChangeNotifier {
           return;
         }
         error = message;
-        if (message.toLowerCase().contains('lobby introuvable')) {
-          // If lobby doesn't exist, code may correspond to an already running game.
-          shouldOpenGameForCode = true;
-        }
+        shouldOpenGameForCode =
+            type == 'lobby:error' && _isLobbyNotFoundMessage(message);
         connectionStatus = 'error';
         notifyListeners();
         return;
@@ -336,6 +338,11 @@ class LobbyController extends ChangeNotifier {
       default:
         return;
     }
+  }
+
+  bool _isLobbyNotFoundMessage(String message) {
+    final normalized = message.trim().toLowerCase();
+    return _lobbyNotFoundMarkers.any(normalized.contains);
   }
 
   void sendChat(String text) {
