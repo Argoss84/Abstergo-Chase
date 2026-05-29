@@ -667,9 +667,13 @@ class GameController extends ChangeNotifier {
         );
     }
     if (game is Map) {
-      final ownRole = players.where((p) => p.id == playerId).isNotEmpty
-          ? players.firstWhere((p) => p.id == playerId).role
-          : null;
+      String? ownRole;
+      for (final player in players) {
+        if (player.id == playerId) {
+          ownRole = player.role;
+          break;
+        }
+      }
       final roleChatMessages = (ownRole ?? '').toUpperCase() == 'ROGUE'
           ? game['rogueChatMessages']
           : game['agentChatMessages'];
