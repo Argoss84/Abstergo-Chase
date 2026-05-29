@@ -662,6 +662,24 @@ let persistQueued = false;
 let eventLogFlushTimer = null;
 let eventLogFlushInFlight = false;
 const pendingEventLogLines = [];
+const MAX_LOBBY_CHAT_MESSAGES = 100;
+const DEFAULT_PLAYER_NAME = 'Joueur';
+
+const normalizeLobbyChatMessages = (messages) => {
+  if (!Array.isArray(messages)) return [];
+  return messages
+    .filter((message) => message && typeof message === 'object')
+    .slice(-MAX_LOBBY_CHAT_MESSAGES)
+    .map((message) => ({
+      playerId: message.playerId || '',
+      playerName: message.playerName || DEFAULT_PLAYER_NAME,
+      text: message.text || '',
+      timestamp:
+        typeof message.timestamp === 'number'
+          ? message.timestamp
+          : Date.now()
+    }));
+};
 
 const serializeLobby = (lobby) => ({
   code: lobby.code,
@@ -670,17 +688,7 @@ const serializeLobby = (lobby) => ({
   createdAt: lobby.createdAt || Date.now(),
   expiresAt: lobby.expiresAt || Date.now() + LOBBY_TTL_MS,
   config: lobby.config || null,
-  chatMessages: Array.isArray(lobby.chatMessages)
-    ? lobby.chatMessages.map((message) => ({
-        playerId: message?.playerId || '',
-        playerName: message?.playerName || 'Joueur',
-        text: message?.text || '',
-        timestamp:
-          typeof message?.timestamp === 'number'
-            ? message.timestamp
-            : Date.now()
-      }))
-    : [],
+  chatMessages: normalizeLobbyChatMessages(lobby.chatMessages),
   players: Array.from(lobby.players.values()).map((p) => ({
     id: p.id,
     name: p.name,
@@ -848,20 +856,7 @@ const hydrateRuntimeState = async () => {
             ? lobby.expiresAt
             : Date.now() + LOBBY_TTL_MS,
         config: lobby.config || null,
-        chatMessages: Array.isArray(lobby.chatMessages)
-          ? lobby.chatMessages
-              .filter((message) => message && typeof message === 'object')
-              .slice(-100)
-              .map((message) => ({
-                playerId: message.playerId || '',
-                playerName: message.playerName || 'Joueur',
-                text: message.text || '',
-                timestamp:
-                  typeof message.timestamp === 'number'
-                    ? message.timestamp
-                    : Date.now()
-              }))
-          : [],
+        chatMessages: normalizeLobbyChatMessages(lobby.chatMessages),
         players: playersMap
       });
       lobbySocketMessageCounts.set(lobby.code, 0);
@@ -1038,17 +1033,7 @@ const getLobbySnapshot = (lobby) => ({
   hostId: lobby.hostId,
   stateVersion: lobby.stateVersion || 1,
   config: lobby.config || null,
-  chatMessages: Array.isArray(lobby.chatMessages)
-    ? lobby.chatMessages.map((message) => ({
-        playerId: message?.playerId || '',
-        playerName: message?.playerName || 'Joueur',
-        text: message?.text || '',
-        timestamp:
-          typeof message?.timestamp === 'number'
-            ? message.timestamp
-            : Date.now()
-      }))
-    : [],
+  chatMessages: normalizeLobbyChatMessages(lobby.chatMessages),
   players: Array.from(lobby.players.values()).map(({ id, name, isHost, role, status }) => ({
     id,
     name,
@@ -2920,8 +2905,11 @@ io.on('connection', (socket) => {
         lobby.chatMessages = [];
       }
       lobby.chatMessages.push(msg);
-      if (lobby.chatMessages.length > 100) {
-        lobby.chatMessages.splice(0, lobby.chatMessages.length - 100);
+      if (lobby.chatMessages.length > MAX_LOBBY_CHAT_MESSAGES) {
+        lobby.chatMessages.splice(
+          0,
+          lobby.chatMessages.length - MAX_LOBBY_CHAT_MESSAGES
+        );
       }
 
       lobby.players.forEach((p) => {

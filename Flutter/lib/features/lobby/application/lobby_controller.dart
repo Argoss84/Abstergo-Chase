@@ -72,6 +72,7 @@ class LobbyController extends ChangeNotifier {
     'lobby introuvable',
     'lobby not found',
   ];
+  static const int _maxLobbyChatMessages = 100;
 
   Future<void> initialize({required LobbyBootstrapData bootstrap}) async {
     bootstrapData = bootstrap;
@@ -241,8 +242,11 @@ class LobbyController extends ChangeNotifier {
                   : DateTime.now().millisecondsSinceEpoch,
             ),
           );
-          if (chatMessages.length > 100) {
-            chatMessages.removeRange(0, chatMessages.length - 100);
+          if (chatMessages.length > _maxLobbyChatMessages) {
+            chatMessages.removeRange(
+              0,
+              chatMessages.length - _maxLobbyChatMessages,
+            );
           }
           notifyListeners();
         }
@@ -575,8 +579,8 @@ class LobbyController extends ChangeNotifier {
   }
 
   List<LobbyChatMessage> _parseLobbyChatMessages(List rawMessages) {
-    final relevantMessages = rawMessages.length > 100
-        ? rawMessages.skip(rawMessages.length - 100)
+    final relevantMessages = rawMessages.length > _maxLobbyChatMessages
+        ? rawMessages.skip(rawMessages.length - _maxLobbyChatMessages)
         : rawMessages;
     return relevantMessages
         .whereType<Map>()
