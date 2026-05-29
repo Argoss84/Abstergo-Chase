@@ -24,6 +24,7 @@ const TextStyle _kTeamChatBubbleStyle = TextStyle(
   height: 1.35,
   color: Color(0xFF0F172A),
 );
+const String _kGameUnavailableMessage = 'Partie indisponible.';
 
 class GamePage extends StatefulWidget {
   const GamePage({super.key, required this.bootstrap});
@@ -113,17 +114,17 @@ class _GamePageState extends State<GamePage>
         }
         if (_shouldRedirectToJoinOnInitialError()) {
           _didRouteBackToJoinOnInitialError = true;
-          final code =
+          final gameCodeForRedirect =
               (_controller.gameCode ??
                       widget.bootstrap.codeOverride ??
                       widget.bootstrap.lobby.code)
                   .trim()
                   .toUpperCase();
-          final message = _controller.error?.trim() ?? 'Partie indisponible.';
+          final message = _controller.error?.trim() ?? _kGameUnavailableMessage;
           final route = Uri(
             path: JoinLobbyPage.routePath,
             queryParameters: <String, String>{
-              'code': code,
+              'code': gameCodeForRedirect,
               'error': message,
             },
           ).toString();

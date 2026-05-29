@@ -68,6 +68,10 @@ class LobbyController extends ChangeNotifier {
     'Salle des serveurs',
     'Point de chute',
   ];
+  static const List<String> _lobbyNotFoundMarkers = <String>[
+    'lobby introuvable',
+    'lobby not found',
+  ];
 
   Future<void> initialize({required LobbyBootstrapData bootstrap}) async {
     bootstrapData = bootstrap;
@@ -338,8 +342,7 @@ class LobbyController extends ChangeNotifier {
 
   bool _isLobbyNotFoundMessage(String message) {
     final normalized = message.trim().toLowerCase();
-    return normalized.contains('lobby introuvable') ||
-        normalized.contains('lobby not found');
+    return _lobbyNotFoundMarkers.any(normalized.contains);
   }
 
   void sendChat(String text) {
