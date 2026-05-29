@@ -102,6 +102,7 @@ class _GamePageState extends State<GamePage>
             : (_controller.roleChat.length - _lastReadCount).clamp(0, 999);
         final fallbackCenter = _resolveCenter();
         final connectionReady = _controller.connectionStatus == 'connected';
+        final realtimePositionReady = _controller.hasRealtimePosition;
         final roleForTts = (_controller.playerRole ?? '').trim();
         if (connectionReady && roleForTts.isNotEmpty && !_hasSpokenJoinTts) {
           _hasSpokenJoinTts = true;
@@ -133,6 +134,34 @@ class _GamePageState extends State<GamePage>
             context.go(route);
           });
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        final loadingMessage = () {
+          if (!connectionReady) {
+            if (_controller.connectionStatus == 'connecting') {
+              return 'Connexion au serveur en cours...';
+            }
+            if (_controller.connectionStatus == 'error') {
+              return 'Impossible de se connecter au serveur.';
+            }
+            return 'Initialisation de la partie...';
+          }
+          return 'Récupération de la position en temps réel...';
+        }();
+        if (_controller.isLoading ||
+            !connectionReady ||
+            !realtimePositionReady) {
+          return Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 12),
+                  Text(loadingMessage),
+                ],
+              ),
+            ),
+          );
         }
         final topInset =
             MediaQuery.of(context).padding.top + kToolbarHeight + 8;
