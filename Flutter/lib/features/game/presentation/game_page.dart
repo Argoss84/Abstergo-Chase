@@ -29,6 +29,7 @@ const String _kGameUnavailableMessage = 'Partie indisponible.';
 const String _kPingPayloadPrefix = '[PING]';
 const Duration _kPingPressDelay = Duration(milliseconds: 500);
 const Duration _kPingVisibleDuration = Duration(seconds: 8);
+const Duration _kDangerPingSoundGap = Duration(milliseconds: 90);
 
 class _PingOption {
   const _PingOption({
@@ -1643,24 +1644,25 @@ class _GamePageState extends State<GamePage>
       return null;
     }
     if (data['kind']?.toString() != 'role-ping') return null;
-    final lat = double.tryParse(data['lat']?.toString() ?? '');
-    final lng = double.tryParse(data['lng']?.toString() ?? '');
+    final latValue = data['lat'];
+    final lngValue = data['lng'];
+    final lat = latValue is num ? latValue.toDouble() : null;
+    final lng = lngValue is num ? lngValue.toDouble() : null;
     if (lat == null || lng == null) return null;
     final colorRaw = int.tryParse(data['color']?.toString() ?? '');
     final timestamp = int.tryParse(data['ts']?.toString() ?? '') ??
         DateTime.now().millisecondsSinceEpoch;
+    final shortMessageRaw = data['msg']?.toString().trim();
+    final shortMessage =
+        (shortMessageRaw?.isNotEmpty ?? false) ? shortMessageRaw! : 'Ping';
     final ttsMessage = data['tts']?.toString().trim();
     return _DecodedPingMessage(
       optionId: data['id']?.toString() ?? 'custom',
       position: GeoPoint(latitude: lat, longitude: lng),
-      shortMessage: (data['msg']?.toString().trim().isNotEmpty ?? false)
-          ? data['msg'].toString().trim()
-          : 'Ping',
+      shortMessage: shortMessage,
       ttsMessage: (ttsMessage?.isNotEmpty ?? false)
           ? ttsMessage!
-          : (data['msg']?.toString().trim().isNotEmpty ?? false)
-          ? data['msg'].toString().trim()
-          : 'Ping',
+          : shortMessage,
       color: Color(colorRaw ?? Colors.blueAccent.value),
       timestampMs: timestamp,
     );
@@ -1685,7 +1687,7 @@ class _GamePageState extends State<GamePage>
         return;
       case 'danger':
         await SystemSound.play(SystemSoundType.alert);
-        await Future<void>.delayed(const Duration(milliseconds: 90));
+        await Future<void>.delayed(_kDangerPingSoundGap);
         await SystemSound.play(SystemSoundType.alert);
         return;
       default:
