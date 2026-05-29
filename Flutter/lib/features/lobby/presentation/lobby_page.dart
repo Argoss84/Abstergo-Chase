@@ -12,6 +12,7 @@ import 'package:broken_veil_protocol/shared/services/socket_environment_service.
 import 'package:broken_veil_protocol/shared/services/vibration_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
@@ -49,6 +50,8 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
   bool _didRouteToGame = false;
   bool _didFallbackRouteToGame = false;
   bool _didRouteBackToJoinOnError = false;
+  GeoPoint? _initialPlayerPosition;
+  bool _initialPlayerPositionResolved = false;
   final VibrationService _vibrationService = VibrationService();
   final SocketEnvironmentService _socketEnvironmentService =
       SocketEnvironmentService();
@@ -60,6 +63,7 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _resolveInitialPlayerPosition();
     _controller = LobbyController();
     _chatController = TextEditingController();
     final bootstrap = widget.bootstrapData;
@@ -71,6 +75,43 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
       _controller.error = 'Code lobby manquant.';
       _controller.isLoading = false;
     }
+  }
+
+  Future<void> _resolveInitialPlayerPosition() async {
+    GeoPoint? position;
+    try {
+      position = await _loadInitialPlayerPosition().timeout(
+        const Duration(seconds: 8),
+        onTimeout: () => null,
+      );
+    } catch (_) {
+      position = null;
+    }
+    if (!mounted) return;
+    setState(() {
+      _initialPlayerPosition = position;
+      _initialPlayerPositionResolved = true;
+    });
+  }
+
+  Future<GeoPoint?> _loadInitialPlayerPosition() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) return null;
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      return null;
+    }
+    final position = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        timeLimit: Duration(seconds: 6),
+      ),
+    );
+    return GeoPoint(latitude: position.latitude, longitude: position.longitude);
   }
 
   Future<void> _initializeFromCode(String code) async {
@@ -122,6 +163,7 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
         _handleLobbyJoinVibration();
         if (_controller.gameStarted &&
             !_didRouteToGame &&
+            _initialPlayerPositionResolved &&
             _controller.playerId != null &&
             bootstrap != null) {
           _didRouteToGame = true;
@@ -136,12 +178,14 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                 gameConfig: _controller.gameConfig,
                 codeOverride: _controller.lobbyCode,
                 fromCodeLookupFallback: false,
+                initialPlayerPosition: _initialPlayerPosition,
               ),
             );
           });
         }
         if (_controller.shouldOpenGameForCode &&
             !_didFallbackRouteToGame &&
+            _initialPlayerPositionResolved &&
             bootstrap != null) {
           _didFallbackRouteToGame = true;
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -155,6 +199,7 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                 gameConfig: null,
                 codeOverride: _controller.lobbyCode ?? bootstrap.code,
                 fromCodeLookupFallback: true,
+                initialPlayerPosition: _initialPlayerPosition,
               ),
             );
           });

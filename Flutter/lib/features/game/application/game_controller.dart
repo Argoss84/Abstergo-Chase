@@ -154,6 +154,7 @@ class GameController extends ChangeNotifier {
     bootstrap = data;
     gameCode = data.codeOverride ?? data.lobby.code;
     playerId = data.playerId;
+    myPosition = data.initialPlayerPosition;
     remainingSeconds = _configuredDurationSeconds();
     winnerType = null;
     winnerReason = null;
@@ -173,6 +174,13 @@ class GameController extends ChangeNotifier {
             isHost: p.isHost,
             role: p.role,
             status: p.status,
+            latitude: (data.initialPlayerPosition != null && p.id == data.playerId)
+                ? data.initialPlayerPosition!.latitude
+                : null,
+            longitude: (data.initialPlayerPosition != null &&
+                    p.id == data.playerId)
+                ? data.initialPlayerPosition!.longitude
+                : null,
           );
         }),
       );
@@ -181,6 +189,7 @@ class GameController extends ChangeNotifier {
         : null;
     isHost = players.any((p) => p.id == playerId && p.isHost);
     _bootstrapObjectives(data);
+    isOutOfGameZone = !_isMyPositionInsideGameZone();
 
     isLoading = true;
     error = null;
