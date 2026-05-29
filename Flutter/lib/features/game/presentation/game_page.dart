@@ -511,17 +511,17 @@ class _GamePageState extends State<GamePage>
                                 ),
                         ),
                         if (_pingWheelVisible && _pingPressOrigin != null)
-                         Positioned.fill(
-                           child: IgnorePointer(
-                             child: CustomPaint(
-                               painter: _PingWheelPainter(
-                                 center: _pingPressOrigin!,
-                                 options: _pingOptions,
-                                 highlightedIndex: _selectedPingOptionIndex,
-                               ),
-                             ),
-                           ),
-                         ),
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: CustomPaint(
+                                painter: _PingWheelPainter(
+                                  center: _pingPressOrigin!,
+                                  options: _pingOptions,
+                                  highlightedIndex: _selectedPingOptionIndex,
+                                ),
+                              ),
+                            ),
+                          ),
                         if (winnerType == null)
                           Positioned(
                             top:
@@ -1649,7 +1649,21 @@ class _GamePageState extends State<GamePage>
     final lat = latValue is num ? latValue.toDouble() : null;
     final lng = lngValue is num ? lngValue.toDouble() : null;
     if (lat == null || lng == null) return null;
-    final colorRaw = int.tryParse(data['color']?.toString() ?? '');
+    final colorSource = data['color'];
+    final colorRaw = switch (colorSource) {
+      int() => colorSource,
+      num() => colorSource.toInt(),
+      String() => int.tryParse(
+        colorSource.startsWith('0x') || colorSource.startsWith('0X')
+            ? colorSource.substring(2)
+            : colorSource,
+        radix:
+            colorSource.startsWith('0x') || colorSource.startsWith('0X')
+            ? 16
+            : null,
+      ),
+      _ => null,
+    };
     final timestamp = int.tryParse(data['ts']?.toString() ?? '') ??
         DateTime.now().millisecondsSinceEpoch;
     final shortMessageRaw = data['msg']?.toString().trim();
