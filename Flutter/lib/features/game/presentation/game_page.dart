@@ -135,13 +135,18 @@ class _GamePageState extends State<GamePage>
           });
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
-        final loadingMessage = !connectionReady
-            ? _controller.connectionStatus == 'connecting'
-                  ? 'Connexion au serveur en cours...'
-                  : _controller.connectionStatus == 'error'
-                  ? 'Impossible de se connecter au serveur.'
-                  : 'Initialisation de la partie...'
-            : 'Récupération de la position en temps réel...';
+        final loadingMessage = () {
+          if (!connectionReady) {
+            if (_controller.connectionStatus == 'connecting') {
+              return 'Connexion au serveur en cours...';
+            }
+            if (_controller.connectionStatus == 'error') {
+              return 'Impossible de se connecter au serveur.';
+            }
+            return 'Initialisation de la partie...';
+          }
+          return 'Récupération de la position en temps réel...';
+        }();
         if (_controller.isLoading ||
             !connectionReady ||
             !realtimePositionReady) {
