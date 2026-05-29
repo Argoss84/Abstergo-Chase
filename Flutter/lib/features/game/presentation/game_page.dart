@@ -171,6 +171,21 @@ class _GamePageState extends State<GamePage>
                     ),
                   )
                   .toList(growable: false);
+        final capturedObjectiveDisplayPoints = isRogue
+            ? _controller.objectives
+                  .where((o) => o.captured)
+                  .map((o) => o.point)
+                  .toList(growable: false)
+            : _controller.objectives
+                  .where((o) => o.captured)
+                  .map(
+                    (o) => _shiftedZoneCenter(
+                      objective: o.point,
+                      objectiveId: o.id,
+                      zoneRadiusMeters: objectiveZoneRadius.toDouble(),
+                    ),
+                  )
+                  .toList(growable: false);
         final capturingDisplayPoints = !isRogue
             ? _controller.objectives
                   .where((o) => !o.captured)
@@ -336,6 +351,8 @@ class _GamePageState extends State<GamePage>
                                             .lobby
                                             .outerStreetContour,
                                   objectives: objectiveDisplayPoints,
+                                  inactiveObjectives:
+                                      capturedObjectiveDisplayPoints,
                                   agentStartZone:
                                       effectiveGameConfig?.startZone ??
                                       widget.bootstrap.lobby.agentStartZone,
