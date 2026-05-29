@@ -18,6 +18,7 @@ import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:flutter/services.dart';
 
 const TextStyle _kTeamChatBubbleStyle = TextStyle(
   fontSize: 14,
@@ -58,6 +59,13 @@ class _GamePageState extends State<GamePage>
   bool _hasSpokenJoinTts = false;
   bool _compassModeEnabled = false;
   bool _didRouteBackToJoinOnInitialError = false;
+  bool _announcementBaselineInitialized = false;
+  bool _prevAnyObjectiveCapturing = false;
+  int _prevCapturedObjectivesCount = 0;
+  int _prevCapturedRoguesCount = 0;
+  bool _prevAllPlayersInStartZone = false;
+  bool _prevGameStarted = false;
+  int? _lastCountdownSecondAnnounced;
 
   @override
   void initState() {
@@ -154,6 +162,10 @@ class _GamePageState extends State<GamePage>
         _handleGameVibrationSignals(
           startCountdownSeconds: startCountdownSeconds,
           outOfZone: outOfZone,
+          winnerType: winnerType,
+        );
+        _handleGameAnnouncements(
+          startCountdownSeconds: startCountdownSeconds,
           winnerType: winnerType,
         );
         final objectiveDisplayPoints = isRogue
@@ -1675,6 +1687,7 @@ class _GamePageState extends State<GamePage>
     if (rogueInRange && !_prevRogueObjectiveInRange) {
       _vibrationService.vibrateIfEnabled(VibrationEvent.rogueObjectiveInRange);
     }
+
     _prevRogueObjectiveInRange = rogueInRange;
 
     // Everyone: entering own start zone during pre-start phase.
@@ -1730,6 +1743,94 @@ class _GamePageState extends State<GamePage>
         _vibrationService.vibrateIfEnabled(VibrationEvent.outOfGameZone);
       }
     }
+  }
+
+  void _handleGameAnnouncements({
+    required int? startCountdownSeconds,
+    required String? winnerType,
+  }) {
+    final anyObjectiveCapturing = _controller.isAnyObjectiveCapturing;
+    final capturedObjectivesCount = _controller.objectives
+        .where((o) => o.captured)
+        .length;
+    final capturedRoguesCount = _controller.players
+        .where((p) => (p.role ?? '').toUpperCase() == 'ROGUE')
+        .where((p) => p.status.toUpperCase() == 'CAPTURED')
+        .length;
+    final allPlayersInStartZone = _areAllPlayersInStartZones();
+    final gameStarted = _controller.gameStarted;
+
+    if (!_announcementBaselineInitialized) {
+      _announcementBaselineInitialized = true;
+      _prevAnyObjectiveCapturing = anyObjectiveCapturing;
+      _prevCapturedObjectivesCount = capturedObjectivesCount;
+      _prevCapturedRoguesCount = capturedRoguesCount;
+      _prevAllPlayersInStartZone = allPlayersInStartZone;
+      _prevGameStarted = gameStarted;
+      _lastCountdownSecondAnnounced = startCountdownSeconds;
+      return;
+    }
+
+    if (anyObjectiveCapturing && !_prevAnyObjectiveCapturing) {
+      _playAnnouncement("Capture d'un point en cours par les rogues.");
+    }
+    if (capturedObjectivesCount > _prevCapturedObjectivesCount) {
+      _playAnnouncement('Un point a été capturé par les rogues.');
+    }
+    if (capturedRoguesCount > _prevCapturedRoguesCount) {
+      _playAnnouncement('Un rogue a été capturé.');
+    }
+    if (allPlayersInStartZone &&
+        !_prevAllPlayersInStartZone &&
+        winnerType == null &&
+        !gameStarted) {
+      _playAnnouncement('Tous les joueurs sont dans leurs zones de départ.');
+    }
+
+    if (startCountdownSeconds != null) {
+      if (_lastCountdownSecondAnnounced != startCountdownSeconds) {
+        _lastCountdownSecondAnnounced = startCountdownSeconds;
+        _playAnnouncement('$startCountdownSeconds');
+      }
+    } else {
+      _lastCountdownSecondAnnounced = null;
+    }
+
+    if (gameStarted && !_prevGameStarted) {
+      _playAnnouncement('La partie commence');
+    }
+
+    _prevAnyObjectiveCapturing = anyObjectiveCapturing;
+    _prevCapturedObjectivesCount = capturedObjectivesCount;
+    _prevCapturedRoguesCount = capturedRoguesCount;
+    _prevAllPlayersInStartZone = allPlayersInStartZone;
+    _prevGameStarted = gameStarted;
+  }
+
+  Future<void> _playAnnouncement(String text) async {
+    try {
+      await SystemSound.play(SystemSoundType.alert);
+    } catch (_) {}
+    await _ttsService.speakIfEnabled(text);
+  }
+
+  bool _areAllPlayersInStartZones() {
+    final relevant = _controller.players
+        .where((p) {
+          if ((p.status).toLowerCase() == 'disconnected') return false;
+          final role = (p.role ?? '').toUpperCase();
+          return role == 'AGENT' || role == 'ROGUE';
+        })
+        .toList(growable: false);
+    if (relevant.isEmpty) return false;
+    final agents = relevant
+        .where((p) => (p.role ?? '').toUpperCase() == 'AGENT')
+        .length;
+    final rogues = relevant
+        .where((p) => (p.role ?? '').toUpperCase() == 'ROGUE')
+        .length;
+    if (agents < 1 || rogues < 1) return false;
+    return relevant.every(_controller.isPlayerInStartZone);
   }
 
   String _winnerReasonMessage({
