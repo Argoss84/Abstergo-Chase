@@ -145,6 +145,12 @@ class LobbyController extends ChangeNotifier {
             if (config is Map) {
               gameConfig = LobbyGameConfig.fromMap(config);
             }
+            final lobbyChatMessages = lobby['chatMessages'];
+            if (lobbyChatMessages is List) {
+              chatMessages
+                ..clear()
+                ..addAll(_parseLobbyChatMessages(lobbyChatMessages));
+            }
             final playersRaw = lobby['players'];
             if (playersRaw is List) {
               players
@@ -566,6 +572,26 @@ class LobbyController extends ChangeNotifier {
           int.tryParse(config['map_radius']?.toString() ?? '') ??
           current.mapRadius,
     );
+  }
+
+  List<LobbyChatMessage> _parseLobbyChatMessages(List rawMessages) {
+    final relevantMessages = rawMessages.length > 100
+        ? rawMessages.skip(rawMessages.length - 100)
+        : rawMessages;
+    return relevantMessages
+        .whereType<Map>()
+        .map((raw) {
+          final timestampRaw = raw['timestamp'];
+          return LobbyChatMessage(
+            playerId: raw['playerId']?.toString() ?? '',
+            playerName: raw['playerName']?.toString() ?? 'Joueur',
+            text: raw['text']?.toString() ?? '',
+            timestampMs: timestampRaw is int
+                ? timestampRaw
+                : DateTime.now().millisecondsSinceEpoch,
+          );
+        })
+        .toList(growable: false);
   }
 
   @override

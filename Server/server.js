@@ -670,6 +670,17 @@ const serializeLobby = (lobby) => ({
   createdAt: lobby.createdAt || Date.now(),
   expiresAt: lobby.expiresAt || Date.now() + LOBBY_TTL_MS,
   config: lobby.config || null,
+  chatMessages: Array.isArray(lobby.chatMessages)
+    ? lobby.chatMessages.map((message) => ({
+        playerId: message?.playerId || '',
+        playerName: message?.playerName || 'Joueur',
+        text: message?.text || '',
+        timestamp:
+          typeof message?.timestamp === 'number'
+            ? message.timestamp
+            : Date.now()
+      }))
+    : [],
   players: Array.from(lobby.players.values()).map((p) => ({
     id: p.id,
     name: p.name,
@@ -837,6 +848,20 @@ const hydrateRuntimeState = async () => {
             ? lobby.expiresAt
             : Date.now() + LOBBY_TTL_MS,
         config: lobby.config || null,
+        chatMessages: Array.isArray(lobby.chatMessages)
+          ? lobby.chatMessages
+              .filter((message) => message && typeof message === 'object')
+              .slice(-100)
+              .map((message) => ({
+                playerId: message.playerId || '',
+                playerName: message.playerName || 'Joueur',
+                text: message.text || '',
+                timestamp:
+                  typeof message.timestamp === 'number'
+                    ? message.timestamp
+                    : Date.now()
+              }))
+          : [],
         players: playersMap
       });
       lobbySocketMessageCounts.set(lobby.code, 0);
@@ -1013,6 +1038,17 @@ const getLobbySnapshot = (lobby) => ({
   hostId: lobby.hostId,
   stateVersion: lobby.stateVersion || 1,
   config: lobby.config || null,
+  chatMessages: Array.isArray(lobby.chatMessages)
+    ? lobby.chatMessages.map((message) => ({
+        playerId: message?.playerId || '',
+        playerName: message?.playerName || 'Joueur',
+        text: message?.text || '',
+        timestamp:
+          typeof message?.timestamp === 'number'
+            ? message.timestamp
+            : Date.now()
+      }))
+    : [],
   players: Array.from(lobby.players.values()).map(({ id, name, isHost, role, status }) => ({
     id,
     name,
@@ -1528,6 +1564,7 @@ io.on('connection', (socket) => {
         hostId: clientId,
         players: new Map(),
         config: payload?.gameConfig || null,
+        chatMessages: [],
         stateVersion: 1,
         createdAt: Date.now(),
         lastActivityAt: Date.now(),
@@ -2879,6 +2916,13 @@ io.on('connection', (socket) => {
         text,
         timestamp: Date.now()
       };
+      if (!Array.isArray(lobby.chatMessages)) {
+        lobby.chatMessages = [];
+      }
+      lobby.chatMessages.push(msg);
+      if (lobby.chatMessages.length > 100) {
+        lobby.chatMessages.splice(0, lobby.chatMessages.length - 100);
+      }
 
       lobby.players.forEach((p) => {
         const s = socketsById.get(p.id);
