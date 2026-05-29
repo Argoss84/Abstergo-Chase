@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:broken_veil_protocol/app/config/app_runtime_config.dart';
 import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_defaults.dart';
@@ -215,10 +216,13 @@ class GameController extends ChangeNotifier {
   }
 
   void _bootstrapObjectives(GameBootstrapData data) {
+    final sourceObjectives = data.lobby.objectives.isNotEmpty
+        ? data.lobby.objectives
+        : _buildFallbackObjectives(data);
     objectives
       ..clear()
       ..addAll(
-        data.lobby.objectives.asMap().entries.map((entry) {
+        sourceObjectives.asMap().entries.map((entry) {
           return GameObjective(
             id: 'obj-${entry.key + 1}',
             point: entry.value,
@@ -226,6 +230,47 @@ class GameController extends ChangeNotifier {
           );
         }),
       );
+  }
+
+  List<GeoPoint> _buildFallbackObjectives(GameBootstrapData data) {
+    final form = data.lobby.form;
+    final center = _resolveFallbackCenter(data);
+    if (center == null) {
+      return const <GeoPoint>[];
+    }
+
+    final objectiveCount = form?.objectiveNumber ?? CreateLobbyDefaults.objectiveNumber;
+    if (objectiveCount <= 0) {
+      return const <GeoPoint>[];
+    }
+
+    final mapRadiusMeters = (form?.mapRadius ?? CreateLobbyDefaults.mapRadius).toDouble();
+    final spawnRadiusMeters = math.max(20, mapRadiusMeters * 0.35);
+    final latFactor = 111_320.0;
+    final lngFactor = math.max(
+      1.0,
+      111_320.0 * math.cos(center.latitude * math.pi / 180).abs(),
+    );
+
+    return List<GeoPoint>.generate(objectiveCount, (index) {
+      final angle = (2 * math.pi * index) / objectiveCount;
+      final latOffset = (spawnRadiusMeters / latFactor) * math.cos(angle);
+      final lngOffset = (spawnRadiusMeters / lngFactor) * math.sin(angle);
+      return GeoPoint(
+        latitude: center.latitude + latOffset,
+        longitude: center.longitude + lngOffset,
+      );
+    }, growable: false);
+  }
+
+  GeoPoint? _resolveFallbackCenter(GameBootstrapData data) {
+    final form = data.lobby.form;
+    final lat = double.tryParse(form?.mapCenterLatitude ?? '');
+    final lng = double.tryParse(form?.mapCenterLongitude ?? '');
+    if (lat != null && lng != null) {
+      return GeoPoint(latitude: lat, longitude: lng);
+    }
+    return data.lobby.agentStartZone ?? data.lobby.rogueStartZone;
   }
 
   Future<void> _startPositionTracking() async {
