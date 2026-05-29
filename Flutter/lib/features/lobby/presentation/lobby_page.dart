@@ -157,21 +157,20 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
             );
           });
         }
-        if (_controller.connectionStatus == 'error' &&
-            !_controller.isLoading &&
-            !_didRouteBackToJoinOnError &&
-            bootstrap != null &&
-            _controller.playerId == null &&
-            _controller.players.isEmpty &&
-            (_controller.error?.isNotEmpty ?? false)) {
+        if (_shouldRedirectToJoinOnInitialError(bootstrap)) {
           _didRouteBackToJoinOnError = true;
-          final code = bootstrap.code.trim().toUpperCase();
-          final message = _controller.error!;
+          final code = (bootstrap?.code ?? '').trim().toUpperCase();
+          final message = _controller.error ?? 'Lobby indisponible.';
+          final route = Uri(
+            path: JoinLobbyPage.routePath,
+            queryParameters: <String, String>{
+              'code': code,
+              'error': message,
+            },
+          ).toString();
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted) return;
-            context.go(
-              '${JoinLobbyPage.routePath}?code=${Uri.encodeQueryComponent(code)}&error=${Uri.encodeQueryComponent(message)}',
-            );
+            context.go(route);
           });
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
@@ -544,6 +543,16 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
         );
       },
     );
+  }
+
+  bool _shouldRedirectToJoinOnInitialError(LobbyBootstrapData? bootstrap) {
+    return _controller.connectionStatus == 'error' &&
+        !_controller.isLoading &&
+        !_didRouteBackToJoinOnError &&
+        bootstrap != null &&
+        _controller.playerId == null &&
+        _controller.players.isEmpty &&
+        (_controller.error?.isNotEmpty ?? false);
   }
 
   void _handleLobbyJoinVibration() {
