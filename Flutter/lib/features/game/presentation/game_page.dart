@@ -12,6 +12,7 @@ import 'package:broken_veil_protocol/shared/services/tts_service.dart';
 import 'package:broken_veil_protocol/shared/services/vibration_service.dart';
 import 'package:broken_veil_protocol/shared/services/voice_settings_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:go_router/go_router.dart';
@@ -25,6 +26,44 @@ const TextStyle _kTeamChatBubbleStyle = TextStyle(
   color: Color(0xFF0F172A),
 );
 const String _kGameUnavailableMessage = 'Partie indisponible.';
+const String _kPingPayloadPrefix = '[PING]';
+const Duration _kPingPressDelay = Duration(milliseconds: 500);
+const Duration _kPingVisibleDuration = Duration(seconds: 8);
+const Duration _kDangerPingSoundGap = Duration(milliseconds: 90);
+
+class _PingOption {
+  const _PingOption({
+    required this.id,
+    required this.color,
+    required this.shortMessage,
+    required this.ttsMessage,
+  });
+
+  final String id;
+  final Color color;
+  final String shortMessage;
+  final String ttsMessage;
+}
+
+class _ActiveRolePing {
+  const _ActiveRolePing({
+    required this.messageKey,
+    required this.playerId,
+    required this.playerName,
+    required this.position,
+    required this.color,
+    required this.shortMessage,
+    required this.createdAtMs,
+  });
+
+  final String messageKey;
+  final String playerId;
+  final String playerName;
+  final GeoPoint position;
+  final Color color;
+  final String shortMessage;
+  final int createdAtMs;
+}
 
 class GamePage extends StatefulWidget {
   const GamePage({super.key, required this.bootstrap});
@@ -58,6 +97,42 @@ class _GamePageState extends State<GamePage>
   bool _hasSpokenJoinTts = false;
   bool _compassModeEnabled = false;
   bool _didRouteBackToJoinOnInitialError = false;
+  Timer? _pingPressTimer;
+  Offset? _pingPressOrigin;
+  GeoPoint? _pingLocation;
+  int? _pingActivePointer;
+  int? _selectedPingOptionIndex;
+  bool _pingWheelVisible = false;
+  int _lastPingChatIndex = 0;
+  bool _pingCursorInitialized = false;
+  final List<_ActiveRolePing> _activeRolePings = <_ActiveRolePing>[];
+
+  static const List<_PingOption> _pingOptions = <_PingOption>[
+    _PingOption(
+      id: 'go_here',
+      color: Colors.blueAccent,
+      shortMessage: 'Je vais ici',
+      ttsMessage: 'Je vais ici',
+    ),
+    _PingOption(
+      id: 'need_help',
+      color: Colors.orangeAccent,
+      shortMessage: 'Besoin d\'aide',
+      ttsMessage: 'Besoin d\'aide',
+    ),
+    _PingOption(
+      id: 'danger',
+      color: Colors.redAccent,
+      shortMessage: 'Danger',
+      ttsMessage: 'Danger',
+    ),
+    _PingOption(
+      id: 'wait',
+      color: Colors.greenAccent,
+      shortMessage: 'Attendez',
+      ttsMessage: 'Attendez',
+    ),
+  ];
 
   @override
   void initState() {
@@ -80,6 +155,7 @@ class _GamePageState extends State<GamePage>
   @override
   void dispose() {
     _compassSub?.cancel();
+    _pingPressTimer?.cancel();
     _headingDeg.dispose();
     _guidancePulseController.dispose();
     _chatController.dispose();
@@ -156,6 +232,8 @@ class _GamePageState extends State<GamePage>
           outOfZone: outOfZone,
           winnerType: winnerType,
         );
+        _syncIncomingPingMessages();
+        _pruneExpiredPings();
         final objectiveDisplayPoints = isRogue
             ? _controller.objectives
                   .where((o) => !o.captured)
@@ -376,6 +454,23 @@ class _GamePageState extends State<GamePage>
                                   highlightObjectivePulse:
                                       _guidancePulseController.value,
                                   showCenterMarker: false,
+                                  pingMarkers: _activeRolePings
+                                      .map(
+                                        (ping) => MapPingMarker(
+                                          point: ping.position,
+                                          color: ping.color,
+                                          playerName: ping.playerName,
+                                          message: ping.shortMessage,
+                                          pulseValue: _pingPulseFor(
+                                            ping.createdAtMs,
+                                          ),
+                                        ),
+                                      )
+                                      .toList(growable: false),
+                                  onMapPointerDown: _onMapPointerDown,
+                                  onMapPointerMove: _onMapPointerMove,
+                                  onMapPointerUp: _onMapPointerUp,
+                                  onMapPointerCancel: _onMapPointerCancel,
                                   playerMarkers: _controller.players
                                       .where(
                                         (p) =>
@@ -415,6 +510,18 @@ class _GamePageState extends State<GamePage>
                                       .toList(growable: false),
                                 ),
                         ),
+                        if (_pingWheelVisible && _pingPressOrigin != null)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: CustomPaint(
+                                painter: _PingWheelPainter(
+                                  center: _pingPressOrigin!,
+                                  options: _pingOptions,
+                                  highlightedIndex: _selectedPingOptionIndex,
+                                ),
+                              ),
+                            ),
+                          ),
                         if (winnerType == null)
                           Positioned(
                             top:
@@ -1401,6 +1508,215 @@ class _GamePageState extends State<GamePage>
     return h;
   }
 
+  void _onMapPointerDown(PointerDownEvent event, LatLng point) {
+    _pingPressTimer?.cancel();
+    _pingActivePointer = event.pointer;
+    _pingPressOrigin = event.localPosition;
+    _pingLocation = GeoPoint(latitude: point.latitude, longitude: point.longitude);
+    _selectedPingOptionIndex = null;
+    _pingWheelVisible = false;
+    _pingPressTimer = Timer(_kPingPressDelay, () {
+      if (!mounted || _pingActivePointer != event.pointer) return;
+      setState(() => _pingWheelVisible = true);
+    });
+  }
+
+  void _onMapPointerMove(PointerMoveEvent event, LatLng point) {
+    if (_pingActivePointer != event.pointer || !_pingWheelVisible) return;
+    final origin = _pingPressOrigin;
+    if (origin == null) return;
+    final vector = event.localPosition - origin;
+    final distance = vector.distance;
+    int? nextIndex;
+    if (distance >= 26 && _pingOptions.isNotEmpty) {
+      final angle = (atan2(vector.dy, vector.dx) + (2 * pi)) % (2 * pi);
+      final sector = (angle / ((2 * pi) / _pingOptions.length)).floor();
+      nextIndex = sector.clamp(0, _pingOptions.length - 1);
+    }
+    if (_selectedPingOptionIndex != nextIndex) {
+      setState(() => _selectedPingOptionIndex = nextIndex);
+    }
+  }
+
+  void _onMapPointerUp(PointerUpEvent event, LatLng point) {
+    if (_pingActivePointer != event.pointer) return;
+    _pingPressTimer?.cancel();
+    final selectedIndex = _selectedPingOptionIndex;
+    final pingPoint = _pingLocation;
+    final shouldTrigger =
+        _pingWheelVisible &&
+        selectedIndex != null &&
+        selectedIndex >= 0 &&
+        selectedIndex < _pingOptions.length &&
+        pingPoint != null;
+    _resetPingWheel();
+    if (!shouldTrigger) return;
+    final option = _pingOptions[selectedIndex!];
+    _broadcastRolePing(option: option, point: pingPoint);
+  }
+
+  void _onMapPointerCancel(PointerCancelEvent event, LatLng point) {
+    if (_pingActivePointer != event.pointer) return;
+    _pingPressTimer?.cancel();
+    _resetPingWheel();
+  }
+
+  void _resetPingWheel() {
+    if (!mounted) return;
+    setState(() {
+      _pingActivePointer = null;
+      _pingPressOrigin = null;
+      _pingLocation = null;
+      _selectedPingOptionIndex = null;
+      _pingWheelVisible = false;
+    });
+  }
+
+  void _broadcastRolePing({required _PingOption option, required GeoPoint point}) {
+    final payload = jsonEncode(<String, dynamic>{
+      'kind': 'role-ping',
+      'id': option.id,
+      'lat': point.latitude,
+      'lng': point.longitude,
+      'msg': option.shortMessage,
+      'tts': option.ttsMessage,
+      'color': option.color.value,
+      'ts': DateTime.now().millisecondsSinceEpoch,
+    });
+    _controller.sendRoleChat('$_kPingPayloadPrefix$payload');
+  }
+
+  void _syncIncomingPingMessages() {
+    final chat = _controller.roleChat;
+    if (!_pingCursorInitialized) {
+      _lastPingChatIndex = chat.length;
+      _pingCursorInitialized = true;
+      return;
+    }
+    if (_lastPingChatIndex > chat.length) {
+      _lastPingChatIndex = chat.length;
+    }
+    while (_lastPingChatIndex < chat.length) {
+      final message = chat[_lastPingChatIndex];
+      _lastPingChatIndex++;
+      final parsed = _tryParsePingMessage(message.text);
+      if (parsed == null) continue;
+      final key = '${message.playerId}:${message.timestampMs}:${parsed.optionId}';
+      final index = _activeRolePings.indexWhere((p) => p.messageKey == key);
+      if (index != -1) continue;
+      _activeRolePings.add(
+        _ActiveRolePing(
+          messageKey: key,
+          playerId: message.playerId,
+          playerName: message.playerName,
+          position: parsed.position,
+          color: parsed.color,
+          shortMessage: parsed.shortMessage,
+          createdAtMs: parsed.timestampMs,
+        ),
+      );
+      _playPingFeedback(parsed: parsed, playerName: message.playerName);
+    }
+  }
+
+  void _pruneExpiredPings() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _activeRolePings.removeWhere(
+      (ping) => now - ping.createdAtMs > _kPingVisibleDuration.inMilliseconds,
+    );
+  }
+
+  double _pingPulseFor(int createdAtMs) {
+    final elapsedMs = DateTime.now().millisecondsSinceEpoch - createdAtMs;
+    final phase = (elapsedMs % 1200) / 1200;
+    return (sin(phase * 2 * pi) + 1) / 2;
+  }
+
+  _DecodedPingMessage? _tryParsePingMessage(String raw) {
+    if (!raw.startsWith(_kPingPayloadPrefix)) return null;
+    final encoded = raw.substring(_kPingPayloadPrefix.length);
+    Map<String, dynamic> data;
+    try {
+      final decoded = jsonDecode(encoded);
+      if (decoded is! Map) return null;
+      data = Map<String, dynamic>.from(decoded);
+    } catch (_) {
+      return null;
+    }
+    if (data['kind']?.toString() != 'role-ping') return null;
+    final latValue = data['lat'];
+    final lngValue = data['lng'];
+    final lat = latValue is num ? latValue.toDouble() : null;
+    final lng = lngValue is num ? lngValue.toDouble() : null;
+    if (lat == null || lng == null) return null;
+    final colorSource = data['color'];
+    final colorRaw = switch (colorSource) {
+      int() => colorSource,
+      num() => colorSource.toInt(),
+      String() => int.tryParse(
+        colorSource.startsWith('0x') || colorSource.startsWith('0X')
+            ? colorSource.substring(2)
+            : colorSource,
+        radix:
+            colorSource.startsWith('0x') || colorSource.startsWith('0X')
+            ? 16
+            : null,
+      ),
+      _ => null,
+    };
+    final timestamp = int.tryParse(data['ts']?.toString() ?? '') ??
+        DateTime.now().millisecondsSinceEpoch;
+    final shortMessageRaw = data['msg']?.toString().trim();
+    final shortMessage =
+        (shortMessageRaw?.isNotEmpty ?? false) ? shortMessageRaw! : 'Ping';
+    final ttsMessage = data['tts']?.toString().trim();
+    return _DecodedPingMessage(
+      optionId: data['id']?.toString() ?? 'custom',
+      position: GeoPoint(latitude: lat, longitude: lng),
+      shortMessage: shortMessage,
+      ttsMessage: (ttsMessage?.isNotEmpty ?? false)
+          ? ttsMessage!
+          : shortMessage,
+      color: Color(colorRaw ?? Colors.blueAccent.value),
+      timestampMs: timestamp,
+    );
+  }
+
+  Future<void> _playPingFeedback({
+    required _DecodedPingMessage parsed,
+    required String playerName,
+  }) async {
+    await _playOptionSound(parsed.optionId);
+    if (!mounted) return;
+    await _ttsService.speakIfEnabled('$playerName ${parsed.ttsMessage}');
+  }
+
+  Future<void> _playOptionSound(String optionId) async {
+    switch (optionId) {
+      case 'go_here':
+        await SystemSound.play(SystemSoundType.click);
+        return;
+      case 'need_help':
+        await SystemSound.play(SystemSoundType.alert);
+        return;
+      case 'danger':
+        await SystemSound.play(SystemSoundType.alert);
+        await Future<void>.delayed(_kDangerPingSoundGap);
+        await SystemSound.play(SystemSoundType.alert);
+        return;
+      default:
+        await SystemSound.play(SystemSoundType.click);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await SystemSound.play(SystemSoundType.alert);
+    }
+  }
+
+  String _displayChatText(String text) {
+    final parsed = _tryParsePingMessage(text);
+    if (parsed == null) return text;
+    return '📍 ${parsed.shortMessage}';
+  }
+
   Future<void> _openChat() async {
     setState(() {
       _chatOpen = true;
@@ -1452,7 +1768,7 @@ class _GamePageState extends State<GamePage>
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(
-                                '${m.playerName}: ${m.text}',
+                                '${m.playerName}: ${_displayChatText(m.text)}',
                                 style: _kTeamChatBubbleStyle,
                               ),
                             ),
@@ -1757,6 +2073,115 @@ class _GamePageState extends State<GamePage>
       return 'Le temps est écoulé.';
     }
     return 'Victoire confirmée.';
+  }
+}
+
+class _DecodedPingMessage {
+  const _DecodedPingMessage({
+    required this.optionId,
+    required this.position,
+    required this.shortMessage,
+    required this.ttsMessage,
+    required this.color,
+    required this.timestampMs,
+  });
+
+  final String optionId;
+  final GeoPoint position;
+  final String shortMessage;
+  final String ttsMessage;
+  final Color color;
+  final int timestampMs;
+}
+
+class _PingWheelPainter extends CustomPainter {
+  const _PingWheelPainter({
+    required this.center,
+    required this.options,
+    required this.highlightedIndex,
+  });
+
+  final Offset center;
+  final List<_PingOption> options;
+  final int? highlightedIndex;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (options.isEmpty) return;
+    const innerRadius = 32.0;
+    const outerRadius = 98.0;
+    final sweep = (2 * pi) / options.length;
+    for (var i = 0; i < options.length; i++) {
+      final option = options[i];
+      final start = (i * sweep) - (pi / options.length);
+      final isHighlighted = highlightedIndex == i;
+      final fillPaint = Paint()
+        ..style = PaintingStyle.fill
+        ..color = option.color.withValues(alpha: isHighlighted ? 0.80 : 0.55);
+      final borderPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = isHighlighted ? 2.6 : 1.3
+        ..color = Colors.white.withValues(alpha: 0.85);
+      final path = Path()
+        ..moveTo(
+          center.dx + innerRadius * cos(start),
+          center.dy + innerRadius * sin(start),
+        )
+        ..arcTo(
+          Rect.fromCircle(center: center, radius: innerRadius),
+          start,
+          sweep,
+          false,
+        )
+        ..lineTo(
+          center.dx + outerRadius * cos(start + sweep),
+          center.dy + outerRadius * sin(start + sweep),
+        )
+        ..arcTo(
+          Rect.fromCircle(center: center, radius: outerRadius),
+          start + sweep,
+          -sweep,
+          false,
+        )
+        ..close();
+      canvas.drawPath(path, fillPaint);
+      canvas.drawPath(path, borderPaint);
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: option.shortMessage,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: 90);
+      final labelAngle = start + (sweep / 2);
+      final labelRadius = 63.0;
+      final labelCenter = Offset(
+        center.dx + (labelRadius * cos(labelAngle)),
+        center.dy + (labelRadius * sin(labelAngle)),
+      );
+      textPainter.paint(
+        canvas,
+        Offset(
+          labelCenter.dx - textPainter.width / 2,
+          labelCenter.dy - textPainter.height / 2,
+        ),
+      );
+    }
+    final corePaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = Colors.black.withValues(alpha: 0.72);
+    canvas.drawCircle(center, innerRadius - 2, corePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _PingWheelPainter oldDelegate) {
+    return oldDelegate.center != center ||
+        oldDelegate.highlightedIndex != highlightedIndex ||
+        oldDelegate.options.length != options.length;
   }
 }
 

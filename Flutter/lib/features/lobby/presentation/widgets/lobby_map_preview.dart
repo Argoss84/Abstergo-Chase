@@ -21,6 +21,22 @@ class PlayerMapMarker {
   final PlayerMarkerAura aura;
 }
 
+class MapPingMarker {
+  const MapPingMarker({
+    required this.point,
+    required this.color,
+    required this.playerName,
+    required this.message,
+    this.pulseValue = 0,
+  });
+
+  final GeoPoint point;
+  final Color color;
+  final String playerName;
+  final String message;
+  final double pulseValue;
+}
+
 class LobbyMapPreview extends StatelessWidget {
   const LobbyMapPreview({
     super.key,
@@ -48,6 +64,12 @@ class LobbyMapPreview extends StatelessWidget {
     this.highlightObjectiveZoneRadiusMeters = 0,
     this.highlightObjectivePulse = 0,
     this.showCenterMarker = true,
+    this.pingMarkers = const <MapPingMarker>[],
+    this.onMapLongPress,
+    this.onMapPointerDown,
+    this.onMapPointerMove,
+    this.onMapPointerUp,
+    this.onMapPointerCancel,
     this.mapController,
     this.height = 260,
   });
@@ -76,6 +98,12 @@ class LobbyMapPreview extends StatelessWidget {
   final int highlightObjectiveZoneRadiusMeters;
   final double highlightObjectivePulse;
   final bool showCenterMarker;
+  final List<MapPingMarker> pingMarkers;
+  final LongPressCallback? onMapLongPress;
+  final PointerDownCallback? onMapPointerDown;
+  final PointerMoveCallback? onMapPointerMove;
+  final PointerUpCallback? onMapPointerUp;
+  final PointerCancelCallback? onMapPointerCancel;
   final MapController? mapController;
   final double? height;
 
@@ -122,6 +150,11 @@ class LobbyMapPreview extends StatelessWidget {
             initialCenter: centerLatLng,
             initialZoom: 15.5,
             maxZoom: _kOsmMaxZoom,
+            onLongPress: onMapLongPress,
+            onPointerDown: onMapPointerDown,
+            onPointerMove: onMapPointerMove,
+            onPointerUp: onMapPointerUp,
+            onPointerCancel: onMapPointerCancel,
           ),
           children: [
             TileLayer(
@@ -204,6 +237,20 @@ class LobbyMapPreview extends StatelessWidget {
                     borderStrokeWidth: 1.5,
                     borderColor: Colors.green,
                   ),
+                ...pingMarkers.map(
+                  (ping) => CircleMarker(
+                    point: LatLng(ping.point.latitude, ping.point.longitude),
+                    radius: 6 + (ping.pulseValue * 13),
+                    useRadiusInMeter: true,
+                    color: ping.color.withValues(
+                      alpha: 0.10 + (ping.pulseValue * 0.28),
+                    ),
+                    borderStrokeWidth: 1.4 + (ping.pulseValue * 1.5),
+                    borderColor: ping.color.withValues(
+                      alpha: 0.65 + (ping.pulseValue * 0.35),
+                    ),
+                  ),
+                ),
               ],
             ),
             if (contourLatLng.length >= 3)
@@ -290,6 +337,14 @@ class LobbyMapPreview extends StatelessWidget {
                     ),
                   ),
                 ),
+                ...pingMarkers.map(
+                  (ping) => Marker(
+                    width: 180,
+                    height: 66,
+                    point: LatLng(ping.point.latitude, ping.point.longitude),
+                    child: _RolePingMarkerWidget(ping: ping),
+                  ),
+                ),
               ],
             ),
           ],
@@ -359,5 +414,51 @@ class _PlayerGpsPin extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  class _RolePingMarkerWidget extends StatelessWidget {
+    const _RolePingMarkerWidget({required this.ping});
+
+    final MapPingMarker ping;
+
+    @override
+    Widget build(BuildContext context) {
+      return IgnorePointer(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.72),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    ping.playerName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    ping.message,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 2),
+            Icon(Icons.wifi_tethering, color: ping.color, size: 26),
+          ],
+        ),
+      );
+    }
   }
 }
