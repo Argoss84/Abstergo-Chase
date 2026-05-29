@@ -26,6 +26,7 @@ const TextStyle _kTeamChatBubbleStyle = TextStyle(
 );
 const String _kGameUnavailableMessage = 'Partie indisponible.';
 const double _kDefaultGameMapZoom = 16.5;
+const double _kCompassCenterToleranceDeg = 0.000001;
 
 class GamePage extends StatefulWidget {
   const GamePage({super.key, required this.bootstrap});
@@ -58,7 +59,9 @@ class _GamePageState extends State<GamePage>
   int _lastOutOfZoneVibrationMs = 0;
   bool _hasSpokenJoinTts = false;
   bool _compassModeEnabled = false;
+  bool _isCompassRecenterScheduled = false;
   GeoPoint? _lastCompassCenteredPosition;
+  GeoPoint? _pendingCompassCenteredPosition;
   bool _didRouteBackToJoinOnInitialError = false;
 
   @override
@@ -1129,7 +1132,9 @@ class _GamePageState extends State<GamePage>
     setState(() {
       _compassModeEnabled = !_compassModeEnabled;
       if (!_compassModeEnabled) {
+        _isCompassRecenterScheduled = false;
         _lastCompassCenteredPosition = null;
+        _pendingCompassCenteredPosition = null;
       }
     });
     if (!_compassModeEnabled) {
@@ -1150,13 +1155,18 @@ class _GamePageState extends State<GamePage>
     if (!_compassModeEnabled || playerPosition == null) return;
     if (_sameGeoPoint(_lastCompassCenteredPosition, playerPosition)) return;
     _lastCompassCenteredPosition = playerPosition;
-    final targetLatitude = playerPosition.latitude;
-    final targetLongitude = playerPosition.longitude;
+    _pendingCompassCenteredPosition = playerPosition;
+    if (_isCompassRecenterScheduled) return;
+    _isCompassRecenterScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _isCompassRecenterScheduled = false;
       if (!mounted || !_compassModeEnabled) return;
+      final target = _pendingCompassCenteredPosition;
+      _pendingCompassCenteredPosition = null;
+      if (target == null) return;
       final zoom = _currentMapZoom();
       _mapController.move(
-        LatLng(targetLatitude, targetLongitude),
+        LatLng(target.latitude, target.longitude),
         zoom,
       );
     });
@@ -1174,7 +1184,10 @@ class _GamePageState extends State<GamePage>
   bool _sameGeoPoint(GeoPoint? a, GeoPoint? b) {
     if (a == null && b == null) return true;
     if (a == null || b == null) return false;
-    return a.latitude == b.latitude && a.longitude == b.longitude;
+    // ~11 cm at the equator; enough to ignore GPS jitter while keeping
+    // effective player movement responsive in compass-follow mode.
+    return (a.latitude - b.latitude).abs() < _kCompassCenterToleranceDeg &&
+        (a.longitude - b.longitude).abs() < _kCompassCenterToleranceDeg;
   }
 
   Future<void> _openVitalityQr() async {
