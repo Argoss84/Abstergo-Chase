@@ -131,6 +131,7 @@ class LobbyGameConfig {
     required this.durationSeconds,
     required this.hackDurationMs,
     required this.rogueRange,
+    required this.agentRange,
     required this.startZone,
     required this.rogueStartZone,
     required this.mapStreets,
@@ -144,6 +145,7 @@ class LobbyGameConfig {
   final int durationSeconds;
   final int hackDurationMs;
   final int rogueRange;
+  final int agentRange;
   final GeoPoint? startZone;
   final GeoPoint? rogueStartZone;
   final List<GeoPoint> mapStreets;
@@ -211,6 +213,9 @@ class LobbyGameConfig {
       hackDurationMs:
           int.tryParse(raw['hack_duration_ms']?.toString() ?? '') ?? 10000,
       rogueRange: int.tryParse(raw['rogue_range']?.toString() ?? '') ?? 120,
+      agentRange:
+          int.tryParse(raw['agent_range']?.toString() ?? '') ??
+          CreateLobbyDefaults.agentRange,
       startZone: parsePoint(
         raw['start_zone_latitude'],
         raw['start_zone_longitude'],
