@@ -49,7 +49,10 @@ GoRouter buildAppRouter(CognitoAuthController authController) {
         path: HomeMenuPage.joinLobbyPath,
         name: JoinLobbyPage.routeName,
         builder: (context, state) =>
-            JoinLobbyPage(initialCode: state.uri.queryParameters['code']),
+            JoinLobbyPage(
+              initialCode: state.uri.queryParameters['code'],
+              initialError: state.uri.queryParameters['error'],
+            ),
       ),
       GoRoute(
         path: LobbyPage.routePath,

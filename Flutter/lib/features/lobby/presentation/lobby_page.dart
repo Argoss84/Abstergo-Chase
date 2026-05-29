@@ -5,6 +5,7 @@ import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart
 import 'package:broken_veil_protocol/features/lobby/data/player_name_store.dart';
 import 'package:broken_veil_protocol/features/game/domain/game_models.dart';
 import 'package:broken_veil_protocol/features/game/presentation/game_page.dart';
+import 'package:broken_veil_protocol/features/join_lobby/presentation/join_lobby_page.dart';
 import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
 import 'package:broken_veil_protocol/features/lobby/presentation/widgets/lobby_map_preview.dart';
 import 'package:broken_veil_protocol/shared/services/socket_environment_service.dart';
@@ -47,6 +48,7 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
   bool _isChatOpen = false;
   bool _didRouteToGame = false;
   bool _didFallbackRouteToGame = false;
+  bool _didRouteBackToJoinOnError = false;
   final VibrationService _vibrationService = VibrationService();
   final SocketEnvironmentService _socketEnvironmentService =
       SocketEnvironmentService();
@@ -154,6 +156,24 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
               ),
             );
           });
+        }
+        if (_controller.connectionStatus == 'error' &&
+            !_controller.isLoading &&
+            !_didRouteBackToJoinOnError &&
+            bootstrap != null &&
+            _controller.playerId == null &&
+            _controller.players.isEmpty &&
+            (_controller.error?.isNotEmpty ?? false)) {
+          _didRouteBackToJoinOnError = true;
+          final code = bootstrap.code.trim().toUpperCase();
+          final message = _controller.error!;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            context.go(
+              '${JoinLobbyPage.routePath}?code=${Uri.encodeQueryComponent(code)}&error=${Uri.encodeQueryComponent(message)}',
+            );
+          });
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
         return Scaffold(
           appBar: AppBar(

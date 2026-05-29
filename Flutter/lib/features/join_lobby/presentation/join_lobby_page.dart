@@ -14,12 +14,13 @@ import 'package:go_router/go_router.dart';
 import 'package:qr_code_dart_scan/qr_code_dart_scan.dart';
 
 class JoinLobbyPage extends ConsumerStatefulWidget {
-  const JoinLobbyPage({super.key, this.initialCode});
+  const JoinLobbyPage({super.key, this.initialCode, this.initialError});
 
   static const String routePath = '/join-lobby';
   static const String routeName = 'join-lobby';
 
   final String? initialCode;
+  final String? initialError;
 
   @override
   ConsumerState<JoinLobbyPage> createState() => _JoinLobbyPageState();
@@ -41,6 +42,13 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
     _codeController = TextEditingController(
       text: (widget.initialCode ?? '').trim().toUpperCase(),
     );
+    final initialError = widget.initialError?.trim();
+    if (initialError != null && initialError.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _showError(initialError);
+      });
+    }
     _loadAccountUsername();
   }
 
