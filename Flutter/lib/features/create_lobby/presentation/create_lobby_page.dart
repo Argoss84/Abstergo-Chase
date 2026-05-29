@@ -6,6 +6,7 @@ import 'package:broken_veil_protocol/features/auth/application/cognito_auth_cont
 import 'package:broken_veil_protocol/features/create_lobby/application/create_lobby_controller.dart';
 import 'package:broken_veil_protocol/features/create_lobby/presentation/widgets/create_lobby_details_sheet.dart';
 import 'package:broken_veil_protocol/features/create_lobby/presentation/widgets/create_lobby_map.dart';
+import 'package:broken_veil_protocol/features/lobby/data/player_session_store.dart';
 import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
 import 'package:broken_veil_protocol/features/lobby/presentation/lobby_page.dart';
 import 'package:broken_veil_protocol/shared/services/socket_environment_service.dart';
@@ -26,6 +27,7 @@ class CreateLobbyPage extends ConsumerStatefulWidget {
 class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
   late final CreateLobbyController _controller;
   final AccountApiService _accountApiService = AccountApiService();
+  final PlayerSessionStore _playerSessionStore = PlayerSessionStore();
   final SocketEnvironmentService _socketEnvironmentService =
       SocketEnvironmentService();
   bool _isLoadingAccountUsername = true;
@@ -237,6 +239,9 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
                                     return;
                                   }
                                   if (_controller.createdLobbyCode != null) {
+                                    await _playerSessionStore.saveLastLobbyCode(
+                                      _controller.createdLobbyCode!,
+                                    );
                                     final session =
                                         _controller.createdLobbySession;
                                     final bootstrap = LobbyBootstrapData(
