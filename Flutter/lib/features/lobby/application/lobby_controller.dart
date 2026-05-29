@@ -178,7 +178,9 @@ class LobbyController extends ChangeNotifier {
               LobbyPlayer(
                 id: id,
                 name: payload['playerName']?.toString() ?? 'Joueur',
-                isHost: false,
+                isHost: payload['isHost'] == true,
+                role: payload['role']?.toString(),
+                status: payload['status']?.toString() ?? 'active',
               ),
             );
             _syncVoiceState();
@@ -248,8 +250,11 @@ class LobbyController extends ChangeNotifier {
           if (id != null && changes is Map) {
             final idx = players.indexWhere((p) => p.id == id);
             if (idx != -1) {
+              final hasRoleChange = changes.containsKey('role');
               players[idx] = players[idx].copyWith(
-                role: changes['role']?.toString(),
+                role: hasRoleChange
+                    ? changes['role']?.toString()
+                    : players[idx].role,
                 status: changes['status']?.toString() ?? players[idx].status,
               );
               notifyListeners();
