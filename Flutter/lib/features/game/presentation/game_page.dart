@@ -1150,11 +1150,13 @@ class _GamePageState extends State<GamePage>
     if (!_compassModeEnabled || playerPosition == null) return;
     if (_sameGeoPoint(_lastCompassCenteredPosition, playerPosition)) return;
     _lastCompassCenteredPosition = playerPosition;
+    final targetLatitude = playerPosition.latitude;
+    final targetLongitude = playerPosition.longitude;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_compassModeEnabled) return;
       final zoom = _currentMapZoom();
       _mapController.move(
-        LatLng(playerPosition.latitude, playerPosition.longitude),
+        LatLng(targetLatitude, targetLongitude),
         zoom,
       );
     });
@@ -1169,15 +1171,10 @@ class _GamePageState extends State<GamePage>
     }
   }
 
-  bool _sameGeoPoint(
-    GeoPoint? a,
-    GeoPoint? b, {
-    double tolerance = 0.000001,
-  }) {
+  bool _sameGeoPoint(GeoPoint? a, GeoPoint? b) {
     if (a == null && b == null) return true;
     if (a == null || b == null) return false;
-    return (a.latitude - b.latitude).abs() < tolerance &&
-        (a.longitude - b.longitude).abs() < tolerance;
+    return a.latitude == b.latitude && a.longitude == b.longitude;
   }
 
   Future<void> _openVitalityQr() async {
