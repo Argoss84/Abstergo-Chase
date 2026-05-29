@@ -623,9 +623,6 @@ class GameController extends ChangeNotifier {
       case 'game:action-rejected':
         _joinInFlight = false;
         final msg = payload?.toString() ?? 'Erreur game';
-        if (msg.contains('Partie introuvable pour action') && !_hasJoinedGame) {
-          return;
-        }
         error = msg;
         connectionStatus = _hasJoinedGame ? 'connected' : 'error';
         notifyListeners();

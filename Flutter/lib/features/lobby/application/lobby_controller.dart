@@ -316,6 +316,8 @@ class LobbyController extends ChangeNotifier {
           return;
         }
         error = message;
+        shouldOpenGameForCode =
+            type == 'lobby:error' && _isLobbyNotFoundMessage(message);
         connectionStatus = 'error';
         notifyListeners();
         return;
@@ -332,6 +334,12 @@ class LobbyController extends ChangeNotifier {
       default:
         return;
     }
+  }
+
+  bool _isLobbyNotFoundMessage(String message) {
+    final normalized = message.trim().toLowerCase();
+    return normalized.contains('lobby introuvable') ||
+        normalized.contains('lobby not found');
   }
 
   void sendChat(String text) {

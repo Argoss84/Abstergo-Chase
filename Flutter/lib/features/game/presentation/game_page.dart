@@ -6,6 +6,7 @@ import 'dart:ui';
 import 'package:broken_veil_protocol/features/game/application/game_controller.dart';
 import 'package:broken_veil_protocol/features/game/domain/game_models.dart';
 import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
+import 'package:broken_veil_protocol/features/join_lobby/presentation/join_lobby_page.dart';
 import 'package:broken_veil_protocol/features/lobby/presentation/widgets/lobby_map_preview.dart';
 import 'package:broken_veil_protocol/shared/services/tts_service.dart';
 import 'package:broken_veil_protocol/shared/services/vibration_service.dart';
@@ -55,6 +56,7 @@ class _GamePageState extends State<GamePage>
   int _lastOutOfZoneVibrationMs = 0;
   bool _hasSpokenJoinTts = false;
   bool _compassModeEnabled = false;
+  bool _didRouteBackToJoinOnInitialError = false;
 
   @override
   void initState() {
@@ -108,6 +110,28 @@ class _GamePageState extends State<GamePage>
               "Bienvenue $spokenRole, dirigez vous vers votre zone de départ",
             );
           });
+        }
+        if (_shouldRedirectToJoinOnInitialError()) {
+          _didRouteBackToJoinOnInitialError = true;
+          final code =
+              (_controller.gameCode ??
+                      widget.bootstrap.codeOverride ??
+                      widget.bootstrap.lobby.code)
+                  .trim()
+                  .toUpperCase();
+          final message = _controller.error?.trim() ?? 'Partie indisponible.';
+          final route = Uri(
+            path: JoinLobbyPage.routePath,
+            queryParameters: <String, String>{
+              'code': code,
+              'error': message,
+            },
+          ).toString();
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            context.go(route);
+          });
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
         final topInset =
             MediaQuery.of(context).padding.top + kToolbarHeight + 8;
@@ -758,6 +782,18 @@ class _GamePageState extends State<GamePage>
         );
       },
     );
+  }
+
+  bool _shouldRedirectToJoinOnInitialError() {
+    final error = _controller.error?.trim();
+    if (error == null || error.isEmpty) {
+      return false;
+    }
+    return !_didRouteBackToJoinOnInitialError &&
+        widget.bootstrap.playerId.trim().isEmpty &&
+        !_controller.isLoading &&
+        _controller.connectionStatus == 'error' &&
+        error.toLowerCase().contains('partie introuvable');
   }
 
   String _formatDuration(int seconds) {

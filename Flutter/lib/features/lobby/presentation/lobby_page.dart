@@ -548,6 +548,7 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
   bool _shouldRedirectToJoinOnInitialError(LobbyBootstrapData? bootstrap) {
     return _controller.connectionStatus == 'error' &&
         !_controller.isLoading &&
+        !_controller.shouldOpenGameForCode &&
         !_didRouteBackToJoinOnError &&
         bootstrap != null &&
         _controller.playerId == null &&

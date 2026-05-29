@@ -46,7 +46,7 @@ class _FailingJoinLobbySocketService extends LobbySocketService {
 
 void main() {
   test(
-    'does not trigger game fallback route when lobby code is invalid',
+    'triggers game fallback route when lobby join returns lobby not found',
     () async {
       final controller = LobbyController(
         socketService: _FailingJoinLobbySocketService(),
@@ -62,7 +62,7 @@ void main() {
 
       expect(controller.connectionStatus, 'error');
       expect(controller.error, isNotNull);
-      expect(controller.shouldOpenGameForCode, isFalse);
+      expect(controller.shouldOpenGameForCode, isTrue);
 
       controller.dispose();
     },
