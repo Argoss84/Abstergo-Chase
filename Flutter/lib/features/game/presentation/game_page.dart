@@ -25,6 +25,8 @@ const TextStyle _kTeamChatBubbleStyle = TextStyle(
   color: Color(0xFF0F172A),
 );
 const String _kGameUnavailableMessage = 'Partie indisponible.';
+const double _kDefaultGameMapZoom = 16.5;
+const double _kCompassCenterToleranceLatLng = 0.000001;
 
 class GamePage extends StatefulWidget {
   const GamePage({super.key, required this.bootstrap});
@@ -57,6 +59,9 @@ class _GamePageState extends State<GamePage>
   int _lastOutOfZoneVibrationMs = 0;
   bool _hasSpokenJoinTts = false;
   bool _compassModeEnabled = false;
+  bool _isCompassRecenterScheduled = false;
+  GeoPoint? _lastCompassCenteredPosition;
+  GeoPoint? _pendingCompassCenteredPosition;
   bool _didRouteBackToJoinOnInitialError = false;
 
   @override
@@ -149,6 +154,7 @@ class _GamePageState extends State<GamePage>
         final winnerReason = (_controller.winnerReason ?? '').toUpperCase();
         final outOfZone = _controller.isOutOfGameZone;
         final myPos = _controller.myPosition;
+        _syncCompassMapCenter(myPos);
         final startCountdownSeconds = _startCountdownSeconds();
         final sameRolePlayers = _controller.sameRoleVoicePlayers;
         _handleGameVibrationSignals(
@@ -1116,17 +1122,26 @@ class _GamePageState extends State<GamePage>
       );
       return;
     }
-    _mapController.move(LatLng(target.latitude, target.longitude), 16.5);
+    _mapController.move(
+      LatLng(target.latitude, target.longitude),
+      _kDefaultGameMapZoom,
+    );
   }
 
   void _toggleCompassMode() {
     setState(() {
       _compassModeEnabled = !_compassModeEnabled;
+      if (!_compassModeEnabled) {
+        _isCompassRecenterScheduled = false;
+        _lastCompassCenteredPosition = null;
+        _pendingCompassCenteredPosition = null;
+      }
     });
     if (!_compassModeEnabled) {
       _mapController.rotate(0);
       return;
     }
+    _syncCompassMapCenter(_controller.myPosition);
     _applyCompassRotation(_headingDeg.value);
   }
 
@@ -1134,6 +1149,45 @@ class _GamePageState extends State<GamePage>
     if (!_compassModeEnabled || heading == null) return;
     // Keep player forward direction at top of screen.
     _mapController.rotate(-heading);
+  }
+
+  void _syncCompassMapCenter(GeoPoint? playerPosition) {
+    if (!_compassModeEnabled || playerPosition == null) return;
+    if (_sameGeoPoint(_lastCompassCenteredPosition, playerPosition)) return;
+    _lastCompassCenteredPosition = playerPosition;
+    _pendingCompassCenteredPosition = playerPosition;
+    if (_isCompassRecenterScheduled) return;
+    _isCompassRecenterScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _isCompassRecenterScheduled = false;
+      if (!mounted || !_compassModeEnabled) return;
+      final target = _pendingCompassCenteredPosition;
+      _pendingCompassCenteredPosition = null;
+      if (target == null) return;
+      final zoom = _currentMapZoom();
+      _mapController.move(
+        LatLng(target.latitude, target.longitude),
+        zoom,
+      );
+    });
+  }
+
+  double _currentMapZoom() {
+    try {
+      final zoom = _mapController.camera.zoom;
+      return zoom.isFinite && zoom > 0 ? zoom : _kDefaultGameMapZoom;
+    } catch (_) {
+      return _kDefaultGameMapZoom;
+    }
+  }
+
+  bool _sameGeoPoint(GeoPoint? a, GeoPoint? b) {
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    // ~11 cm in latitude at the equator; this filters insignificant GPS jitter
+    // while keeping effective player movement responsive in compass-follow mode.
+    return (a.latitude - b.latitude).abs() < _kCompassCenterToleranceLatLng &&
+        (a.longitude - b.longitude).abs() < _kCompassCenterToleranceLatLng;
   }
 
   Future<void> _openVitalityQr() async {
