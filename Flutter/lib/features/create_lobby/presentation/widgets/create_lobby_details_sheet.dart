@@ -122,7 +122,7 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
           children: [
             Expanded(
               child: DropdownButtonFormField<int>(
-                value: _durationMinutes,
+                initialValue: _durationMinutes,
                 decoration: const InputDecoration(
                   labelText: 'Minutes',
                   border: OutlineInputBorder(),
@@ -146,7 +146,7 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
             const SizedBox(width: 8),
             Expanded(
               child: DropdownButtonFormField<int>(
-                value: _durationSeconds,
+                initialValue: _durationSeconds,
                 decoration: const InputDecoration(
                   labelText: 'Secondes',
                   border: OutlineInputBorder(),

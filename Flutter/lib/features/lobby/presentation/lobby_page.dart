@@ -371,7 +371,7 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                                 margin: const EdgeInsets.only(bottom: 4),
                                 decoration: BoxDecoration(
                                   color: voiceActive
-                                      ? Colors.cyanAccent.withOpacity(0.16)
+                                      ? Colors.cyanAccent.withValues(alpha: 0.16)
                                       : Colors.transparent,
                                   borderRadius: BorderRadius.circular(8),
                                   border: Border.all(
@@ -420,7 +420,7 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                                             child: Image.asset(
                                               _roleMarkerAssetFor(player.role)!,
                                               fit: BoxFit.contain,
-                                              errorBuilder: (context, _, __) =>
+                                              errorBuilder: (context, _, _) =>
                                                   Icon(
                                                     _roleFallbackIconFor(
                                                       player.role,
@@ -566,7 +566,7 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.2),
+        color: color.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(status, style: TextStyle(color: color, fontSize: 12)),
@@ -735,7 +735,7 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                             hintStyle: TextStyle(
                               color: Theme.of(
                                 context,
-                              ).colorScheme.onSurface.withOpacity(0.55),
+                              ).colorScheme.onSurface.withValues(alpha: 0.55),
                             ),
                           ),
                         ),

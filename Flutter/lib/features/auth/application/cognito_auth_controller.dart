@@ -10,7 +10,6 @@ class CognitoAuthController extends ChangeNotifier {
   final CognitoAuthService _authService;
   final AccountApiService _accountApiService = AccountApiService();
   Timer? _sessionGuardTimer;
-  bool _sessionGuardInFlight = false;
 
   bool isInitializing = true;
   bool isAuthenticated = false;
@@ -62,7 +61,7 @@ class CognitoAuthController extends ChangeNotifier {
       isAuthenticated = true;
       _startSessionGuard();
       unawaited(
-        _enforceSingleDevicePolicy(
+        _syncUserBestEffort(
           accessToken: session.accessToken,
           username: session.username,
         ).catchError(_handleBackgroundSyncError),
@@ -117,7 +116,7 @@ class CognitoAuthController extends ChangeNotifier {
       isAuthenticated = true;
       _startSessionGuard();
       unawaited(
-        _enforceSingleDevicePolicy(
+        _syncUserBestEffort(
           accessToken: session.accessToken,
           username: session.username,
         ).catchError(_handleBackgroundSyncError),
@@ -142,7 +141,7 @@ class CognitoAuthController extends ChangeNotifier {
     return _authService.getCurrentUserSub();
   }
 
-  Future<void> _enforceSingleDevicePolicy({
+  Future<void> _syncUserBestEffort({
     required String accessToken,
     required String username,
   }) async {
@@ -151,44 +150,17 @@ class CognitoAuthController extends ChangeNotifier {
     } on BackendUnavailableException {
       // Allow Cognito login when ServerBDD is temporarily unreachable.
       return;
-    } on SessionInvalidatedException {
-      await _authService.clearSession();
-      rethrow;
-    } catch (error) {
-      final message = error.toString();
-      if (message.contains('Compte déjà connecté sur un autre appareil')) {
-        await _authService.clearSession();
-        throw Exception(
-          'Compte déjà connecté sur un autre appareil, veuillez le déconnecter pour l\'utiliser ici',
-        );
-      }
+    } catch (_) {
       // Do not reject Cognito authentication on backend sync errors.
       return;
     }
   }
 
   void _startSessionGuard() {
+    // Session guard volontairement désactivé: on ne force plus de déconnexion
+    // automatique en arrière-plan (multi-appareils / réponse backend).
     _sessionGuardTimer?.cancel();
-    _sessionGuardTimer = Timer.periodic(const Duration(seconds: 8), (_) async {
-      if (!isAuthenticated || _sessionGuardInFlight) {
-        return;
-      }
-      _sessionGuardInFlight = true;
-      try {
-        final token = await _authService.getAccessToken();
-        if (token == null || token.isEmpty) {
-          await handleSessionInvalidated('Session expirée, reconnectez-vous.');
-          return;
-        }
-        await _accountApiService.getMyProfile(token);
-      } catch (error) {
-        if (error is SessionInvalidatedException) {
-          await handleSessionInvalidated(error.message);
-        }
-      } finally {
-        _sessionGuardInFlight = false;
-      }
-    });
+    _sessionGuardTimer = null;
   }
 
   void _stopSessionGuard() {
@@ -199,13 +171,6 @@ class CognitoAuthController extends ChangeNotifier {
   Future<void> _handleBackgroundSyncError(Object error) async {
     if (error is SessionInvalidatedException) {
       await handleSessionInvalidated(error.message);
-      return;
-    }
-    final message = error.toString();
-    if (message.contains('Compte déjà connecté sur un autre appareil')) {
-      await handleSessionInvalidated(
-        'Votre session a été déconnectée car ce compte a été utilisé sur un autre appareil.',
-      );
     }
   }
 }

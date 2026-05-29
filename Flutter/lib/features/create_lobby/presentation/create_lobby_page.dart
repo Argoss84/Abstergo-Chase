@@ -230,6 +230,8 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
                         FilledButton(
                           onPressed: _controller.canCreateLobby
                               ? () async {
+                                  final router = GoRouter.of(context);
+                                  final messenger = ScaffoldMessenger.of(context);
                                   await _controller.createLobby();
                                   if (!mounted) {
                                     return;
@@ -255,12 +257,12 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
                                       outerStreetContour:
                                           _controller.outerStreetContour,
                                     );
-                                    context.go(
+                                    router.go(
                                       '${LobbyPage.routePath}?code=${_controller.createdLobbyCode}',
                                       extra: bootstrap,
                                     );
                                   } else if (_controller.lastError != null) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
+                                    messenger.showSnackBar(
                                       SnackBar(
                                         content: Text(_controller.lastError!),
                                       ),

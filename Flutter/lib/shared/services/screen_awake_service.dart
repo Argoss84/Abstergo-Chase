@@ -1,5 +1,5 @@
+import 'package:keep_screen_on/keep_screen_on.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
 
 class ScreenAwakeService {
   ScreenAwakeService._();
@@ -25,9 +25,9 @@ class ScreenAwakeService {
 
   Future<void> _apply(bool enabled) async {
     if (enabled) {
-      await WakelockPlus.enable();
+      await KeepScreenOn.turnOn();
     } else {
-      await WakelockPlus.disable();
+      await KeepScreenOn.turnOff();
     }
   }
 }

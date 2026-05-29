@@ -131,7 +131,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           decoration: BoxDecoration(
                             color: Theme.of(
                               context,
-                            ).colorScheme.surface.withOpacity(0.6),
+                            ).colorScheme.surface.withValues(alpha: 0.6),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           alignment: Alignment.center,
