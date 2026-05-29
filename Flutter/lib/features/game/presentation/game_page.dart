@@ -790,10 +790,9 @@ class _GamePageState extends State<GamePage>
       return false;
     }
     return !_didRouteBackToJoinOnInitialError &&
-        widget.bootstrap.playerId.trim().isEmpty &&
+        widget.bootstrap.fromCodeLookupFallback &&
         !_controller.isLoading &&
-        _controller.connectionStatus == 'error' &&
-        error.toLowerCase().contains('partie introuvable');
+        _controller.connectionStatus == 'error';
   }
 
   String _formatDuration(int seconds) {

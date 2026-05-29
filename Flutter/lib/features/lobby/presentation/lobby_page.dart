@@ -135,6 +135,7 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                 players: List<LobbyPlayer>.from(_controller.players),
                 gameConfig: _controller.gameConfig,
                 codeOverride: _controller.lobbyCode,
+                fromCodeLookupFallback: false,
               ),
             );
           });
@@ -153,6 +154,7 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                 players: const <LobbyPlayer>[],
                 gameConfig: null,
                 codeOverride: _controller.lobbyCode ?? bootstrap.code,
+                fromCodeLookupFallback: true,
               ),
             );
           });
