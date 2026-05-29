@@ -57,6 +57,7 @@ class _GamePageState extends State<GamePage>
   int _lastOutOfZoneVibrationMs = 0;
   bool _hasSpokenJoinTts = false;
   bool _compassModeEnabled = false;
+  GeoPoint? _lastCompassCenteredPosition;
   bool _didRouteBackToJoinOnInitialError = false;
 
   @override
@@ -149,6 +150,7 @@ class _GamePageState extends State<GamePage>
         final winnerReason = (_controller.winnerReason ?? '').toUpperCase();
         final outOfZone = _controller.isOutOfGameZone;
         final myPos = _controller.myPosition;
+        _syncCompassMapCenter(myPos);
         final startCountdownSeconds = _startCountdownSeconds();
         final sameRolePlayers = _controller.sameRoleVoicePlayers;
         _handleGameVibrationSignals(
@@ -1122,11 +1124,15 @@ class _GamePageState extends State<GamePage>
   void _toggleCompassMode() {
     setState(() {
       _compassModeEnabled = !_compassModeEnabled;
+      if (!_compassModeEnabled) {
+        _lastCompassCenteredPosition = null;
+      }
     });
     if (!_compassModeEnabled) {
       _mapController.rotate(0);
       return;
     }
+    _syncCompassMapCenter(_controller.myPosition);
     _applyCompassRotation(_headingDeg.value);
   }
 
@@ -1134,6 +1140,36 @@ class _GamePageState extends State<GamePage>
     if (!_compassModeEnabled || heading == null) return;
     // Keep player forward direction at top of screen.
     _mapController.rotate(-heading);
+  }
+
+  void _syncCompassMapCenter(GeoPoint? playerPosition) {
+    if (!_compassModeEnabled || playerPosition == null) return;
+    if (_sameGeoPoint(_lastCompassCenteredPosition, playerPosition)) return;
+    _lastCompassCenteredPosition = playerPosition;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_compassModeEnabled) return;
+      final zoom = _currentMapZoom();
+      _mapController.move(
+        LatLng(playerPosition.latitude, playerPosition.longitude),
+        zoom,
+      );
+    });
+  }
+
+  double _currentMapZoom() {
+    try {
+      final zoom = _mapController.camera.zoom;
+      return zoom.isFinite && zoom > 0 ? zoom : 16.5;
+    } catch (_) {
+      return 16.5;
+    }
+  }
+
+  bool _sameGeoPoint(GeoPoint? a, GeoPoint? b, {double eps = 0.000001}) {
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    return (a.latitude - b.latitude).abs() < eps &&
+        (a.longitude - b.longitude).abs() < eps;
   }
 
   Future<void> _openVitalityQr() async {
