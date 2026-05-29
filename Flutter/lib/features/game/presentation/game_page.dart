@@ -11,6 +11,7 @@ import 'package:broken_veil_protocol/features/lobby/presentation/widgets/lobby_m
 import 'package:broken_veil_protocol/shared/services/tts_service.dart';
 import 'package:broken_veil_protocol/shared/services/vibration_service.dart';
 import 'package:broken_veil_protocol/shared/services/voice_settings_service.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_compass/flutter_compass.dart';
@@ -54,6 +55,8 @@ class _GamePageState extends State<GamePage>
   bool _prevSelfInStartZone = false;
   final Map<String, bool> _hostPlayerInStartZone = <String, bool>{};
   int? _lastCountdownSecondVibrated;
+  int? _lastCountdownSecondAnnounced;
+  bool _didAnnounceCountdownGo = false;
   int _lastOutOfZoneVibrationMs = 0;
   bool _hasSpokenJoinTts = false;
   bool _compassModeEnabled = false;
@@ -154,6 +157,10 @@ class _GamePageState extends State<GamePage>
         _handleGameVibrationSignals(
           startCountdownSeconds: startCountdownSeconds,
           outOfZone: outOfZone,
+          winnerType: winnerType,
+        );
+        _handleStartCountdownAudioSignals(
+          startCountdownSeconds: startCountdownSeconds,
           winnerType: winnerType,
         );
         final objectiveDisplayPoints = isRogue
@@ -479,35 +486,74 @@ class _GamePageState extends State<GamePage>
                               child: Container(
                                 color: Colors.black.withValues(alpha: 0.55),
                                 child: Center(
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 18,
-                                      vertical: 16,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withValues(alpha: 0.95),
-                                      borderRadius: BorderRadius.circular(14),
-                                    ),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Text(
-                                          'La partie commence dans…',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            fontSize: 22,
-                                            fontWeight: FontWeight.w800,
-                                          ),
+                                  child: Transform.scale(
+                                    scale: 0.96 + (_guidancePulseController.value * 0.1),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 18,
+                                        vertical: 16,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withValues(alpha: 0.95),
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(
+                                          color: Colors.black.withValues(alpha: 0.22),
+                                          width: 1.3,
                                         ),
-                                        const SizedBox(height: 10),
-                                        Text(
-                                          '$startCountdownSeconds',
-                                          style: const TextStyle(
-                                            fontSize: 56,
-                                            fontWeight: FontWeight.w900,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(alpha: 0.28),
+                                            blurRadius: 16,
+                                            spreadRadius: 0.8,
                                           ),
-                                        ),
-                                      ],
+                                        ],
+                                      ),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Text(
+                                            'La partie commence dans…',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontSize: 22,
+                                              fontWeight: FontWeight.w900,
+                                              color: Color(0xFF111827),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 10),
+                                          Stack(
+                                            alignment: Alignment.center,
+                                            children: [
+                                              Text(
+                                                '$startCountdownSeconds',
+                                                style: TextStyle(
+                                                  fontSize: 60,
+                                                  fontWeight: FontWeight.w900,
+                                                  foreground: Paint()
+                                                    ..style = PaintingStyle.stroke
+                                                    ..strokeWidth = 6
+                                                    ..color = Colors.black87,
+                                                ),
+                                              ),
+                                              Text(
+                                                '$startCountdownSeconds',
+                                                style: const TextStyle(
+                                                  fontSize: 60,
+                                                  fontWeight: FontWeight.w900,
+                                                  color: Color(0xFFB91C1C),
+                                                  shadows: [
+                                                    Shadow(
+                                                      color: Colors.black45,
+                                                      offset: Offset(0, 2),
+                                                      blurRadius: 5,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -1660,6 +1706,35 @@ class _GamePageState extends State<GamePage>
     if (seconds <= 0) return null;
     if (seconds > 3) return 3;
     return seconds;
+  }
+
+  void _handleStartCountdownAudioSignals({
+    required int? startCountdownSeconds,
+    required String? winnerType,
+  }) {
+    final isPreStartPhase = !_controller.gameStarted && winnerType == null;
+    if (!isPreStartPhase) {
+      _lastCountdownSecondAnnounced = null;
+      _didAnnounceCountdownGo = false;
+      return;
+    }
+
+    if (startCountdownSeconds != null) {
+      if (_lastCountdownSecondAnnounced != startCountdownSeconds) {
+        _lastCountdownSecondAnnounced = startCountdownSeconds;
+        _didAnnounceCountdownGo = false;
+        unawaited(SystemSound.play(SystemSoundType.alert));
+        unawaited(_ttsService.speakIfEnabled('$startCountdownSeconds'));
+      }
+      return;
+    }
+
+    if (_lastCountdownSecondAnnounced != null && !_didAnnounceCountdownGo) {
+      _lastCountdownSecondAnnounced = null;
+      _didAnnounceCountdownGo = true;
+      unawaited(SystemSound.play(SystemSoundType.click));
+      unawaited(_ttsService.speakIfEnabled('Partez !'));
+    }
   }
 
   void _handleGameVibrationSignals({
