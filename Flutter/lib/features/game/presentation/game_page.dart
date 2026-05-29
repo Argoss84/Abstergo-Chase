@@ -25,6 +25,7 @@ const TextStyle _kTeamChatBubbleStyle = TextStyle(
   color: Color(0xFF0F172A),
 );
 const String _kGameUnavailableMessage = 'Partie indisponible.';
+const double _kDefaultGameMapZoom = 16.5;
 
 class GamePage extends StatefulWidget {
   const GamePage({super.key, required this.bootstrap});
@@ -1118,7 +1119,10 @@ class _GamePageState extends State<GamePage>
       );
       return;
     }
-    _mapController.move(LatLng(target.latitude, target.longitude), 16.5);
+    _mapController.move(
+      LatLng(target.latitude, target.longitude),
+      _kDefaultGameMapZoom,
+    );
   }
 
   void _toggleCompassMode() {
@@ -1159,17 +1163,21 @@ class _GamePageState extends State<GamePage>
   double _currentMapZoom() {
     try {
       final zoom = _mapController.camera.zoom;
-      return zoom.isFinite && zoom > 0 ? zoom : 16.5;
+      return zoom.isFinite && zoom > 0 ? zoom : _kDefaultGameMapZoom;
     } catch (_) {
-      return 16.5;
+      return _kDefaultGameMapZoom;
     }
   }
 
-  bool _sameGeoPoint(GeoPoint? a, GeoPoint? b, {double eps = 0.000001}) {
+  bool _sameGeoPoint(
+    GeoPoint? a,
+    GeoPoint? b, {
+    double tolerance = 0.000001,
+  }) {
     if (a == null && b == null) return true;
     if (a == null || b == null) return false;
-    return (a.latitude - b.latitude).abs() < eps &&
-        (a.longitude - b.longitude).abs() < eps;
+    return (a.latitude - b.latitude).abs() < tolerance &&
+        (a.longitude - b.longitude).abs() < tolerance;
   }
 
   Future<void> _openVitalityQr() async {
