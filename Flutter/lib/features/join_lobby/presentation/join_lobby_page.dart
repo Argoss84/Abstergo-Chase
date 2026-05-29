@@ -58,7 +58,6 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
     final lastCode = await _playerSessionStore.loadLastLobbyCode();
     if (!mounted || lastCode == null) return;
     _codeController.text = lastCode;
-    setState(() {});
   }
 
   @override
