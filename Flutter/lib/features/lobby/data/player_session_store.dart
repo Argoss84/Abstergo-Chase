@@ -26,8 +26,12 @@ class PlayerSessionStore {
   }
 
   Future<String?> loadLastLobbyCode() async {
+    String? code;
     final prefs = await SharedPreferences.getInstance();
-    final code = prefs.getString(_lastLobbyCodeKey)?.trim();
+    final storedCode = prefs.getString(_lastLobbyCodeKey);
+    if (storedCode != null) {
+      code = _normalizeCode(storedCode);
+    }
     if (code == null || code.isEmpty) return null;
     return code;
   }
