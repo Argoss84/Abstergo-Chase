@@ -316,10 +316,6 @@ class LobbyController extends ChangeNotifier {
           return;
         }
         error = message;
-        if (message.toLowerCase().contains('lobby introuvable')) {
-          // If lobby doesn't exist, code may correspond to an already running game.
-          shouldOpenGameForCode = true;
-        }
         connectionStatus = 'error';
         notifyListeners();
         return;
