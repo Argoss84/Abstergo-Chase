@@ -33,9 +33,9 @@ class _FailingJoinLobbySocketService extends LobbySocketService {
   }) async {
     _messagesController.add(const <String, dynamic>{
       'type': 'lobby:error',
-      'payload': 'Lobby introuvable.',
+      'payload': 'Lobby not found.',
     });
-    throw Exception('Lobby introuvable.');
+    throw Exception('Lobby not found.');
   }
 
   @override
