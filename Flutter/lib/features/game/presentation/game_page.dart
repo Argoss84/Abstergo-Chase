@@ -26,7 +26,7 @@ const TextStyle _kTeamChatBubbleStyle = TextStyle(
 );
 const String _kGameUnavailableMessage = 'Partie indisponible.';
 const double _kDefaultGameMapZoom = 16.5;
-const double _kCompassCenterToleranceDeg = 0.000001;
+const double _kCompassCenterToleranceLatLng = 0.000001;
 
 class GamePage extends StatefulWidget {
   const GamePage({super.key, required this.bootstrap});
@@ -1184,10 +1184,10 @@ class _GamePageState extends State<GamePage>
   bool _sameGeoPoint(GeoPoint? a, GeoPoint? b) {
     if (a == null && b == null) return true;
     if (a == null || b == null) return false;
-    // ~11 cm at the equator; enough to ignore GPS jitter while keeping
-    // effective player movement responsive in compass-follow mode.
-    return (a.latitude - b.latitude).abs() < _kCompassCenterToleranceDeg &&
-        (a.longitude - b.longitude).abs() < _kCompassCenterToleranceDeg;
+    // ~11 cm in latitude at the equator; this filters insignificant GPS jitter
+    // while keeping effective player movement responsive in compass-follow mode.
+    return (a.latitude - b.latitude).abs() < _kCompassCenterToleranceLatLng &&
+        (a.longitude - b.longitude).abs() < _kCompassCenterToleranceLatLng;
   }
 
   Future<void> _openVitalityQr() async {
