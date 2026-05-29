@@ -31,6 +31,7 @@ class LobbyMapPreview extends StatelessWidget {
     required this.agentStartZone,
     required this.rogueStartZone,
     required this.objectiveZoneRadiusMeters,
+    this.inactiveObjectives = const <GeoPoint>[],
     this.startZoneRadiusMeters = CreateLobbyDefaults.startZoneRadius,
     this.showObjectives = true,
     this.showObjectiveMarkers = true,
@@ -59,6 +60,7 @@ class LobbyMapPreview extends StatelessWidget {
   final GeoPoint? agentStartZone;
   final GeoPoint? rogueStartZone;
   final int objectiveZoneRadiusMeters;
+  final List<GeoPoint> inactiveObjectives;
   final int startZoneRadiusMeters;
   final bool showObjectives;
   final bool showObjectiveMarkers;
@@ -83,6 +85,9 @@ class LobbyMapPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final centerLatLng = LatLng(center.latitude, center.longitude);
     final objectiveLatLng = objectives
+        .map((p) => LatLng(p.latitude, p.longitude))
+        .toList(growable: false);
+    final inactiveObjectiveLatLng = inactiveObjectives
         .map((p) => LatLng(p.latitude, p.longitude))
         .toList(growable: false);
     final effectivePlayerMarkers = playerMarkers.isNotEmpty
@@ -150,6 +155,17 @@ class LobbyMapPreview extends StatelessWidget {
                       color: Colors.red.withValues(alpha: 0.08),
                       borderStrokeWidth: 1,
                       borderColor: Colors.red,
+                    ),
+                  ),
+                if (showObjectives && showObjectiveZones)
+                  ...inactiveObjectiveLatLng.map(
+                    (point) => CircleMarker(
+                      point: point,
+                      radius: objectiveZoneRadiusMeters.toDouble(),
+                      useRadiusInMeter: true,
+                      color: Colors.grey.withValues(alpha: 0.08),
+                      borderStrokeWidth: 1,
+                      borderColor: Colors.grey,
                     ),
                   ),
                 if (showObjectives &&
@@ -254,6 +270,17 @@ class LobbyMapPreview extends StatelessWidget {
                       child: Icon(
                         objectiveMarkerIcon,
                         color: objectiveMarkerColor,
+                        size: objectiveMarkerSize,
+                      ),
+                    ),
+                  ),
+                if (showObjectives && showObjectiveMarkers)
+                  ...inactiveObjectiveLatLng.map(
+                    (point) => Marker(
+                      point: point,
+                      child: Icon(
+                        Icons.block,
+                        color: Colors.grey,
                         size: objectiveMarkerSize,
                       ),
                     ),
