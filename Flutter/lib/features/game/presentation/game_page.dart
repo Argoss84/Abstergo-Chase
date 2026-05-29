@@ -1772,7 +1772,7 @@ class _GamePageState extends State<GamePage>
     }
 
     if (anyObjectiveCapturing && !_prevAnyObjectiveCapturing) {
-      _playAnnouncement("Capture d'un point en cours par les rogues.");
+      _playAnnouncement("Début de capture d'un point par les rogues.");
     }
     if (capturedObjectivesCount > _prevCapturedObjectivesCount) {
       _playAnnouncement('Un point a été capturé par les rogues.');
@@ -1797,7 +1797,7 @@ class _GamePageState extends State<GamePage>
     }
 
     if (gameStarted && !_prevGameStarted) {
-      _playAnnouncement('La partie commence');
+      _playAnnouncement('La partie commence.');
     }
 
     _prevAnyObjectiveCapturing = anyObjectiveCapturing;
@@ -1810,7 +1810,9 @@ class _GamePageState extends State<GamePage>
   Future<void> _playAnnouncement(String text) async {
     try {
       await SystemSound.play(SystemSoundType.alert);
-    } catch (_) {}
+    } catch (_) {
+      // Keep game flow resilient if system sound is unavailable.
+    }
     await _ttsService.speakIfEnabled(text);
   }
 
