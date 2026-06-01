@@ -663,6 +663,7 @@ let eventLogFlushTimer = null;
 let eventLogFlushInFlight = false;
 const pendingEventLogLines = [];
 const MAX_LOBBY_CHAT_MESSAGES = 100;
+const MAX_GAME_CHAT_MESSAGES = 150;
 const DEFAULT_PLAYER_NAME = 'Joueur';
 
 const normalizeLobbyChatMessages = (messages) => {
@@ -670,6 +671,22 @@ const normalizeLobbyChatMessages = (messages) => {
   return messages
     .filter((message) => message && typeof message === 'object')
     .slice(-MAX_LOBBY_CHAT_MESSAGES)
+    .map((message) => ({
+      playerId: message.playerId || '',
+      playerName: message.playerName || DEFAULT_PLAYER_NAME,
+      text: message.text || '',
+      timestamp:
+        typeof message.timestamp === 'number'
+          ? message.timestamp
+          : Date.now()
+    }));
+};
+
+const normalizeGameChatMessages = (messages) => {
+  if (!Array.isArray(messages)) return [];
+  return messages
+    .filter((message) => message && typeof message === 'object')
+    .slice(-MAX_GAME_CHAT_MESSAGES)
     .map((message) => ({
       playerId: message.playerId || '',
       playerName: message.playerName || DEFAULT_PLAYER_NAME,
@@ -721,7 +738,9 @@ const serializeGame = (game) => ({
   lastHostStateAt:
     typeof game.lastHostStateAt === 'number' ? game.lastHostStateAt : null,
   lastHostStateHostId: game.lastHostStateHostId || null,
-  reconnectedPlayerIds: game.reconnectedPlayerIds || {}
+  reconnectedPlayerIds: game.reconnectedPlayerIds || {},
+  agentChatMessages: normalizeGameChatMessages(game.agentChatMessages),
+  rogueChatMessages: normalizeGameChatMessages(game.rogueChatMessages)
 });
 
 const persistRuntimeStateNow = async (reason = 'unspecified') => {
@@ -899,7 +918,9 @@ const hydrateRuntimeState = async () => {
         lastHostStateAt:
           typeof game.lastHostStateAt === 'number' ? game.lastHostStateAt : null,
         lastHostStateHostId: game.lastHostStateHostId || null,
-        reconnectedPlayerIds: game.reconnectedPlayerIds || {}
+        reconnectedPlayerIds: game.reconnectedPlayerIds || {},
+        agentChatMessages: normalizeGameChatMessages(game.agentChatMessages),
+        rogueChatMessages: normalizeGameChatMessages(game.rogueChatMessages)
       });
       gameSocketMessageCounts.set(game.code, 0);
     }
@@ -1034,6 +1055,8 @@ const getLobbySnapshot = (lobby) => ({
   stateVersion: lobby.stateVersion || 1,
   config: lobby.config || null,
   chatMessages: normalizeLobbyChatMessages(lobby.chatMessages),
+  agentChatMessages: normalizeGameChatMessages(lobby.agentChatMessages),
+  rogueChatMessages: normalizeGameChatMessages(lobby.rogueChatMessages),
   players: Array.from(lobby.players.values()).map(({ id, name, isHost, role, status }) => ({
     id,
     name,
@@ -1292,6 +1315,8 @@ const tryStartGameFromLobby = ({
     hostId: lobby.hostId,
     config: lobby.config || null,
     players: new Map(),
+    agentChatMessages: [],
+    rogueChatMessages: [],
     stateVersion: 1,
     createdAt: Date.now(),
     lastActivityAt: Date.now(),
@@ -2935,12 +2960,23 @@ io.on('connection', (socket) => {
         text,
         timestamp: Date.now()
       };
+      if (!Array.isArray(game.agentChatMessages)) {
+        game.agentChatMessages = [];
+      }
+      game.agentChatMessages.push(msg);
+      if (game.agentChatMessages.length > MAX_GAME_CHAT_MESSAGES) {
+        game.agentChatMessages.splice(
+          0,
+          game.agentChatMessages.length - MAX_GAME_CHAT_MESSAGES
+        );
+      }
 
       game.players.forEach((p) => {
         if ((p.role || '').toUpperCase() !== 'AGENT') return;
         const s = socketsById.get(p.id);
         if (s) send(s, { type: 'game:chat-agent-message', payload: msg });
       });
+      markStateChanged('game:chat:agent', { code: gameCode, playerId: clientId });
       return;
     }
 
@@ -2959,12 +2995,23 @@ io.on('connection', (socket) => {
         text,
         timestamp: Date.now()
       };
+      if (!Array.isArray(game.rogueChatMessages)) {
+        game.rogueChatMessages = [];
+      }
+      game.rogueChatMessages.push(msg);
+      if (game.rogueChatMessages.length > MAX_GAME_CHAT_MESSAGES) {
+        game.rogueChatMessages.splice(
+          0,
+          game.rogueChatMessages.length - MAX_GAME_CHAT_MESSAGES
+        );
+      }
 
       game.players.forEach((p) => {
         if ((p.role || '').toUpperCase() !== 'ROGUE') return;
         const s = socketsById.get(p.id);
         if (s) send(s, { type: 'game:chat-rogue-message', payload: msg });
       });
+      markStateChanged('game:chat:rogue', { code: gameCode, playerId: clientId });
       return;
     }
 
