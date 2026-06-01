@@ -214,16 +214,7 @@ class _GamePageState extends State<GamePage>
                 ),
               ),
             ),
-            title: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text((_controller.playerRole ?? 'N/A').toUpperCase()),
-                if (winnerType == null) ...[
-                  const SizedBox(width: 8),
-                  _buildGamePhaseBadge(compactForAppBar: true),
-                ],
-              ],
-            ),
+            title: _buildRoleTitleIcon(),
             actions: [
               IconButton(
                 tooltip: _compassModeEnabled
@@ -234,20 +225,9 @@ class _GamePageState extends State<GamePage>
                   _compassModeEnabled ? Icons.explore : Icons.explore_off,
                 ),
               ),
-              IconButton(
-                tooltip: _controller.isVoiceChatEnabled
-                    ? 'Désactiver vocal'
-                    : 'Activer vocal',
-                onPressed: () {
-                  _controller.toggleVoiceChatEnabled();
-                },
-                icon: Icon(
-                  _controller.isVoiceChatEnabled ? Icons.mic : Icons.mic_off,
-                ),
-              ),
               Padding(
                 padding: const EdgeInsets.only(right: 8),
-                child: Center(child: _buildConnectionBadge()),
+                child: Center(child: _buildAppBarStatusBadges(winnerType)),
               ),
               if (_controller.remainingSeconds != null)
                 Center(
@@ -903,56 +883,113 @@ class _GamePageState extends State<GamePage>
     );
   }
 
+  Widget _buildRoleTitleIcon() {
+    final role = (_controller.playerRole ?? '').toUpperCase();
+    final label = role.isEmpty ? 'N/A' : role;
+    final asset = _roleMarkerAssetFor(role);
+    return Tooltip(
+      message: label,
+      child: asset == null
+          ? const Icon(Icons.help_outline, size: 28, color: Colors.white70)
+          : SizedBox(
+              width: 28,
+              height: 28,
+              child: Image.asset(
+                asset,
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.high,
+                errorBuilder: (context, _, _) => const Icon(
+                  Icons.help_outline,
+                  size: 28,
+                  color: Colors.white70,
+                ),
+              ),
+            ),
+    );
+  }
+
+  String? _roleMarkerAssetFor(String role) {
+    switch (role) {
+      case 'AGENT':
+        return 'assets/images/agent_marker.png';
+      case 'ROGUE':
+        return 'assets/images/rogue_marker.png';
+      default:
+        return null;
+    }
+  }
+
+  Widget _buildAppBarStatusBadges(String? winnerType) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (winnerType == null) ...[
+          _buildGamePhaseBadge(compactForAppBar: true),
+          const SizedBox(width: 6),
+        ],
+        _buildConnectionBadge(),
+      ],
+    );
+  }
+
   Widget _buildConnectionBadge() {
     final status = _controller.connectionStatus;
-    late final Color color;
+    late final Color backgroundColor;
     late final String label;
     late final IconData icon;
     switch (status) {
       case 'connected':
-        color = Colors.green;
+        backgroundColor = Colors.green.shade700;
         label = 'En ligne';
         icon = Icons.check_circle;
         break;
       case 'connecting':
-        color = Colors.orange;
+        backgroundColor = Colors.orange.shade800;
         label = 'Connexion';
         icon = Icons.sync;
         break;
       case 'error':
-        color = Colors.red;
+        backgroundColor = Colors.red.shade700;
         label = 'Hors ligne';
         icon = Icons.error_outline;
         break;
       case 'closed':
-        color = Colors.grey;
+        backgroundColor = Colors.grey.shade700;
         label = 'Déconnecté';
         icon = Icons.cancel_outlined;
         break;
       default:
-        color = Colors.blueGrey;
+        backgroundColor = Colors.blueGrey.shade700;
         label = 'Attente';
         icon = Icons.hourglass_bottom;
         break;
     }
+    const foregroundColor = Colors.white;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        border: Border.all(color: color.withValues(alpha: 0.45)),
+        color: backgroundColor.withValues(alpha: 0.92),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
         borderRadius: BorderRadius.circular(999),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.2),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 4),
+          Icon(icon, size: 14, color: foregroundColor),
+          const SizedBox(width: 5),
           Text(
             label,
-            style: TextStyle(
-              color: color,
+            style: const TextStyle(
+              color: foregroundColor,
               fontSize: 12,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
@@ -1702,9 +1739,16 @@ class _GamePageState extends State<GamePage>
                     children: [
                       SwitchListTile(
                         value: _controller.isVoiceChatEnabled,
-                        title: const Text('Chat vocal actif'),
-                        subtitle: const Text(
-                          'Active ou coupe votre émission/réception vocale',
+                        secondary: Icon(
+                          _controller.isVoiceChatEnabled
+                              ? Icons.mic
+                              : Icons.mic_off,
+                        ),
+                        title: const Text('Microphone'),
+                        subtitle: Text(
+                          _controller.isVoiceChatEnabled
+                              ? 'Micro actif — appuyer pour couper'
+                              : 'Micro coupé — appuyer pour activer',
                         ),
                         onChanged: (_) {
                           _controller.toggleVoiceChatEnabled();
