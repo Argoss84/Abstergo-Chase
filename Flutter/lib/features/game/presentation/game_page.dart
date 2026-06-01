@@ -214,7 +214,16 @@ class _GamePageState extends State<GamePage>
                 ),
               ),
             ),
-            title: Text((_controller.playerRole ?? 'N/A').toUpperCase()),
+            title: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text((_controller.playerRole ?? 'N/A').toUpperCase()),
+                if (winnerType == null) ...[
+                  const SizedBox(width: 8),
+                  _buildGamePhaseBadge(compactForAppBar: true),
+                ],
+              ],
+            ),
             actions: [
               IconButton(
                 tooltip: _compassModeEnabled
@@ -480,17 +489,6 @@ class _GamePageState extends State<GamePage>
                               ),
                             ),
                           ),
-                        if (winnerType == null)
-                          Positioned(
-                            top: topInset,
-                            left: 0,
-                            right: 0,
-                            child: IgnorePointer(
-                              child: Center(
-                                child: _buildGamePhaseBadge(),
-                              ),
-                            ),
-                          ),
                         if (winnerType == null && startCountdownSeconds != null)
                           Positioned.fill(
                             child: IgnorePointer(
@@ -626,7 +624,6 @@ class _GamePageState extends State<GamePage>
                               child: BackdropFilter(
                                 filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
                                 child: Container(
-                                  width: 260,
                                   padding: const EdgeInsets.all(8),
                                   color: Colors.black.withValues(alpha: 0.08),
                                   child: Column(
@@ -859,36 +856,42 @@ class _GamePageState extends State<GamePage>
     return '$m:$s';
   }
 
-  Widget _buildGamePhaseBadge() {
+  Widget _buildGamePhaseBadge({bool compactForAppBar = false}) {
     final isConvergence = !_controller.gameStarted;
     final color = isConvergence ? Colors.amber.shade700 : Colors.green.shade600;
-    final label = isConvergence ? 'Convergence' : 'Partie en cours';
+    final label = isConvergence
+        ? (compactForAppBar ? 'Conv.' : 'Convergence')
+        : (compactForAppBar ? 'En cours' : 'Partie en cours');
     final icon = isConvergence ? Icons.groups_2 : Icons.play_arrow_rounded;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: compactForAppBar
+          ? const EdgeInsets.symmetric(horizontal: 8, vertical: 4)
+          : const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.22),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        boxShadow: compactForAppBar
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.22),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: Colors.white),
-          const SizedBox(width: 5),
+          Icon(icon, size: compactForAppBar ? 12 : 14, color: Colors.white),
+          SizedBox(width: compactForAppBar ? 4 : 5),
           Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               color: Colors.white,
-              fontSize: 12,
+              fontSize: compactForAppBar ? 11 : 12,
               fontWeight: FontWeight.w800,
               letterSpacing: 0.2,
             ),
