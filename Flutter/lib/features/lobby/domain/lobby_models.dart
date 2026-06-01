@@ -211,9 +211,7 @@ class LobbyGameConfig {
           if (lat != null && lng != null) {
             objectives.add(GeoPoint(latitude: lat, longitude: lng));
           }
-          continue;
-        }
-        if (rawPoint is Map) {
+        } else if (rawPoint is Map) {
           final parsed = parsePoint(
             rawPoint['latitude'] ?? rawPoint['lat'],
             rawPoint['longitude'] ?? rawPoint['lng'] ?? rawPoint['lon'],
