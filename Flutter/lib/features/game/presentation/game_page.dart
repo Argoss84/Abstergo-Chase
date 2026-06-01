@@ -480,6 +480,17 @@ class _GamePageState extends State<GamePage>
                               ),
                             ),
                           ),
+                        if (winnerType == null)
+                          Positioned(
+                            top: topInset,
+                            left: 0,
+                            right: 0,
+                            child: IgnorePointer(
+                              child: Center(
+                                child: _buildGamePhaseBadge(),
+                              ),
+                            ),
+                          ),
                         if (winnerType == null && startCountdownSeconds != null)
                           Positioned.fill(
                             child: IgnorePointer(
@@ -846,6 +857,45 @@ class _GamePageState extends State<GamePage>
     final m = (seconds ~/ 60).toString().padLeft(2, '0');
     final s = (seconds % 60).toString().padLeft(2, '0');
     return '$m:$s';
+  }
+
+  Widget _buildGamePhaseBadge() {
+    final isConvergence = !_controller.gameStarted;
+    final color = isConvergence ? Colors.amber.shade700 : Colors.green.shade600;
+    final label = isConvergence ? 'Convergence' : 'Partie en cours';
+    final icon = isConvergence ? Icons.groups_2 : Icons.play_arrow_rounded;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.22),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Colors.white),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildConnectionBadge() {
