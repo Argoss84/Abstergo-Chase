@@ -886,7 +886,9 @@ class _GamePageState extends State<GamePage>
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: compactForAppBar ? 12 : 14, color: Colors.white),
-          SizedBox(width: compactForAppBar ? 4 : 5),
+          compactForAppBar
+              ? const SizedBox(width: 4)
+              : const SizedBox(width: 5),
           Text(
             label,
             style: TextStyle(
