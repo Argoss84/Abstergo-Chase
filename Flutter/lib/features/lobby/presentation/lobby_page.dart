@@ -352,7 +352,9 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                                 config?.mapStreets ??
                                 bootstrap!.outerStreetContour,
                             objectives: _controller.isHost
-                                ? bootstrap?.objectives ?? const <GeoPoint>[]
+                                ? (bootstrap?.objectives.isNotEmpty ?? false
+                                      ? bootstrap!.objectives
+                                      : config?.objectives ?? const <GeoPoint>[])
                                 : const <GeoPoint>[],
                             agentStartZone:
                                 config?.startZone ?? bootstrap?.agentStartZone,

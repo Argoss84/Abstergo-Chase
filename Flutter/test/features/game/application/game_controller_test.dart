@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_form_data.dart';
+import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
 import 'package:broken_veil_protocol/features/game/application/game_controller.dart';
 import 'package:broken_veil_protocol/features/game/data/game_socket_service.dart';
 import 'package:broken_veil_protocol/features/game/domain/game_models.dart';
@@ -44,46 +44,48 @@ class _NoopGameSocketService extends GameSocketService {
 
 void main() {
   test(
-    'generate fallback objectives when bootstrap has none',
+    'reuses server objectives from game config when bootstrap has none',
     () async {
       final controller = GameController(socketService: _NoopGameSocketService());
+      const persistedObjectives = <GeoPoint>[
+        GeoPoint(latitude: 45.764043, longitude: 4.835659),
+        GeoPoint(latitude: 45.7645, longitude: 4.8362),
+        GeoPoint(latitude: 45.7636, longitude: 4.8352),
+      ];
 
       await controller.initialize(
         GameBootstrapData(
-          lobby: LobbyBootstrapData(
+          lobby: const LobbyBootstrapData(
             code: 'ABC123',
             serverUrl: 'http://localhost:3000',
             socketPath: '/socket.io',
             playerName: 'Host',
-            form: const CreateLobbyFormData(
-              objectiveNumber: 3,
-              duration: 900,
-              victoryConditionObjectives: 1,
-              hackDurationMs: 10000,
-              objectiveZoneRadius: 25,
-              startZoneRadius: 25,
-              rogueRange: 10,
-              agentRange: 80,
-              mapCenterLatitude: '45.764043',
-              mapCenterLongitude: '4.835659',
-              mapRadius: 200,
-            ),
           ),
           playerId: 'host-1',
           players: const <LobbyPlayer>[
             LobbyPlayer(id: 'host-1', name: 'Host', isHost: true, role: 'AGENT'),
           ],
-          gameConfig: null,
+          gameConfig: const LobbyGameConfig(
+            mapCenter: GeoPoint(latitude: 45.764043, longitude: 4.835659),
+            mapRadius: 200,
+            objectiveZoneRadius: 25,
+            startZoneRadius: 25,
+            durationSeconds: 900,
+            hackDurationMs: 10000,
+            rogueRange: 80,
+            startZone: null,
+            rogueStartZone: null,
+            objectives: persistedObjectives,
+            mapStreets: <GeoPoint>[],
+          ),
           codeOverride: 'ABC123',
           fromCodeLookupFallback: false,
         ),
       );
 
       expect(controller.objectives.length, 3);
-      expect(
-        controller.objectives.map((objective) => objective.id).toSet().length,
-        3,
-      );
+      expect(controller.objectives.first.point, persistedObjectives.first);
+      expect(controller.objectives.last.point, persistedObjectives.last);
 
       controller.dispose();
     },
