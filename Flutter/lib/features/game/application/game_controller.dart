@@ -92,6 +92,7 @@ class GameController extends ChangeNotifier {
   int? startCountdownEndAtMs;
   Timer? _startCountdownTimer;
   bool isOutOfGameZone = false;
+  bool hasRealtimePosition = false;
   final List<GamePlayer> players = <GamePlayer>[];
   final List<GameObjective> objectives = <GameObjective>[];
   final List<GameChatMessage> roleChat = <GameChatMessage>[];
@@ -114,6 +115,7 @@ class GameController extends ChangeNotifier {
   int _turnExpiresAtMs = 0;
   static const double _kRogueTargetingMaxDistanceMeters = 5.0;
   static const double _kRogueTargetingHalfConeDeg = 20.0;
+  static const int _maxGameChatMessages = 150;
   int? _rogueCaptureInterruptedAtMs;
 
   bool _samePoint(GeoPoint? a, GeoPoint? b, {double eps = 0.000001}) {
@@ -150,14 +152,28 @@ class GameController extends ChangeNotifier {
     return 120;
   }
 
+  int _configuredVictoryObjectivesRequired() {
+    final fromLive = victoryObjectivesRequired;
+    if (fromLive != null && fromLive > 0) return fromLive;
+    final fromForm = bootstrap?.lobby.form?.victoryConditionObjectives;
+    if (fromForm != null && fromForm > 0) return fromForm;
+    final fromConfig = _effectiveGameConfig?.victoryConditionObjectives;
+    if (fromConfig != null && fromConfig > 0) return fromConfig;
+    return objectives.length;
+  }
+
   Future<void> initialize(GameBootstrapData data) async {
     bootstrap = data;
     gameCode = data.codeOverride ?? data.lobby.code;
     playerId = data.playerId;
+    myPosition = data.initialPlayerPosition;
+    hasRealtimePosition = false;
     remainingSeconds = _configuredDurationSeconds();
     winnerType = null;
     winnerReason = null;
-    final required = data.lobby.form?.victoryConditionObjectives;
+    final required =
+        data.lobby.form?.victoryConditionObjectives ??
+        data.gameConfig?.victoryConditionObjectives;
     victoryObjectivesRequired = (required != null && required > 0)
         ? required
         : null;
@@ -173,6 +189,13 @@ class GameController extends ChangeNotifier {
             isHost: p.isHost,
             role: p.role,
             status: p.status,
+            latitude: (data.initialPlayerPosition != null && p.id == data.playerId)
+                ? data.initialPlayerPosition!.latitude
+                : null,
+            longitude: (data.initialPlayerPosition != null &&
+                    p.id == data.playerId)
+                ? data.initialPlayerPosition!.longitude
+                : null,
           );
         }),
       );
@@ -181,6 +204,7 @@ class GameController extends ChangeNotifier {
         : null;
     isHost = players.any((p) => p.id == playerId && p.isHost);
     _bootstrapObjectives(data);
+    isOutOfGameZone = !_isMyPositionInsideGameZone();
 
     isLoading = true;
     error = null;
@@ -252,11 +276,13 @@ class GameController extends ChangeNotifier {
         ).listen((position) {
           final previousPosition = myPosition;
           final previousOutOfZone = isOutOfGameZone;
+          final hadRealtimePosition = hasRealtimePosition;
           final nextPosition = GeoPoint(
             latitude: position.latitude,
             longitude: position.longitude,
           );
           myPosition = nextPosition;
+          hasRealtimePosition = true;
           isOutOfGameZone = !_isMyPositionInsideGameZone();
           var playerPositionChanged = false;
           final idx = players.indexWhere((p) => p.id == playerId);
@@ -270,7 +296,8 @@ class GameController extends ChangeNotifier {
             );
           }
           _publishPositionIfDue(position.latitude, position.longitude);
-          if (!_samePoint(previousPosition, nextPosition) ||
+          if (!hadRealtimePosition ||
+              !_samePoint(previousPosition, nextPosition) ||
               previousOutOfZone != isOutOfGameZone ||
               playerPositionChanged) {
             notifyListeners();
@@ -616,8 +643,11 @@ class GameController extends ChangeNotifier {
                   DateTime.now().millisecondsSinceEpoch,
             ),
           );
-          if (roleChat.length > 150) {
-            roleChat.removeRange(0, roleChat.length - 150);
+          if (roleChat.length > _maxGameChatMessages) {
+            roleChat.removeRange(
+              0,
+              roleChat.length - _maxGameChatMessages,
+            );
           }
           notifyListeners();
         }
@@ -663,6 +693,25 @@ class GameController extends ChangeNotifier {
               status: raw['status']?.toString() ?? 'active',
             );
           }),
+        );
+    }
+    if (game is Map) {
+      String? ownRole;
+      for (final player in players) {
+        if (player.id == playerId) {
+          ownRole = player.role;
+          break;
+        }
+      }
+      final roleChatMessages = (ownRole ?? '').toUpperCase() == 'ROGUE'
+          ? game['rogueChatMessages']
+          : game['agentChatMessages'];
+      roleChat
+        ..clear()
+        ..addAll(
+          roleChatMessages is List
+              ? _parseGameChatMessages(roleChatMessages)
+              : const <GameChatMessage>[],
         );
     }
     if (game is Map) {
@@ -895,9 +944,7 @@ class GameController extends ChangeNotifier {
       'gameDetails': <String, dynamic>{
         'winner_type': winnerType,
         'winner_reason': winnerReason,
-        'victory_objectives_required':
-            victoryObjectivesRequired ??
-            bootstrap?.lobby.form?.victoryConditionObjectives,
+        'victory_objectives_required': _configuredVictoryObjectivesRequired(),
         'start_countdown_end_at_ms': startCountdownEndAtMs,
       },
     };
@@ -915,8 +962,7 @@ class GameController extends ChangeNotifier {
   _WinnerOutcome? _winnerOutcomeIfAny() {
     // Rogue wins by capturing enough objectives.
     final captured = objectives.where((o) => o.captured).length;
-    final required =
-        bootstrap?.lobby.form?.victoryConditionObjectives ?? objectives.length;
+    final required = _configuredVictoryObjectivesRequired();
     if (required > 0 && captured >= required) {
       return const _WinnerOutcome(type: 'ROGUE', reason: 'OBJECTIVES_CAPTURED');
     }
@@ -1904,6 +1950,26 @@ class GameController extends ChangeNotifier {
     final rogues = relevant.where((p) => (p.role ?? '').toUpperCase() == 'ROGUE').length;
     if (agents < 1 || rogues < 1) return false;
     return relevant.every(isPlayerInStartZone);
+  }
+
+  List<GameChatMessage> _parseGameChatMessages(List rawMessages) {
+    final relevantMessages = rawMessages.length > _maxGameChatMessages
+        ? rawMessages.skip(rawMessages.length - _maxGameChatMessages)
+        : rawMessages;
+    return relevantMessages
+        .whereType<Map>()
+        .map((raw) {
+          final timestampRaw = raw['timestamp'];
+          return GameChatMessage(
+            playerId: raw['playerId']?.toString() ?? '',
+            playerName: raw['playerName']?.toString() ?? 'Joueur',
+            text: raw['text']?.toString() ?? '',
+            timestampMs: timestampRaw is int
+                ? timestampRaw
+                : DateTime.now().millisecondsSinceEpoch,
+          );
+        })
+        .toList(growable: false);
   }
 
   @override

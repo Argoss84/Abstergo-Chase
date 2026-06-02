@@ -72,6 +72,7 @@ class LobbyController extends ChangeNotifier {
     'lobby introuvable',
     'lobby not found',
   ];
+  static const int _maxLobbyChatMessages = 100;
 
   Future<void> initialize({required LobbyBootstrapData bootstrap}) async {
     bootstrapData = bootstrap;
@@ -143,7 +144,19 @@ class LobbyController extends ChangeNotifier {
           if (lobby is Map) {
             final config = lobby['config'];
             if (config is Map) {
-              gameConfig = LobbyGameConfig.fromMap(config);
+              final configMap = Map<String, dynamic>.from(
+                config.map((k, v) => MapEntry(k.toString(), v)),
+              );
+              gameConfig = LobbyGameConfig.fromMap(configMap);
+              bootstrapData = bootstrapData?.copyWith(
+                form: _formFromConfigMap(configMap),
+              );
+            }
+            final lobbyChatMessages = lobby['chatMessages'];
+            if (lobbyChatMessages is List) {
+              chatMessages
+                ..clear()
+                ..addAll(_parseLobbyChatMessages(lobbyChatMessages));
             }
             final playersRaw = lobby['players'];
             if (playersRaw is List) {
@@ -235,8 +248,11 @@ class LobbyController extends ChangeNotifier {
                   : DateTime.now().millisecondsSinceEpoch,
             ),
           );
-          if (chatMessages.length > 100) {
-            chatMessages.removeRange(0, chatMessages.length - 100);
+          if (chatMessages.length > _maxLobbyChatMessages) {
+            chatMessages.removeRange(
+              0,
+              chatMessages.length - _maxLobbyChatMessages,
+            );
           }
           notifyListeners();
         }
@@ -538,7 +554,10 @@ class LobbyController extends ChangeNotifier {
           current.duration,
       victoryConditionObjectives:
           int.tryParse(
-            config['victory_condition_nb_objectivs']?.toString() ?? '',
+            (config['victory_condition_nb_objectivs'] ??
+                    config['victory_condition_nb_objectives'])
+                ?.toString() ??
+                '',
           ) ??
           current.victoryConditionObjectives,
       hackDurationMs:
@@ -566,6 +585,26 @@ class LobbyController extends ChangeNotifier {
           int.tryParse(config['map_radius']?.toString() ?? '') ??
           current.mapRadius,
     );
+  }
+
+  List<LobbyChatMessage> _parseLobbyChatMessages(List rawMessages) {
+    final relevantMessages = rawMessages.length > _maxLobbyChatMessages
+        ? rawMessages.skip(rawMessages.length - _maxLobbyChatMessages)
+        : rawMessages;
+    return relevantMessages
+        .whereType<Map>()
+        .map((raw) {
+          final timestampRaw = raw['timestamp'];
+          return LobbyChatMessage(
+            playerId: raw['playerId']?.toString() ?? '',
+            playerName: raw['playerName']?.toString() ?? 'Joueur',
+            text: raw['text']?.toString() ?? '',
+            timestampMs: timestampRaw is int
+                ? timestampRaw
+                : DateTime.now().millisecondsSinceEpoch,
+          );
+        })
+        .toList(growable: false);
   }
 
   @override

@@ -90,4 +90,50 @@ void main() {
       controller.dispose();
     },
   );
+
+  test(
+    'uses persisted victory objective count when bootstrap form is missing',
+    () async {
+      final controller = GameController(socketService: _NoopGameSocketService());
+
+      await controller.initialize(
+        GameBootstrapData(
+          lobby: const LobbyBootstrapData(
+            code: 'ABC123',
+            serverUrl: 'http://localhost:3000',
+            socketPath: '/socket.io',
+            playerName: 'Host',
+          ),
+          playerId: 'host-1',
+          players: const <LobbyPlayer>[
+            LobbyPlayer(id: 'host-1', name: 'Host', isHost: true, role: 'AGENT'),
+          ],
+          gameConfig: const LobbyGameConfig(
+            mapCenter: GeoPoint(latitude: 45.764043, longitude: 4.835659),
+            mapRadius: 200,
+            objectiveZoneRadius: 25,
+            startZoneRadius: 25,
+            durationSeconds: 900,
+            victoryConditionObjectives: 2,
+            hackDurationMs: 10000,
+            rogueRange: 80,
+            startZone: null,
+            rogueStartZone: null,
+            objectives: <GeoPoint>[
+              GeoPoint(latitude: 45.764043, longitude: 4.835659),
+              GeoPoint(latitude: 45.7645, longitude: 4.8362),
+              GeoPoint(latitude: 45.7636, longitude: 4.8352),
+            ],
+            mapStreets: <GeoPoint>[],
+          ),
+          codeOverride: 'ABC123',
+          fromCodeLookupFallback: false,
+        ),
+      );
+
+      expect(controller.victoryObjectivesRequired, 2);
+
+      controller.dispose();
+    },
+  );
 }
