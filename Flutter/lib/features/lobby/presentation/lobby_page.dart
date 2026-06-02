@@ -873,7 +873,7 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                       ),
                       _kv(
                         'Objectifs victoire',
-                        '${form?.victoryConditionObjectives ?? 'n/a'}',
+                        '${form?.victoryConditionObjectives ?? config?.victoryConditionObjectives ?? 'n/a'}',
                       ),
                       _kv('Duree', '${form?.duration ?? 'n/a'} secondes'),
                     ],

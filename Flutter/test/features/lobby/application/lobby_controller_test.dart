@@ -44,6 +44,68 @@ class _FailingJoinLobbySocketService extends LobbySocketService {
   }
 }
 
+class _JoinedLobbyWithConfigSocketService extends LobbySocketService {
+  final StreamController<Map<String, dynamic>> _messagesController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  @override
+  Stream<Map<String, dynamic>> get messages => _messagesController.stream;
+
+  @override
+  bool get isConnected => true;
+
+  @override
+  Future<void> connect({
+    required Uri serverUrl,
+    required String socketPath,
+    Duration timeout = const Duration(seconds: 12),
+  }) async {}
+
+  @override
+  Future<JoinLobbyResult> joinLobby({
+    required String code,
+    required String playerName,
+    String? cognitoSub,
+    String? previousPlayerId,
+    bool reconnectAsHost = false,
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
+    _messagesController.add(<String, dynamic>{
+      'type': 'lobby:joined',
+      'payload': <String, dynamic>{
+        'code': code,
+        'playerId': 'player-2',
+        'hostId': 'player-1',
+        'lobby': <String, dynamic>{
+          'config': <String, dynamic>{
+            'objectif_number': 5,
+            'duration': 1200,
+            'victory_condition_nb_objectivs': 3,
+            'hack_duration_ms': 9000,
+            'objectiv_zone_radius': 30,
+            'start_zone_radius': 35,
+            'rogue_range': 150,
+            'agent_range': 80,
+            'map_center_latitude': '45.764043',
+            'map_center_longitude': '4.835659',
+            'map_radius': 350,
+          },
+        },
+      },
+    });
+    return const JoinLobbyResult(
+      code: 'ABC123',
+      playerId: 'player-2',
+      hostId: 'player-1',
+    );
+  }
+
+  @override
+  void dispose() {
+    _messagesController.close();
+  }
+}
+
 void main() {
   test(
     'triggers game fallback route when lobby join returns lobby not found',
@@ -63,6 +125,39 @@ void main() {
       expect(controller.connectionStatus, 'error');
       expect(controller.error, isNotNull);
       expect(controller.shouldOpenGameForCode, isTrue);
+
+      controller.dispose();
+    },
+  );
+
+  test(
+    'hydrates bootstrap form from server config when joining lobby',
+    () async {
+      final controller = LobbyController(
+        socketService: _JoinedLobbyWithConfigSocketService(),
+      );
+      await controller.initialize(
+        bootstrap: const LobbyBootstrapData(
+          code: 'ABC123',
+          serverUrl: 'http://localhost:3000',
+          socketPath: '/socket.io',
+          playerName: 'Player',
+        ),
+      );
+
+      final form = controller.bootstrapData?.form;
+      expect(form, isNotNull);
+      expect(form?.objectiveNumber, 5);
+      expect(form?.victoryConditionObjectives, 3);
+      expect(form?.duration, 1200);
+      expect(form?.hackDurationMs, 9000);
+      expect(form?.objectiveZoneRadius, 30);
+      expect(form?.startZoneRadius, 35);
+      expect(form?.rogueRange, 150);
+      expect(form?.agentRange, 80);
+      expect(form?.mapCenterLatitude, '45.764043');
+      expect(form?.mapCenterLongitude, '4.835659');
+      expect(form?.mapRadius, 350);
 
       controller.dispose();
     },

@@ -129,6 +129,7 @@ class LobbyGameConfig {
     required this.objectiveZoneRadius,
     required this.startZoneRadius,
     required this.durationSeconds,
+    this.victoryConditionObjectives,
     required this.hackDurationMs,
     required this.rogueRange,
     required this.startZone,
@@ -143,6 +144,7 @@ class LobbyGameConfig {
   final int objectiveZoneRadius;
   final int startZoneRadius;
   final int durationSeconds;
+  final int? victoryConditionObjectives;
   final int hackDurationMs;
   final int rogueRange;
   final GeoPoint? startZone;
@@ -232,6 +234,12 @@ class LobbyGameConfig {
           int.tryParse(raw['start_zone_radius']?.toString() ?? '') ??
           CreateLobbyDefaults.startZoneRadius,
       durationSeconds: int.tryParse(raw['duration']?.toString() ?? '') ?? 900,
+      victoryConditionObjectives: int.tryParse(
+        (raw['victory_condition_nb_objectivs'] ??
+                raw['victory_condition_nb_objectives'])
+            ?.toString() ??
+            '',
+      ),
       hackDurationMs:
           int.tryParse(raw['hack_duration_ms']?.toString() ?? '') ?? 10000,
       rogueRange: int.tryParse(raw['rogue_range']?.toString() ?? '') ?? 120,

@@ -149,6 +149,16 @@ class GameController extends ChangeNotifier {
     return 120;
   }
 
+  int _configuredVictoryObjectivesRequired() {
+    final fromLive = victoryObjectivesRequired;
+    if (fromLive != null && fromLive > 0) return fromLive;
+    final fromForm = bootstrap?.lobby.form?.victoryConditionObjectives;
+    if (fromForm != null && fromForm > 0) return fromForm;
+    final fromConfig = _effectiveGameConfig?.victoryConditionObjectives;
+    if (fromConfig != null && fromConfig > 0) return fromConfig;
+    return objectives.length;
+  }
+
   Future<void> initialize(GameBootstrapData data) async {
     bootstrap = data;
     gameCode = data.codeOverride ?? data.lobby.code;
@@ -156,7 +166,9 @@ class GameController extends ChangeNotifier {
     remainingSeconds = _configuredDurationSeconds();
     winnerType = null;
     winnerReason = null;
-    final required = data.lobby.form?.victoryConditionObjectives;
+    final required =
+        data.lobby.form?.victoryConditionObjectives ??
+        data.gameConfig?.victoryConditionObjectives;
     victoryObjectivesRequired = (required != null && required > 0)
         ? required
         : null;
@@ -894,9 +906,7 @@ class GameController extends ChangeNotifier {
       'gameDetails': <String, dynamic>{
         'winner_type': winnerType,
         'winner_reason': winnerReason,
-        'victory_objectives_required':
-            victoryObjectivesRequired ??
-            bootstrap?.lobby.form?.victoryConditionObjectives,
+        'victory_objectives_required': _configuredVictoryObjectivesRequired(),
         'start_countdown_end_at_ms': startCountdownEndAtMs,
       },
     };
@@ -914,8 +924,7 @@ class GameController extends ChangeNotifier {
   _WinnerOutcome? _winnerOutcomeIfAny() {
     // Rogue wins by capturing enough objectives.
     final captured = objectives.where((o) => o.captured).length;
-    final required =
-        bootstrap?.lobby.form?.victoryConditionObjectives ?? objectives.length;
+    final required = _configuredVictoryObjectivesRequired();
     if (required > 0 && captured >= required) {
       return const _WinnerOutcome(type: 'ROGUE', reason: 'OBJECTIVES_CAPTURED');
     }

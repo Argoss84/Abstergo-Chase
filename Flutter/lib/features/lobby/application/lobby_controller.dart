@@ -143,7 +143,13 @@ class LobbyController extends ChangeNotifier {
           if (lobby is Map) {
             final config = lobby['config'];
             if (config is Map) {
-              gameConfig = LobbyGameConfig.fromMap(config);
+              final configMap = Map<String, dynamic>.from(
+                config.map((k, v) => MapEntry(k.toString(), v)),
+              );
+              gameConfig = LobbyGameConfig.fromMap(configMap);
+              bootstrapData = bootstrapData?.copyWith(
+                form: _formFromConfigMap(configMap),
+              );
             }
             final playersRaw = lobby['players'];
             if (playersRaw is List) {
@@ -538,7 +544,10 @@ class LobbyController extends ChangeNotifier {
           current.duration,
       victoryConditionObjectives:
           int.tryParse(
-            config['victory_condition_nb_objectivs']?.toString() ?? '',
+            (config['victory_condition_nb_objectivs'] ??
+                    config['victory_condition_nb_objectives'])
+                ?.toString() ??
+                '',
           ) ??
           current.victoryConditionObjectives,
       hackDurationMs:
