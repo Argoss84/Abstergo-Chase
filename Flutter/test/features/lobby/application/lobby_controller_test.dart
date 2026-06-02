@@ -250,4 +250,83 @@ void main() {
 
     controller.dispose();
   });
+
+  test('keeps existing role when player update payload does not include role', () async {
+    final socketService = _LobbyMessagesSocketService();
+    final controller = LobbyController(socketService: socketService);
+
+    await controller.initialize(
+      bootstrap: const LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Player',
+      ),
+    );
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:joined',
+      'payload': <String, dynamic>{
+        'code': 'ABC123',
+        'playerId': 'me',
+        'hostId': 'host',
+        'lobby': <String, dynamic>{
+          'players': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'p1',
+              'name': 'Alpha',
+              'role': 'AGENT',
+              'status': 'active',
+              'isHost': false,
+            },
+          ],
+        },
+      },
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:player-updated',
+      'payload': <String, dynamic>{
+        'playerId': 'p1',
+        'changes': <String, dynamic>{'status': 'disconnected'},
+      },
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.players.single.role, 'AGENT');
+    expect(controller.players.single.status, 'disconnected');
+    controller.dispose();
+  });
+
+  test('stores role from peer-joined payload when available', () async {
+    final socketService = _LobbyMessagesSocketService();
+    final controller = LobbyController(socketService: socketService);
+
+    await controller.initialize(
+      bootstrap: const LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Player',
+      ),
+    );
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:peer-joined',
+      'payload': <String, dynamic>{
+        'playerId': 'p2',
+        'playerName': 'Bravo',
+        'role': 'ROGUE',
+        'status': 'active',
+      },
+    });
+
+    await Future<void>.delayed(Duration.zero);
+
+    final peer = controller.players.firstWhere((player) => player.id == 'p2');
+    expect(peer.role, 'ROGUE');
+    expect(peer.status, 'active');
+    controller.dispose();
+  });
 }
