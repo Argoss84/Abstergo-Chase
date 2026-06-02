@@ -396,9 +396,11 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                             outerStreetContour:
                                 config?.mapStreets ??
                                 bootstrap!.outerStreetContour,
-                            objectives: _controller.isHost
-                                ? bootstrap?.objectives ?? const <GeoPoint>[]
-                                : const <GeoPoint>[],
+                            objectives: _resolveHostObjectives(
+                              isHost: _controller.isHost,
+                              bootstrap: bootstrap,
+                              config: config,
+                            ),
                             agentStartZone:
                                 config?.startZone ?? bootstrap?.agentStartZone,
                             rogueStartZone:
@@ -623,6 +625,18 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
       latitude: double.tryParse(data.form!.mapCenterLatitude) ?? 0,
       longitude: double.tryParse(data.form!.mapCenterLongitude) ?? 0,
     );
+  }
+
+  List<GeoPoint> _resolveHostObjectives({
+    required bool isHost,
+    required LobbyBootstrapData? bootstrap,
+    required LobbyGameConfig? config,
+  }) {
+    if (!isHost) return const <GeoPoint>[];
+    if (bootstrap?.objectives.isNotEmpty ?? false) {
+      return bootstrap!.objectives;
+    }
+    return config?.objectives ?? const <GeoPoint>[];
   }
 
   Widget _statusChip(String status) {
@@ -904,7 +918,7 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                       ),
                       _kv(
                         'Objectifs victoire',
-                        '${form?.victoryConditionObjectives ?? 'n/a'}',
+                        '${form?.victoryConditionObjectives ?? config?.victoryConditionObjectives ?? 'n/a'}',
                       ),
                       _kv('Duree', '${form?.duration ?? 'n/a'} secondes'),
                     ],
