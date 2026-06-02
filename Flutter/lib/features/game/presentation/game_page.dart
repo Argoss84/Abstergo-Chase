@@ -11,6 +11,7 @@ import 'package:broken_veil_protocol/features/lobby/presentation/widgets/lobby_m
 import 'package:broken_veil_protocol/shared/services/tts_service.dart';
 import 'package:broken_veil_protocol/shared/services/vibration_service.dart';
 import 'package:broken_veil_protocol/shared/services/voice_settings_service.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_compass/flutter_compass.dart';
@@ -25,6 +26,8 @@ const TextStyle _kTeamChatBubbleStyle = TextStyle(
   color: Color(0xFF0F172A),
 );
 const String _kGameUnavailableMessage = 'Partie indisponible.';
+const double _kDefaultGameMapZoom = 16.5;
+const double _kCompassCenterToleranceLatLng = 0.000001;
 
 class GamePage extends StatefulWidget {
   const GamePage({super.key, required this.bootstrap});
@@ -54,9 +57,14 @@ class _GamePageState extends State<GamePage>
   bool _prevSelfInStartZone = false;
   final Map<String, bool> _hostPlayerInStartZone = <String, bool>{};
   int? _lastCountdownSecondVibrated;
+  int? _lastCountdownSecondAnnounced;
+  bool _didAnnounceCountdownGo = false;
   int _lastOutOfZoneVibrationMs = 0;
   bool _hasSpokenJoinTts = false;
   bool _compassModeEnabled = false;
+  bool _isCompassRecenterScheduled = false;
+  GeoPoint? _lastCompassCenteredPosition;
+  GeoPoint? _pendingCompassCenteredPosition;
   bool _didRouteBackToJoinOnInitialError = false;
 
   @override
@@ -102,6 +110,7 @@ class _GamePageState extends State<GamePage>
             : (_controller.roleChat.length - _lastReadCount).clamp(0, 999);
         final fallbackCenter = _resolveCenter();
         final connectionReady = _controller.connectionStatus == 'connected';
+        final realtimePositionReady = _controller.hasRealtimePosition;
         final roleForTts = (_controller.playerRole ?? '').trim();
         if (connectionReady && roleForTts.isNotEmpty && !_hasSpokenJoinTts) {
           _hasSpokenJoinTts = true;
@@ -134,6 +143,34 @@ class _GamePageState extends State<GamePage>
           });
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
+        final loadingMessage = () {
+          if (!connectionReady) {
+            if (_controller.connectionStatus == 'connecting') {
+              return 'Connexion au serveur en cours...';
+            }
+            if (_controller.connectionStatus == 'error') {
+              return 'Impossible de se connecter au serveur.';
+            }
+            return 'Initialisation de la partie...';
+          }
+          return 'Récupération de la position en temps réel...';
+        }();
+        if (_controller.isLoading ||
+            !connectionReady ||
+            !realtimePositionReady) {
+          return Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 12),
+                  Text(loadingMessage),
+                ],
+              ),
+            ),
+          );
+        }
         final topInset =
             MediaQuery.of(context).padding.top + kToolbarHeight + 8;
         final objectiveZoneRadius =
@@ -149,11 +186,16 @@ class _GamePageState extends State<GamePage>
         final winnerReason = (_controller.winnerReason ?? '').toUpperCase();
         final outOfZone = _controller.isOutOfGameZone;
         final myPos = _controller.myPosition;
+        _syncCompassMapCenter(myPos);
         final startCountdownSeconds = _startCountdownSeconds();
         final sameRolePlayers = _controller.sameRoleVoicePlayers;
         _handleGameVibrationSignals(
           startCountdownSeconds: startCountdownSeconds,
           outOfZone: outOfZone,
+          winnerType: winnerType,
+        );
+        _handleStartCountdownAudioSignals(
+          startCountdownSeconds: startCountdownSeconds,
           winnerType: winnerType,
         );
         final objectiveDisplayPoints = isRogue
@@ -163,6 +205,21 @@ class _GamePageState extends State<GamePage>
                   .toList(growable: false)
             : _controller.objectives
                   .where((o) => !o.captured)
+                  .map(
+                    (o) => _shiftedZoneCenter(
+                      objective: o.point,
+                      objectiveId: o.id,
+                      zoneRadiusMeters: objectiveZoneRadius.toDouble(),
+                    ),
+                  )
+                  .toList(growable: false);
+        final capturedObjectiveDisplayPoints = isRogue
+            ? _controller.objectives
+                  .where((o) => o.captured)
+                  .map((o) => o.point)
+                  .toList(growable: false)
+            : _controller.objectives
+                  .where((o) => o.captured)
                   .map(
                     (o) => _shiftedZoneCenter(
                       objective: o.point,
@@ -207,7 +264,7 @@ class _GamePageState extends State<GamePage>
                 ),
               ),
             ),
-            title: Text((_controller.playerRole ?? 'N/A').toUpperCase()),
+            title: _buildRoleTitleIcon(),
             actions: [
               IconButton(
                 tooltip: _compassModeEnabled
@@ -218,20 +275,9 @@ class _GamePageState extends State<GamePage>
                   _compassModeEnabled ? Icons.explore : Icons.explore_off,
                 ),
               ),
-              IconButton(
-                tooltip: _controller.isVoiceChatEnabled
-                    ? 'Désactiver vocal'
-                    : 'Activer vocal',
-                onPressed: () {
-                  _controller.toggleVoiceChatEnabled();
-                },
-                icon: Icon(
-                  _controller.isVoiceChatEnabled ? Icons.mic : Icons.mic_off,
-                ),
-              ),
               Padding(
                 padding: const EdgeInsets.only(right: 8),
-                child: Center(child: _buildConnectionBadge()),
+                child: Center(child: _buildAppBarStatusBadges(winnerType)),
               ),
               if (_controller.remainingSeconds != null)
                 Center(
@@ -336,6 +382,8 @@ class _GamePageState extends State<GamePage>
                                             .lobby
                                             .outerStreetContour,
                                   objectives: objectiveDisplayPoints,
+                                  inactiveObjectives:
+                                      capturedObjectiveDisplayPoints,
                                   agentStartZone:
                                       effectiveGameConfig?.startZone ??
                                       widget.bootstrap.lobby.agentStartZone,
@@ -479,35 +527,74 @@ class _GamePageState extends State<GamePage>
                               child: Container(
                                 color: Colors.black.withValues(alpha: 0.55),
                                 child: Center(
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 18,
-                                      vertical: 16,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withValues(alpha: 0.95),
-                                      borderRadius: BorderRadius.circular(14),
-                                    ),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Text(
-                                          'La partie commence dans…',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            fontSize: 22,
-                                            fontWeight: FontWeight.w800,
-                                          ),
+                                  child: Transform.scale(
+                                    scale: 0.96 + (_guidancePulseController.value * 0.1),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 18,
+                                        vertical: 16,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withValues(alpha: 0.95),
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(
+                                          color: Colors.black.withValues(alpha: 0.22),
+                                          width: 1.3,
                                         ),
-                                        const SizedBox(height: 10),
-                                        Text(
-                                          '$startCountdownSeconds',
-                                          style: const TextStyle(
-                                            fontSize: 56,
-                                            fontWeight: FontWeight.w900,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(alpha: 0.28),
+                                            blurRadius: 16,
+                                            spreadRadius: 0.8,
                                           ),
-                                        ),
-                                      ],
+                                        ],
+                                      ),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Text(
+                                            'La partie commence dans…',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontSize: 22,
+                                              fontWeight: FontWeight.w900,
+                                              color: Color(0xFF111827),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 10),
+                                          Stack(
+                                            alignment: Alignment.center,
+                                            children: [
+                                              Text(
+                                                '$startCountdownSeconds',
+                                                style: TextStyle(
+                                                  fontSize: 60,
+                                                  fontWeight: FontWeight.w900,
+                                                  foreground: Paint()
+                                                    ..style = PaintingStyle.stroke
+                                                    ..strokeWidth = 6
+                                                    ..color = Colors.black87,
+                                                ),
+                                              ),
+                                              Text(
+                                                '$startCountdownSeconds',
+                                                style: const TextStyle(
+                                                  fontSize: 60,
+                                                  fontWeight: FontWeight.w900,
+                                                  color: Color(0xFFB91C1C),
+                                                  shadows: [
+                                                    Shadow(
+                                                      color: Colors.black45,
+                                                      offset: Offset(0, 2),
+                                                      blurRadius: 5,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -569,7 +656,6 @@ class _GamePageState extends State<GamePage>
                               child: BackdropFilter(
                                 filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
                                 child: Container(
-                                  width: 260,
                                   padding: const EdgeInsets.all(8),
                                   color: Colors.black.withValues(alpha: 0.08),
                                   child: Column(
@@ -802,56 +888,160 @@ class _GamePageState extends State<GamePage>
     return '$m:$s';
   }
 
-  Widget _buildConnectionBadge() {
-    final status = _controller.connectionStatus;
-    late final Color color;
-    late final String label;
-    late final IconData icon;
-    switch (status) {
-      case 'connected':
-        color = Colors.green;
-        label = 'En ligne';
-        icon = Icons.check_circle;
-        break;
-      case 'connecting':
-        color = Colors.orange;
-        label = 'Connexion';
-        icon = Icons.sync;
-        break;
-      case 'error':
-        color = Colors.red;
-        label = 'Hors ligne';
-        icon = Icons.error_outline;
-        break;
-      case 'closed':
-        color = Colors.grey;
-        label = 'Déconnecté';
-        icon = Icons.cancel_outlined;
-        break;
-      default:
-        color = Colors.blueGrey;
-        label = 'Attente';
-        icon = Icons.hourglass_bottom;
-        break;
-    }
+  Widget _buildGamePhaseBadge({bool compactForAppBar = false}) {
+    final isConvergence = !_controller.gameStarted;
+    final color = isConvergence ? Colors.amber.shade700 : Colors.green.shade600;
+    final label = isConvergence
+        ? (compactForAppBar ? 'Conv.' : 'Convergence')
+        : (compactForAppBar ? 'En cours' : 'Partie en cours');
+    final icon = isConvergence ? Icons.groups_2 : Icons.play_arrow_rounded;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: compactForAppBar
+          ? const EdgeInsets.symmetric(horizontal: 8, vertical: 4)
+          : const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        border: Border.all(color: color.withValues(alpha: 0.45)),
+        color: color.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 1),
+        boxShadow: compactForAppBar
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.22),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 4),
+          Icon(icon, size: compactForAppBar ? 12 : 14, color: Colors.white),
+          compactForAppBar
+              ? const SizedBox(width: 4)
+              : const SizedBox(width: 5),
           Text(
             label,
             style: TextStyle(
-              color: color,
+              color: Colors.white,
+              fontSize: compactForAppBar ? 11 : 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRoleTitleIcon() {
+    final role = (_controller.playerRole ?? '').toUpperCase();
+    final label = role.isEmpty ? 'N/A' : role;
+    final asset = _roleMarkerAssetFor(role);
+    return Tooltip(
+      message: label,
+      child: asset == null
+          ? const Icon(Icons.help_outline, size: 28, color: Colors.white70)
+          : SizedBox(
+              width: 28,
+              height: 28,
+              child: Image.asset(
+                asset,
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.high,
+                errorBuilder: (context, _, _) => const Icon(
+                  Icons.help_outline,
+                  size: 28,
+                  color: Colors.white70,
+                ),
+              ),
+            ),
+    );
+  }
+
+  String? _roleMarkerAssetFor(String role) {
+    switch (role) {
+      case 'AGENT':
+        return 'assets/images/agent_marker.png';
+      case 'ROGUE':
+        return 'assets/images/rogue_marker.png';
+      default:
+        return null;
+    }
+  }
+
+  Widget _buildAppBarStatusBadges(String? winnerType) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (winnerType == null) ...[
+          _buildGamePhaseBadge(compactForAppBar: true),
+          const SizedBox(width: 6),
+        ],
+        _buildConnectionBadge(),
+      ],
+    );
+  }
+
+  Widget _buildConnectionBadge() {
+    final status = _controller.connectionStatus;
+    late final Color backgroundColor;
+    late final String label;
+    late final IconData icon;
+    switch (status) {
+      case 'connected':
+        backgroundColor = Colors.green.shade700;
+        label = 'En ligne';
+        icon = Icons.check_circle;
+        break;
+      case 'connecting':
+        backgroundColor = Colors.orange.shade800;
+        label = 'Connexion';
+        icon = Icons.sync;
+        break;
+      case 'error':
+        backgroundColor = Colors.red.shade700;
+        label = 'Hors ligne';
+        icon = Icons.error_outline;
+        break;
+      case 'closed':
+        backgroundColor = Colors.grey.shade700;
+        label = 'Déconnecté';
+        icon = Icons.cancel_outlined;
+        break;
+      default:
+        backgroundColor = Colors.blueGrey.shade700;
+        label = 'Attente';
+        icon = Icons.hourglass_bottom;
+        break;
+    }
+    const foregroundColor = Colors.white;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: backgroundColor.withValues(alpha: 0.92),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.2),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: foregroundColor),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              color: foregroundColor,
               fontSize: 12,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
@@ -1116,17 +1306,26 @@ class _GamePageState extends State<GamePage>
       );
       return;
     }
-    _mapController.move(LatLng(target.latitude, target.longitude), 16.5);
+    _mapController.move(
+      LatLng(target.latitude, target.longitude),
+      _kDefaultGameMapZoom,
+    );
   }
 
   void _toggleCompassMode() {
     setState(() {
       _compassModeEnabled = !_compassModeEnabled;
+      if (!_compassModeEnabled) {
+        _isCompassRecenterScheduled = false;
+        _lastCompassCenteredPosition = null;
+        _pendingCompassCenteredPosition = null;
+      }
     });
     if (!_compassModeEnabled) {
       _mapController.rotate(0);
       return;
     }
+    _syncCompassMapCenter(_controller.myPosition);
     _applyCompassRotation(_headingDeg.value);
   }
 
@@ -1134,6 +1333,45 @@ class _GamePageState extends State<GamePage>
     if (!_compassModeEnabled || heading == null) return;
     // Keep player forward direction at top of screen.
     _mapController.rotate(-heading);
+  }
+
+  void _syncCompassMapCenter(GeoPoint? playerPosition) {
+    if (!_compassModeEnabled || playerPosition == null) return;
+    if (_sameGeoPoint(_lastCompassCenteredPosition, playerPosition)) return;
+    _lastCompassCenteredPosition = playerPosition;
+    _pendingCompassCenteredPosition = playerPosition;
+    if (_isCompassRecenterScheduled) return;
+    _isCompassRecenterScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _isCompassRecenterScheduled = false;
+      if (!mounted || !_compassModeEnabled) return;
+      final target = _pendingCompassCenteredPosition;
+      _pendingCompassCenteredPosition = null;
+      if (target == null) return;
+      final zoom = _currentMapZoom();
+      _mapController.move(
+        LatLng(target.latitude, target.longitude),
+        zoom,
+      );
+    });
+  }
+
+  double _currentMapZoom() {
+    try {
+      final zoom = _mapController.camera.zoom;
+      return zoom.isFinite && zoom > 0 ? zoom : _kDefaultGameMapZoom;
+    } catch (_) {
+      return _kDefaultGameMapZoom;
+    }
+  }
+
+  bool _sameGeoPoint(GeoPoint? a, GeoPoint? b) {
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    // ~11 cm in latitude at the equator; this filters insignificant GPS jitter
+    // while keeping effective player movement responsive in compass-follow mode.
+    return (a.latitude - b.latitude).abs() < _kCompassCenterToleranceLatLng &&
+        (a.longitude - b.longitude).abs() < _kCompassCenterToleranceLatLng;
   }
 
   Future<void> _openVitalityQr() async {
@@ -1601,9 +1839,16 @@ class _GamePageState extends State<GamePage>
                     children: [
                       SwitchListTile(
                         value: _controller.isVoiceChatEnabled,
-                        title: const Text('Chat vocal actif'),
-                        subtitle: const Text(
-                          'Active ou coupe votre émission/réception vocale',
+                        secondary: Icon(
+                          _controller.isVoiceChatEnabled
+                              ? Icons.mic
+                              : Icons.mic_off,
+                        ),
+                        title: const Text('Microphone'),
+                        subtitle: Text(
+                          _controller.isVoiceChatEnabled
+                              ? 'Micro actif — appuyer pour couper'
+                              : 'Micro coupé — appuyer pour activer',
                         ),
                         onChanged: (_) {
                           _controller.toggleVoiceChatEnabled();
@@ -1660,6 +1905,35 @@ class _GamePageState extends State<GamePage>
     if (seconds <= 0) return null;
     if (seconds > 3) return 3;
     return seconds;
+  }
+
+  void _handleStartCountdownAudioSignals({
+    required int? startCountdownSeconds,
+    required String? winnerType,
+  }) {
+    final isPreStartPhase = !_controller.gameStarted && winnerType == null;
+    if (!isPreStartPhase) {
+      _lastCountdownSecondAnnounced = null;
+      _didAnnounceCountdownGo = false;
+      return;
+    }
+
+    if (startCountdownSeconds != null) {
+      if (_lastCountdownSecondAnnounced != startCountdownSeconds) {
+        _lastCountdownSecondAnnounced = startCountdownSeconds;
+        _didAnnounceCountdownGo = false;
+        unawaited(SystemSound.play(SystemSoundType.alert));
+        unawaited(_ttsService.speakIfEnabled('$startCountdownSeconds'));
+      }
+      return;
+    }
+
+    if (_lastCountdownSecondAnnounced != null && !_didAnnounceCountdownGo) {
+      _lastCountdownSecondAnnounced = null;
+      _didAnnounceCountdownGo = true;
+      unawaited(SystemSound.play(SystemSoundType.click));
+      unawaited(_ttsService.speakIfEnabled('Partez !'));
+    }
   }
 
   void _handleGameVibrationSignals({
