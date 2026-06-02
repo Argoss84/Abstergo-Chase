@@ -129,10 +129,12 @@ class LobbyGameConfig {
     required this.objectiveZoneRadius,
     required this.startZoneRadius,
     required this.durationSeconds,
+    this.victoryConditionObjectives,
     required this.hackDurationMs,
     required this.rogueRange,
     required this.startZone,
     required this.rogueStartZone,
+    this.objectives = const <GeoPoint>[],
     required this.mapStreets,
     this.mapStreetNetwork = const <List<GeoPoint>>[],
   });
@@ -142,10 +144,12 @@ class LobbyGameConfig {
   final int objectiveZoneRadius;
   final int startZoneRadius;
   final int durationSeconds;
+  final int? victoryConditionObjectives;
   final int hackDurationMs;
   final int rogueRange;
   final GeoPoint? startZone;
   final GeoPoint? rogueStartZone;
+  final List<GeoPoint> objectives;
   final List<GeoPoint> mapStreets;
   final List<List<GeoPoint>> mapStreetNetwork;
 
@@ -199,6 +203,28 @@ class LobbyGameConfig {
       }
     }
 
+    final objectives = <GeoPoint>[];
+    final rawObjectives = raw['objective_points'] ?? raw['objectives'];
+    if (rawObjectives is List) {
+      for (final rawPoint in rawObjectives) {
+        if (rawPoint is List && rawPoint.length >= 2) {
+          final lat = double.tryParse(rawPoint[0].toString());
+          final lng = double.tryParse(rawPoint[1].toString());
+          if (lat != null && lng != null) {
+            objectives.add(GeoPoint(latitude: lat, longitude: lng));
+          }
+        } else if (rawPoint is Map) {
+          final parsed = parsePoint(
+            rawPoint['latitude'] ?? rawPoint['lat'],
+            rawPoint['longitude'] ?? rawPoint['lng'] ?? rawPoint['lon'],
+          );
+          if (parsed != null) {
+            objectives.add(parsed);
+          }
+        }
+      }
+    }
+
     return LobbyGameConfig(
       mapCenter: center,
       mapRadius: int.tryParse(raw['map_radius']?.toString() ?? '') ?? 1000,
@@ -208,6 +234,12 @@ class LobbyGameConfig {
           int.tryParse(raw['start_zone_radius']?.toString() ?? '') ??
           CreateLobbyDefaults.startZoneRadius,
       durationSeconds: int.tryParse(raw['duration']?.toString() ?? '') ?? 900,
+      victoryConditionObjectives: int.tryParse(
+        (raw['victory_condition_nb_objectivs'] ??
+                raw['victory_condition_nb_objectives'])
+            ?.toString() ??
+            '',
+      ),
       hackDurationMs:
           int.tryParse(raw['hack_duration_ms']?.toString() ?? '') ?? 10000,
       rogueRange: int.tryParse(raw['rogue_range']?.toString() ?? '') ?? 120,
@@ -219,6 +251,7 @@ class LobbyGameConfig {
         raw['start_zone_rogue_latitude'],
         raw['start_zone_rogue_longitude'],
       ),
+      objectives: objectives,
       mapStreets: contour,
       mapStreetNetwork: network,
     );
