@@ -113,7 +113,6 @@ class GameController extends ChangeNotifier {
       <String, String>{};
   final Map<String, int> _voiceActiveSeenAtMs = <String, int>{};
   int _turnExpiresAtMs = 0;
-  static const double _kRogueTargetingMaxDistanceMeters = 5.0;
   static const double _kRogueTargetingHalfConeDeg = 20.0;
   static const int _maxGameChatMessages = 150;
   int? _rogueCaptureInterruptedAtMs;
@@ -152,6 +151,12 @@ class GameController extends ChangeNotifier {
     return 120;
   }
 
+  double _configuredAgentTargetingRangeMeters() {
+    final fromForm = bootstrap?.lobby.form?.agentRange;
+    if (fromForm != null && fromForm > 0) return fromForm.toDouble();
+    final fromConfig = _effectiveGameConfig?.agentRange;
+    if (fromConfig != null && fromConfig > 0) return fromConfig.toDouble();
+    return CreateLobbyDefaults.agentRange.toDouble();
   int _configuredVictoryObjectivesRequired() {
     final fromLive = victoryObjectivesRequired;
     if (fromLive != null && fromLive > 0) return fromLive;
@@ -1048,6 +1053,7 @@ class GameController extends ChangeNotifier {
       );
     }
 
+    final maxDistanceMeters = _configuredAgentTargetingRangeMeters();
     GamePlayer? bestTarget;
     double? bestDistance;
     double? bestAngleDelta;
@@ -1063,6 +1069,7 @@ class GameController extends ChangeNotifier {
         player.latitude!,
         player.longitude!,
       );
+      if (distance > maxDistanceMeters) continue;
       final bearing = Geolocator.bearingBetween(
         me.latitude,
         me.longitude,
@@ -1070,10 +1077,8 @@ class GameController extends ChangeNotifier {
         player.longitude!,
       );
       final delta = _absAngleDeltaDeg(headingDeg, bearing);
-      final inRange = distance <= _kRogueTargetingMaxDistanceMeters;
       final inCone = delta <= _kRogueTargetingHalfConeDeg;
-      final penalty = (inRange ? 0.0 : 1000.0) + (inCone ? 0.0 : 1000.0);
-      final score = penalty + (delta * 10) + distance;
+      final score = (inCone ? 0.0 : 1000.0) + (delta * 10) + distance;
       if (score >= bestScore) continue;
       bestScore = score;
       bestTarget = player;
@@ -1087,20 +1092,15 @@ class GameController extends ChangeNotifier {
         reason: 'Aucun rogue détecté à proximité.',
       );
     }
-    final isValid =
-        bestDistance <= _kRogueTargetingMaxDistanceMeters &&
-        bestAngleDelta <= _kRogueTargetingHalfConeDeg;
+    final isValid = bestAngleDelta <= _kRogueTargetingHalfConeDeg;
     if (!isValid) {
-      final reason = bestDistance > _kRogueTargetingMaxDistanceMeters
-          ? 'Rogue hors portée (5 m max).'
-          : 'Rogue hors cône de visée.';
       return RogueTargetingResult(
         isValid: false,
         targetPlayerId: bestTarget.id,
         targetPlayerName: bestTarget.name,
         distanceMeters: bestDistance,
         angularDeltaDeg: bestAngleDelta,
-        reason: reason,
+        reason: 'Rogue hors cône de visée.',
       );
     }
     return RogueTargetingResult(
@@ -1632,6 +1632,8 @@ class GameController extends ChangeNotifier {
   }
 
   int get configuredHackDurationMs => _configuredHackDurationMs();
+  double get configuredAgentTargetingRangeMeters =>
+      _configuredAgentTargetingRangeMeters();
 
   bool get showRogueCaptureInterruptedBanner {
     if (_rogueCaptureInterruptedAtMs == null) return false;

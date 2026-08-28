@@ -132,6 +132,7 @@ class LobbyGameConfig {
     this.victoryConditionObjectives,
     required this.hackDurationMs,
     required this.rogueRange,
+    required this.agentRange,
     required this.startZone,
     required this.rogueStartZone,
     this.objectives = const <GeoPoint>[],
@@ -147,6 +148,7 @@ class LobbyGameConfig {
   final int? victoryConditionObjectives;
   final int hackDurationMs;
   final int rogueRange;
+  final int agentRange;
   final GeoPoint? startZone;
   final GeoPoint? rogueStartZone;
   final List<GeoPoint> objectives;
@@ -243,6 +245,9 @@ class LobbyGameConfig {
       hackDurationMs:
           int.tryParse(raw['hack_duration_ms']?.toString() ?? '') ?? 10000,
       rogueRange: int.tryParse(raw['rogue_range']?.toString() ?? '') ?? 120,
+      agentRange:
+          int.tryParse(raw['agent_range']?.toString() ?? '') ??
+          CreateLobbyDefaults.agentRange,
       startZone: parsePoint(
         raw['start_zone_latitude'],
         raw['start_zone_longitude'],
