@@ -11,11 +11,13 @@ import 'package:broken_veil_protocol/features/lobby/presentation/widgets/lobby_m
 import 'package:broken_veil_protocol/shared/services/tts_service.dart';
 import 'package:broken_veil_protocol/shared/services/vibration_service.dart';
 import 'package:broken_veil_protocol/shared/services/voice_settings_service.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:go_router/go_router.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:latlong2/latlong.dart' hide Path;
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter/services.dart';
@@ -26,6 +28,46 @@ const TextStyle _kTeamChatBubbleStyle = TextStyle(
   color: Color(0xFF0F172A),
 );
 const String _kGameUnavailableMessage = 'Partie indisponible.';
+const String _kPingPayloadPrefix = '[PING]';
+const Duration _kPingPressDelay = Duration(milliseconds: 500);
+const Duration _kPingVisibleDuration = Duration(seconds: 8);
+const Duration _kDangerPingSoundGap = Duration(milliseconds: 90);
+
+class _PingOption {
+  const _PingOption({
+    required this.id,
+    required this.color,
+    required this.shortMessage,
+    required this.ttsMessage,
+  });
+
+  final String id;
+  final Color color;
+  final String shortMessage;
+  final String ttsMessage;
+}
+
+class _ActiveRolePing {
+  const _ActiveRolePing({
+    required this.messageKey,
+    required this.playerId,
+    required this.playerName,
+    required this.position,
+    required this.color,
+    required this.shortMessage,
+    required this.createdAtMs,
+  });
+
+  final String messageKey;
+  final String playerId;
+  final String playerName;
+  final GeoPoint position;
+  final Color color;
+  final String shortMessage;
+  final int createdAtMs;
+}
+const double _kDefaultGameMapZoom = 16.5;
+const double _kCompassCenterToleranceLatLng = 0.000001;
 
 class GamePage extends StatefulWidget {
   const GamePage({super.key, required this.bootstrap});
@@ -55,9 +97,14 @@ class _GamePageState extends State<GamePage>
   bool _prevSelfInStartZone = false;
   final Map<String, bool> _hostPlayerInStartZone = <String, bool>{};
   int? _lastCountdownSecondVibrated;
+  int? _lastCountdownSecondAnnounced;
+  bool _didAnnounceCountdownGo = false;
   int _lastOutOfZoneVibrationMs = 0;
   bool _hasSpokenJoinTts = false;
   bool _compassModeEnabled = false;
+  bool _isCompassRecenterScheduled = false;
+  GeoPoint? _lastCompassCenteredPosition;
+  GeoPoint? _pendingCompassCenteredPosition;
   bool _didRouteBackToJoinOnInitialError = false;
   bool _announcementBaselineInitialized = false;
   bool _prevAnyObjectiveCapturing = false;
@@ -66,6 +113,42 @@ class _GamePageState extends State<GamePage>
   bool _prevAllPlayersInStartZone = false;
   bool _prevGameStarted = false;
   int? _lastCountdownSecondAnnounced;
+  Timer? _pingPressTimer;
+  Offset? _pingPressOrigin;
+  GeoPoint? _pingLocation;
+  int? _pingActivePointer;
+  int? _selectedPingOptionIndex;
+  bool _pingWheelVisible = false;
+  int _lastPingChatIndex = 0;
+  bool _pingCursorInitialized = false;
+  final List<_ActiveRolePing> _activeRolePings = <_ActiveRolePing>[];
+
+  static const List<_PingOption> _pingOptions = <_PingOption>[
+    _PingOption(
+      id: 'go_here',
+      color: Colors.blueAccent,
+      shortMessage: 'Je vais ici',
+      ttsMessage: 'Je vais ici',
+    ),
+    _PingOption(
+      id: 'need_help',
+      color: Colors.orangeAccent,
+      shortMessage: 'Besoin d\'aide',
+      ttsMessage: 'Besoin d\'aide',
+    ),
+    _PingOption(
+      id: 'danger',
+      color: Colors.redAccent,
+      shortMessage: 'Danger',
+      ttsMessage: 'Danger',
+    ),
+    _PingOption(
+      id: 'wait',
+      color: Colors.greenAccent,
+      shortMessage: 'Attendez',
+      ttsMessage: 'Attendez',
+    ),
+  ];
 
   @override
   void initState() {
@@ -88,6 +171,7 @@ class _GamePageState extends State<GamePage>
   @override
   void dispose() {
     _compassSub?.cancel();
+    _pingPressTimer?.cancel();
     _headingDeg.dispose();
     _guidancePulseController.dispose();
     _chatController.dispose();
@@ -110,6 +194,7 @@ class _GamePageState extends State<GamePage>
             : (_controller.roleChat.length - _lastReadCount).clamp(0, 999);
         final fallbackCenter = _resolveCenter();
         final connectionReady = _controller.connectionStatus == 'connected';
+        final realtimePositionReady = _controller.hasRealtimePosition;
         final roleForTts = (_controller.playerRole ?? '').trim();
         if (connectionReady && roleForTts.isNotEmpty && !_hasSpokenJoinTts) {
           _hasSpokenJoinTts = true;
@@ -142,6 +227,34 @@ class _GamePageState extends State<GamePage>
           });
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
+        final loadingMessage = () {
+          if (!connectionReady) {
+            if (_controller.connectionStatus == 'connecting') {
+              return 'Connexion au serveur en cours...';
+            }
+            if (_controller.connectionStatus == 'error') {
+              return 'Impossible de se connecter au serveur.';
+            }
+            return 'Initialisation de la partie...';
+          }
+          return 'Récupération de la position en temps réel...';
+        }();
+        if (_controller.isLoading ||
+            !connectionReady ||
+            !realtimePositionReady) {
+          return Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 12),
+                  Text(loadingMessage),
+                ],
+              ),
+            ),
+          );
+        }
         final topInset =
             MediaQuery.of(context).padding.top + kToolbarHeight + 8;
         final objectiveZoneRadius =
@@ -157,6 +270,7 @@ class _GamePageState extends State<GamePage>
         final winnerReason = (_controller.winnerReason ?? '').toUpperCase();
         final outOfZone = _controller.isOutOfGameZone;
         final myPos = _controller.myPosition;
+        _syncCompassMapCenter(myPos);
         final startCountdownSeconds = _startCountdownSeconds();
         final sameRolePlayers = _controller.sameRoleVoicePlayers;
         _handleGameVibrationSignals(
@@ -165,6 +279,9 @@ class _GamePageState extends State<GamePage>
           winnerType: winnerType,
         );
         _handleGameAnnouncements(
+        _syncIncomingPingMessages();
+        _pruneExpiredPings();
+        _handleStartCountdownAudioSignals(
           startCountdownSeconds: startCountdownSeconds,
           winnerType: winnerType,
         );
@@ -175,6 +292,21 @@ class _GamePageState extends State<GamePage>
                   .toList(growable: false)
             : _controller.objectives
                   .where((o) => !o.captured)
+                  .map(
+                    (o) => _shiftedZoneCenter(
+                      objective: o.point,
+                      objectiveId: o.id,
+                      zoneRadiusMeters: objectiveZoneRadius.toDouble(),
+                    ),
+                  )
+                  .toList(growable: false);
+        final capturedObjectiveDisplayPoints = isRogue
+            ? _controller.objectives
+                  .where((o) => o.captured)
+                  .map((o) => o.point)
+                  .toList(growable: false)
+            : _controller.objectives
+                  .where((o) => o.captured)
                   .map(
                     (o) => _shiftedZoneCenter(
                       objective: o.point,
@@ -219,7 +351,7 @@ class _GamePageState extends State<GamePage>
                 ),
               ),
             ),
-            title: Text((_controller.playerRole ?? 'N/A').toUpperCase()),
+            title: _buildRoleTitleIcon(),
             actions: [
               IconButton(
                 tooltip: _compassModeEnabled
@@ -230,20 +362,9 @@ class _GamePageState extends State<GamePage>
                   _compassModeEnabled ? Icons.explore : Icons.explore_off,
                 ),
               ),
-              IconButton(
-                tooltip: _controller.isVoiceChatEnabled
-                    ? 'Désactiver vocal'
-                    : 'Activer vocal',
-                onPressed: () {
-                  _controller.toggleVoiceChatEnabled();
-                },
-                icon: Icon(
-                  _controller.isVoiceChatEnabled ? Icons.mic : Icons.mic_off,
-                ),
-              ),
               Padding(
                 padding: const EdgeInsets.only(right: 8),
-                child: Center(child: _buildConnectionBadge()),
+                child: Center(child: _buildAppBarStatusBadges(winnerType)),
               ),
               if (_controller.remainingSeconds != null)
                 Center(
@@ -348,6 +469,8 @@ class _GamePageState extends State<GamePage>
                                             .lobby
                                             .outerStreetContour,
                                   objectives: objectiveDisplayPoints,
+                                  inactiveObjectives:
+                                      capturedObjectiveDisplayPoints,
                                   agentStartZone:
                                       effectiveGameConfig?.startZone ??
                                       widget.bootstrap.lobby.agentStartZone,
@@ -388,6 +511,23 @@ class _GamePageState extends State<GamePage>
                                   highlightObjectivePulse:
                                       _guidancePulseController.value,
                                   showCenterMarker: false,
+                                  pingMarkers: _activeRolePings
+                                      .map(
+                                        (ping) => MapPingMarker(
+                                          point: ping.position,
+                                          color: ping.color,
+                                          playerName: ping.playerName,
+                                          message: ping.shortMessage,
+                                          pulseValue: _pingPulseFor(
+                                            ping.createdAtMs,
+                                          ),
+                                        ),
+                                      )
+                                      .toList(growable: false),
+                                  onMapPointerDown: _onMapPointerDown,
+                                  onMapPointerMove: _onMapPointerMove,
+                                  onMapPointerUp: _onMapPointerUp,
+                                  onMapPointerCancel: _onMapPointerCancel,
                                   playerMarkers: _controller.players
                                       .where(
                                         (p) =>
@@ -427,6 +567,18 @@ class _GamePageState extends State<GamePage>
                                       .toList(growable: false),
                                 ),
                         ),
+                        if (_pingWheelVisible && _pingPressOrigin != null)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: CustomPaint(
+                                painter: _PingWheelPainter(
+                                  center: _pingPressOrigin!,
+                                  options: _pingOptions,
+                                  highlightedIndex: _selectedPingOptionIndex,
+                                ),
+                              ),
+                            ),
+                          ),
                         if (winnerType == null)
                           Positioned(
                             top:
@@ -491,35 +643,74 @@ class _GamePageState extends State<GamePage>
                               child: Container(
                                 color: Colors.black.withValues(alpha: 0.55),
                                 child: Center(
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 18,
-                                      vertical: 16,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withValues(alpha: 0.95),
-                                      borderRadius: BorderRadius.circular(14),
-                                    ),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Text(
-                                          'La partie commence dans…',
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            fontSize: 22,
-                                            fontWeight: FontWeight.w800,
-                                          ),
+                                  child: Transform.scale(
+                                    scale: 0.96 + (_guidancePulseController.value * 0.1),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 18,
+                                        vertical: 16,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withValues(alpha: 0.95),
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(
+                                          color: Colors.black.withValues(alpha: 0.22),
+                                          width: 1.3,
                                         ),
-                                        const SizedBox(height: 10),
-                                        Text(
-                                          '$startCountdownSeconds',
-                                          style: const TextStyle(
-                                            fontSize: 56,
-                                            fontWeight: FontWeight.w900,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(alpha: 0.28),
+                                            blurRadius: 16,
+                                            spreadRadius: 0.8,
                                           ),
-                                        ),
-                                      ],
+                                        ],
+                                      ),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Text(
+                                            'La partie commence dans…',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontSize: 22,
+                                              fontWeight: FontWeight.w900,
+                                              color: Color(0xFF111827),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 10),
+                                          Stack(
+                                            alignment: Alignment.center,
+                                            children: [
+                                              Text(
+                                                '$startCountdownSeconds',
+                                                style: TextStyle(
+                                                  fontSize: 60,
+                                                  fontWeight: FontWeight.w900,
+                                                  foreground: Paint()
+                                                    ..style = PaintingStyle.stroke
+                                                    ..strokeWidth = 6
+                                                    ..color = Colors.black87,
+                                                ),
+                                              ),
+                                              Text(
+                                                '$startCountdownSeconds',
+                                                style: const TextStyle(
+                                                  fontSize: 60,
+                                                  fontWeight: FontWeight.w900,
+                                                  color: Color(0xFFB91C1C),
+                                                  shadows: [
+                                                    Shadow(
+                                                      color: Colors.black45,
+                                                      offset: Offset(0, 2),
+                                                      blurRadius: 5,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -581,7 +772,6 @@ class _GamePageState extends State<GamePage>
                               child: BackdropFilter(
                                 filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
                                 child: Container(
-                                  width: 260,
                                   padding: const EdgeInsets.all(8),
                                   color: Colors.black.withValues(alpha: 0.08),
                                   child: Column(
@@ -814,56 +1004,160 @@ class _GamePageState extends State<GamePage>
     return '$m:$s';
   }
 
-  Widget _buildConnectionBadge() {
-    final status = _controller.connectionStatus;
-    late final Color color;
-    late final String label;
-    late final IconData icon;
-    switch (status) {
-      case 'connected':
-        color = Colors.green;
-        label = 'En ligne';
-        icon = Icons.check_circle;
-        break;
-      case 'connecting':
-        color = Colors.orange;
-        label = 'Connexion';
-        icon = Icons.sync;
-        break;
-      case 'error':
-        color = Colors.red;
-        label = 'Hors ligne';
-        icon = Icons.error_outline;
-        break;
-      case 'closed':
-        color = Colors.grey;
-        label = 'Déconnecté';
-        icon = Icons.cancel_outlined;
-        break;
-      default:
-        color = Colors.blueGrey;
-        label = 'Attente';
-        icon = Icons.hourglass_bottom;
-        break;
-    }
+  Widget _buildGamePhaseBadge({bool compactForAppBar = false}) {
+    final isConvergence = !_controller.gameStarted;
+    final color = isConvergence ? Colors.amber.shade700 : Colors.green.shade600;
+    final label = isConvergence
+        ? (compactForAppBar ? 'Conv.' : 'Convergence')
+        : (compactForAppBar ? 'En cours' : 'Partie en cours');
+    final icon = isConvergence ? Icons.groups_2 : Icons.play_arrow_rounded;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: compactForAppBar
+          ? const EdgeInsets.symmetric(horizontal: 8, vertical: 4)
+          : const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        border: Border.all(color: color.withValues(alpha: 0.45)),
+        color: color.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 1),
+        boxShadow: compactForAppBar
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.22),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 4),
+          Icon(icon, size: compactForAppBar ? 12 : 14, color: Colors.white),
+          compactForAppBar
+              ? const SizedBox(width: 4)
+              : const SizedBox(width: 5),
           Text(
             label,
             style: TextStyle(
-              color: color,
+              color: Colors.white,
+              fontSize: compactForAppBar ? 11 : 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRoleTitleIcon() {
+    final role = (_controller.playerRole ?? '').toUpperCase();
+    final label = role.isEmpty ? 'N/A' : role;
+    final asset = _roleMarkerAssetFor(role);
+    return Tooltip(
+      message: label,
+      child: asset == null
+          ? const Icon(Icons.help_outline, size: 28, color: Colors.white70)
+          : SizedBox(
+              width: 28,
+              height: 28,
+              child: Image.asset(
+                asset,
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.high,
+                errorBuilder: (context, _, _) => const Icon(
+                  Icons.help_outline,
+                  size: 28,
+                  color: Colors.white70,
+                ),
+              ),
+            ),
+    );
+  }
+
+  String? _roleMarkerAssetFor(String role) {
+    switch (role) {
+      case 'AGENT':
+        return 'assets/images/agent_marker.png';
+      case 'ROGUE':
+        return 'assets/images/rogue_marker.png';
+      default:
+        return null;
+    }
+  }
+
+  Widget _buildAppBarStatusBadges(String? winnerType) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (winnerType == null) ...[
+          _buildGamePhaseBadge(compactForAppBar: true),
+          const SizedBox(width: 6),
+        ],
+        _buildConnectionBadge(),
+      ],
+    );
+  }
+
+  Widget _buildConnectionBadge() {
+    final status = _controller.connectionStatus;
+    late final Color backgroundColor;
+    late final String label;
+    late final IconData icon;
+    switch (status) {
+      case 'connected':
+        backgroundColor = Colors.green.shade700;
+        label = 'En ligne';
+        icon = Icons.check_circle;
+        break;
+      case 'connecting':
+        backgroundColor = Colors.orange.shade800;
+        label = 'Connexion';
+        icon = Icons.sync;
+        break;
+      case 'error':
+        backgroundColor = Colors.red.shade700;
+        label = 'Hors ligne';
+        icon = Icons.error_outline;
+        break;
+      case 'closed':
+        backgroundColor = Colors.grey.shade700;
+        label = 'Déconnecté';
+        icon = Icons.cancel_outlined;
+        break;
+      default:
+        backgroundColor = Colors.blueGrey.shade700;
+        label = 'Attente';
+        icon = Icons.hourglass_bottom;
+        break;
+    }
+    const foregroundColor = Colors.white;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: backgroundColor.withValues(alpha: 0.92),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.2),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: foregroundColor),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              color: foregroundColor,
               fontSize: 12,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
@@ -1128,17 +1422,26 @@ class _GamePageState extends State<GamePage>
       );
       return;
     }
-    _mapController.move(LatLng(target.latitude, target.longitude), 16.5);
+    _mapController.move(
+      LatLng(target.latitude, target.longitude),
+      _kDefaultGameMapZoom,
+    );
   }
 
   void _toggleCompassMode() {
     setState(() {
       _compassModeEnabled = !_compassModeEnabled;
+      if (!_compassModeEnabled) {
+        _isCompassRecenterScheduled = false;
+        _lastCompassCenteredPosition = null;
+        _pendingCompassCenteredPosition = null;
+      }
     });
     if (!_compassModeEnabled) {
       _mapController.rotate(0);
       return;
     }
+    _syncCompassMapCenter(_controller.myPosition);
     _applyCompassRotation(_headingDeg.value);
   }
 
@@ -1146,6 +1449,45 @@ class _GamePageState extends State<GamePage>
     if (!_compassModeEnabled || heading == null) return;
     // Keep player forward direction at top of screen.
     _mapController.rotate(-heading);
+  }
+
+  void _syncCompassMapCenter(GeoPoint? playerPosition) {
+    if (!_compassModeEnabled || playerPosition == null) return;
+    if (_sameGeoPoint(_lastCompassCenteredPosition, playerPosition)) return;
+    _lastCompassCenteredPosition = playerPosition;
+    _pendingCompassCenteredPosition = playerPosition;
+    if (_isCompassRecenterScheduled) return;
+    _isCompassRecenterScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _isCompassRecenterScheduled = false;
+      if (!mounted || !_compassModeEnabled) return;
+      final target = _pendingCompassCenteredPosition;
+      _pendingCompassCenteredPosition = null;
+      if (target == null) return;
+      final zoom = _currentMapZoom();
+      _mapController.move(
+        LatLng(target.latitude, target.longitude),
+        zoom,
+      );
+    });
+  }
+
+  double _currentMapZoom() {
+    try {
+      final zoom = _mapController.camera.zoom;
+      return zoom.isFinite && zoom > 0 ? zoom : _kDefaultGameMapZoom;
+    } catch (_) {
+      return _kDefaultGameMapZoom;
+    }
+  }
+
+  bool _sameGeoPoint(GeoPoint? a, GeoPoint? b) {
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    // ~11 cm in latitude at the equator; this filters insignificant GPS jitter
+    // while keeping effective player movement responsive in compass-follow mode.
+    return (a.latitude - b.latitude).abs() < _kCompassCenterToleranceLatLng &&
+        (a.longitude - b.longitude).abs() < _kCompassCenterToleranceLatLng;
   }
 
   Future<void> _openVitalityQr() async {
@@ -1413,6 +1755,215 @@ class _GamePageState extends State<GamePage>
     return h;
   }
 
+  void _onMapPointerDown(PointerDownEvent event, LatLng point) {
+    _pingPressTimer?.cancel();
+    _pingActivePointer = event.pointer;
+    _pingPressOrigin = event.localPosition;
+    _pingLocation = GeoPoint(latitude: point.latitude, longitude: point.longitude);
+    _selectedPingOptionIndex = null;
+    _pingWheelVisible = false;
+    _pingPressTimer = Timer(_kPingPressDelay, () {
+      if (!mounted || _pingActivePointer != event.pointer) return;
+      setState(() => _pingWheelVisible = true);
+    });
+  }
+
+  void _onMapPointerMove(PointerMoveEvent event, LatLng point) {
+    if (_pingActivePointer != event.pointer || !_pingWheelVisible) return;
+    final origin = _pingPressOrigin;
+    if (origin == null) return;
+    final vector = event.localPosition - origin;
+    final distance = vector.distance;
+    int? nextIndex;
+    if (distance >= 26 && _pingOptions.isNotEmpty) {
+      final angle = (atan2(vector.dy, vector.dx) + (2 * pi)) % (2 * pi);
+      final sector = (angle / ((2 * pi) / _pingOptions.length)).floor();
+      nextIndex = sector.clamp(0, _pingOptions.length - 1);
+    }
+    if (_selectedPingOptionIndex != nextIndex) {
+      setState(() => _selectedPingOptionIndex = nextIndex);
+    }
+  }
+
+  void _onMapPointerUp(PointerUpEvent event, LatLng point) {
+    if (_pingActivePointer != event.pointer) return;
+    _pingPressTimer?.cancel();
+    final selectedIndex = _selectedPingOptionIndex;
+    final pingPoint = _pingLocation;
+    final shouldTrigger =
+        _pingWheelVisible &&
+        selectedIndex != null &&
+        selectedIndex >= 0 &&
+        selectedIndex < _pingOptions.length &&
+        pingPoint != null;
+    _resetPingWheel();
+    if (!shouldTrigger) return;
+    final option = _pingOptions[selectedIndex!];
+    _broadcastRolePing(option: option, point: pingPoint);
+  }
+
+  void _onMapPointerCancel(PointerCancelEvent event, LatLng point) {
+    if (_pingActivePointer != event.pointer) return;
+    _pingPressTimer?.cancel();
+    _resetPingWheel();
+  }
+
+  void _resetPingWheel() {
+    if (!mounted) return;
+    setState(() {
+      _pingActivePointer = null;
+      _pingPressOrigin = null;
+      _pingLocation = null;
+      _selectedPingOptionIndex = null;
+      _pingWheelVisible = false;
+    });
+  }
+
+  void _broadcastRolePing({required _PingOption option, required GeoPoint point}) {
+    final payload = jsonEncode(<String, dynamic>{
+      'kind': 'role-ping',
+      'id': option.id,
+      'lat': point.latitude,
+      'lng': point.longitude,
+      'msg': option.shortMessage,
+      'tts': option.ttsMessage,
+      'color': option.color.value,
+      'ts': DateTime.now().millisecondsSinceEpoch,
+    });
+    _controller.sendRoleChat('$_kPingPayloadPrefix$payload');
+  }
+
+  void _syncIncomingPingMessages() {
+    final chat = _controller.roleChat;
+    if (!_pingCursorInitialized) {
+      _lastPingChatIndex = chat.length;
+      _pingCursorInitialized = true;
+      return;
+    }
+    if (_lastPingChatIndex > chat.length) {
+      _lastPingChatIndex = chat.length;
+    }
+    while (_lastPingChatIndex < chat.length) {
+      final message = chat[_lastPingChatIndex];
+      _lastPingChatIndex++;
+      final parsed = _tryParsePingMessage(message.text);
+      if (parsed == null) continue;
+      final key = '${message.playerId}:${message.timestampMs}:${parsed.optionId}';
+      final index = _activeRolePings.indexWhere((p) => p.messageKey == key);
+      if (index != -1) continue;
+      _activeRolePings.add(
+        _ActiveRolePing(
+          messageKey: key,
+          playerId: message.playerId,
+          playerName: message.playerName,
+          position: parsed.position,
+          color: parsed.color,
+          shortMessage: parsed.shortMessage,
+          createdAtMs: parsed.timestampMs,
+        ),
+      );
+      _playPingFeedback(parsed: parsed, playerName: message.playerName);
+    }
+  }
+
+  void _pruneExpiredPings() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _activeRolePings.removeWhere(
+      (ping) => now - ping.createdAtMs > _kPingVisibleDuration.inMilliseconds,
+    );
+  }
+
+  double _pingPulseFor(int createdAtMs) {
+    final elapsedMs = DateTime.now().millisecondsSinceEpoch - createdAtMs;
+    final phase = (elapsedMs % 1200) / 1200;
+    return (sin(phase * 2 * pi) + 1) / 2;
+  }
+
+  _DecodedPingMessage? _tryParsePingMessage(String raw) {
+    if (!raw.startsWith(_kPingPayloadPrefix)) return null;
+    final encoded = raw.substring(_kPingPayloadPrefix.length);
+    Map<String, dynamic> data;
+    try {
+      final decoded = jsonDecode(encoded);
+      if (decoded is! Map) return null;
+      data = Map<String, dynamic>.from(decoded);
+    } catch (_) {
+      return null;
+    }
+    if (data['kind']?.toString() != 'role-ping') return null;
+    final latValue = data['lat'];
+    final lngValue = data['lng'];
+    final lat = latValue is num ? latValue.toDouble() : null;
+    final lng = lngValue is num ? lngValue.toDouble() : null;
+    if (lat == null || lng == null) return null;
+    final colorSource = data['color'];
+    final colorRaw = switch (colorSource) {
+      int() => colorSource,
+      num() => colorSource.toInt(),
+      String() => int.tryParse(
+        colorSource.startsWith('0x') || colorSource.startsWith('0X')
+            ? colorSource.substring(2)
+            : colorSource,
+        radix:
+            colorSource.startsWith('0x') || colorSource.startsWith('0X')
+            ? 16
+            : null,
+      ),
+      _ => null,
+    };
+    final timestamp = int.tryParse(data['ts']?.toString() ?? '') ??
+        DateTime.now().millisecondsSinceEpoch;
+    final shortMessageRaw = data['msg']?.toString().trim();
+    final shortMessage =
+        (shortMessageRaw?.isNotEmpty ?? false) ? shortMessageRaw! : 'Ping';
+    final ttsMessage = data['tts']?.toString().trim();
+    return _DecodedPingMessage(
+      optionId: data['id']?.toString() ?? 'custom',
+      position: GeoPoint(latitude: lat, longitude: lng),
+      shortMessage: shortMessage,
+      ttsMessage: (ttsMessage?.isNotEmpty ?? false)
+          ? ttsMessage!
+          : shortMessage,
+      color: Color(colorRaw ?? Colors.blueAccent.value),
+      timestampMs: timestamp,
+    );
+  }
+
+  Future<void> _playPingFeedback({
+    required _DecodedPingMessage parsed,
+    required String playerName,
+  }) async {
+    await _playOptionSound(parsed.optionId);
+    if (!mounted) return;
+    await _ttsService.speakIfEnabled('$playerName ${parsed.ttsMessage}');
+  }
+
+  Future<void> _playOptionSound(String optionId) async {
+    switch (optionId) {
+      case 'go_here':
+        await SystemSound.play(SystemSoundType.click);
+        return;
+      case 'need_help':
+        await SystemSound.play(SystemSoundType.alert);
+        return;
+      case 'danger':
+        await SystemSound.play(SystemSoundType.alert);
+        await Future<void>.delayed(_kDangerPingSoundGap);
+        await SystemSound.play(SystemSoundType.alert);
+        return;
+      default:
+        await SystemSound.play(SystemSoundType.click);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await SystemSound.play(SystemSoundType.alert);
+    }
+  }
+
+  String _displayChatText(String text) {
+    final parsed = _tryParsePingMessage(text);
+    if (parsed == null) return text;
+    return '📍 ${parsed.shortMessage}';
+  }
+
   Future<void> _openChat() async {
     setState(() {
       _chatOpen = true;
@@ -1464,7 +2015,7 @@ class _GamePageState extends State<GamePage>
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(
-                                '${m.playerName}: ${m.text}',
+                                '${m.playerName}: ${_displayChatText(m.text)}',
                                 style: _kTeamChatBubbleStyle,
                               ),
                             ),
@@ -1613,9 +2164,16 @@ class _GamePageState extends State<GamePage>
                     children: [
                       SwitchListTile(
                         value: _controller.isVoiceChatEnabled,
-                        title: const Text('Chat vocal actif'),
-                        subtitle: const Text(
-                          'Active ou coupe votre émission/réception vocale',
+                        secondary: Icon(
+                          _controller.isVoiceChatEnabled
+                              ? Icons.mic
+                              : Icons.mic_off,
+                        ),
+                        title: const Text('Microphone'),
+                        subtitle: Text(
+                          _controller.isVoiceChatEnabled
+                              ? 'Micro actif — appuyer pour couper'
+                              : 'Micro coupé — appuyer pour activer',
                         ),
                         onChanged: (_) {
                           _controller.toggleVoiceChatEnabled();
@@ -1672,6 +2230,35 @@ class _GamePageState extends State<GamePage>
     if (seconds <= 0) return null;
     if (seconds > 3) return 3;
     return seconds;
+  }
+
+  void _handleStartCountdownAudioSignals({
+    required int? startCountdownSeconds,
+    required String? winnerType,
+  }) {
+    final isPreStartPhase = !_controller.gameStarted && winnerType == null;
+    if (!isPreStartPhase) {
+      _lastCountdownSecondAnnounced = null;
+      _didAnnounceCountdownGo = false;
+      return;
+    }
+
+    if (startCountdownSeconds != null) {
+      if (_lastCountdownSecondAnnounced != startCountdownSeconds) {
+        _lastCountdownSecondAnnounced = startCountdownSeconds;
+        _didAnnounceCountdownGo = false;
+        unawaited(SystemSound.play(SystemSoundType.alert));
+        unawaited(_ttsService.speakIfEnabled('$startCountdownSeconds'));
+      }
+      return;
+    }
+
+    if (_lastCountdownSecondAnnounced != null && !_didAnnounceCountdownGo) {
+      _lastCountdownSecondAnnounced = null;
+      _didAnnounceCountdownGo = true;
+      unawaited(SystemSound.play(SystemSoundType.click));
+      unawaited(_ttsService.speakIfEnabled('Partez !'));
+    }
   }
 
   void _handleGameVibrationSignals({
@@ -1860,6 +2447,115 @@ class _GamePageState extends State<GamePage>
       return 'Le temps est écoulé.';
     }
     return 'Victoire confirmée.';
+  }
+}
+
+class _DecodedPingMessage {
+  const _DecodedPingMessage({
+    required this.optionId,
+    required this.position,
+    required this.shortMessage,
+    required this.ttsMessage,
+    required this.color,
+    required this.timestampMs,
+  });
+
+  final String optionId;
+  final GeoPoint position;
+  final String shortMessage;
+  final String ttsMessage;
+  final Color color;
+  final int timestampMs;
+}
+
+class _PingWheelPainter extends CustomPainter {
+  const _PingWheelPainter({
+    required this.center,
+    required this.options,
+    required this.highlightedIndex,
+  });
+
+  final Offset center;
+  final List<_PingOption> options;
+  final int? highlightedIndex;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (options.isEmpty) return;
+    const innerRadius = 32.0;
+    const outerRadius = 98.0;
+    final sweep = (2 * pi) / options.length;
+    for (var i = 0; i < options.length; i++) {
+      final option = options[i];
+      final start = (i * sweep) - (pi / options.length);
+      final isHighlighted = highlightedIndex == i;
+      final fillPaint = Paint()
+        ..style = PaintingStyle.fill
+        ..color = option.color.withValues(alpha: isHighlighted ? 0.80 : 0.55);
+      final borderPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = isHighlighted ? 2.6 : 1.3
+        ..color = Colors.white.withValues(alpha: 0.85);
+      final path = Path()
+        ..moveTo(
+          center.dx + innerRadius * cos(start),
+          center.dy + innerRadius * sin(start),
+        )
+        ..arcTo(
+          Rect.fromCircle(center: center, radius: innerRadius),
+          start,
+          sweep,
+          false,
+        )
+        ..lineTo(
+          center.dx + outerRadius * cos(start + sweep),
+          center.dy + outerRadius * sin(start + sweep),
+        )
+        ..arcTo(
+          Rect.fromCircle(center: center, radius: outerRadius),
+          start + sweep,
+          -sweep,
+          false,
+        )
+        ..close();
+      canvas.drawPath(path, fillPaint);
+      canvas.drawPath(path, borderPaint);
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: option.shortMessage,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: 90);
+      final labelAngle = start + (sweep / 2);
+      final labelRadius = 63.0;
+      final labelCenter = Offset(
+        center.dx + (labelRadius * cos(labelAngle)),
+        center.dy + (labelRadius * sin(labelAngle)),
+      );
+      textPainter.paint(
+        canvas,
+        Offset(
+          labelCenter.dx - textPainter.width / 2,
+          labelCenter.dy - textPainter.height / 2,
+        ),
+      );
+    }
+    final corePaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = Colors.black.withValues(alpha: 0.72);
+    canvas.drawCircle(center, innerRadius - 2, corePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _PingWheelPainter oldDelegate) {
+    return oldDelegate.center != center ||
+        oldDelegate.highlightedIndex != highlightedIndex ||
+        oldDelegate.options.length != options.length;
   }
 }
 

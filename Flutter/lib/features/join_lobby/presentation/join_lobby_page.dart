@@ -49,7 +49,16 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
         _showError(initialError);
       });
     }
+    _restoreLastLobbyCode();
     _loadAccountUsername();
+  }
+
+  Future<void> _restoreLastLobbyCode() async {
+    if (_codeController.text.trim().isNotEmpty) return;
+    if (!mounted) return;
+    final lastCode = await _playerSessionStore.loadLastLobbyCode();
+    if (!mounted || lastCode == null) return;
+    _codeController.text = lastCode;
   }
 
   @override
@@ -116,6 +125,7 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
       return;
     }
 
+    await _playerSessionStore.saveLastLobbyCode(code);
     final previousPlayerId = await _playerSessionStore.loadPlayerIdForCode(
       code,
     );

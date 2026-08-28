@@ -224,6 +224,9 @@ class CreateLobbyController extends ChangeNotifier {
           'start_zone_longitude': agentStartZone?.longitude.toString(),
           'start_zone_rogue_latitude': rogueStartZone?.latitude.toString(),
           'start_zone_rogue_longitude': rogueStartZone?.longitude.toString(),
+          'objective_points': objectives
+              .map((p) => <double>[p.latitude, p.longitude])
+              .toList(growable: false),
           'map_streets': outerStreetContour.length >= 3
               ? <dynamic>[
                   outerStreetContour
