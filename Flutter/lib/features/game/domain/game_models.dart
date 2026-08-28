@@ -78,6 +78,7 @@ class GameBootstrapData {
     this.gameConfig,
     this.codeOverride,
     this.fromCodeLookupFallback = false,
+    this.initialPlayerPosition,
   });
 
   final LobbyBootstrapData lobby;
@@ -86,4 +87,5 @@ class GameBootstrapData {
   final LobbyGameConfig? gameConfig;
   final String? codeOverride;
   final bool fromCodeLookupFallback;
+  final GeoPoint? initialPlayerPosition;
 }
