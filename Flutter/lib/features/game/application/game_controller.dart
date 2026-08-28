@@ -157,6 +157,8 @@ class GameController extends ChangeNotifier {
     final fromConfig = _effectiveGameConfig?.agentRange;
     if (fromConfig != null && fromConfig > 0) return fromConfig.toDouble();
     return CreateLobbyDefaults.agentRange.toDouble();
+  }
+
   int _configuredVictoryObjectivesRequired() {
     final fromLive = victoryObjectivesRequired;
     if (fromLive != null && fromLive > 0) return fromLive;

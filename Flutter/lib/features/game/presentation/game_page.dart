@@ -112,7 +112,6 @@ class _GamePageState extends State<GamePage>
   int _prevCapturedRoguesCount = 0;
   bool _prevAllPlayersInStartZone = false;
   bool _prevGameStarted = false;
-  int? _lastCountdownSecondAnnounced;
   Timer? _pingPressTimer;
   Offset? _pingPressOrigin;
   GeoPoint? _pingLocation;
@@ -279,6 +278,9 @@ class _GamePageState extends State<GamePage>
           winnerType: winnerType,
         );
         _handleGameAnnouncements(
+          startCountdownSeconds: startCountdownSeconds,
+          winnerType: winnerType,
+        );
         _syncIncomingPingMessages();
         _pruneExpiredPings();
         _handleStartCountdownAudioSignals(
