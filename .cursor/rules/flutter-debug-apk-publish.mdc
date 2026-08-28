@@ -1,26 +1,62 @@
 ---
-description: Après modifications Flutter, publier uniquement en APK debug sur les émulateurs
-globs: Flutter/**/*
-alwaysApply: false
+description: Procédure debug — build APK avec cognito.release.json, lancer les 3 émulateurs si besoin, installer et ouvrir l’app
+alwaysApply: true
 ---
 
-# Publication APK **debug** sur émulateurs (obligatoire)
+# Procédure debug émulateurs (obligatoire)
 
-Les installations sur émulateurs doivent **toujours** être des builds **debug**, pas release ni profile.
+Quand l’utilisateur demande de déployer / republier / tester en debug sur les émulateurs, **exécuter** la procédure ci-dessous (ne pas se contenter d’afficher les commandes).
 
-À la **fin** d’une série de modifications sous `Flutter/` (depuis le dossier `Flutter/`), exécuter dans l’ordre :
+## Définitifs
 
-1. **`flutter build apk --debug`**  
-   - Ne pas utiliser `flutter build apk` sans `--debug`, ni `--release`, ni `--profile` pour cette étape émulateurs.
+| Élément | Valeur |
+|---------|--------|
+| Defines | `Flutter/config/cognito.release.json` (**toujours**) |
+| Variante | **debug** uniquement (jamais release / profile pour les émulateurs) |
+| Package | `com.brokenveilprotocol.app` |
+| Emulators | `emulator-5554` (Galaxy_S23_Ultra), `emulator-5556` (Galaxy_A12), `emulator-5558` (Galaxy_Tab_A7) |
 
-2. Pour chaque appareil `emulator-*` en état `device` dans `adb devices` :  
-   **`flutter install -d <id> --debug`**  
-   - Le flag **`--debug` est obligatoire** : sans lui, Flutter peut réinstaller une variante déjà présente (ex. release) et ce n’est pas le comportement voulu.
+## Raccourci (préféré)
 
-3. **Ouvrir automatiquement l’application après installation** sur chaque émulateur :  
-   - Lancer explicitement l’app `com.abstergo.chase` juste après l’installation (ex. via `adb shell monkey -p com.abstergo.chase -c android.intent.category.LAUNCHER 1`).
-   - Ce lancement automatique est **obligatoire** : ne pas laisser l’app fermée après publication.
+```powershell
+C:\Users\Alexa\Documents\Work\Utiles\Flutter\build-abstergo.ps1 -Action deploy-debug
+```
 
-Ne pas seulement indiquer les commandes : **les lancer** dans le terminal du projet.
+Ce script : vérifie / lance les 3 AVD manquants → build APK debug avec `config/cognito.release.json` → `flutter install --debug` → ouvre l’app sur chaque appareil.
 
-Si aucun émulateur n’est connecté, le signaler clairement.
+## Procédure manuelle (si le script n’est pas utilisable)
+
+1. **Environnement**
+   ```powershell
+   . C:\Users\Alexa\Documents\Work\Utiles\Flutter\env.ps1
+   ```
+
+2. **Émulateurs** — `adb devices` doit montrer les 3 serials en état `device`.
+   - Aucun lancé, ou il en manque : démarrer les manquants
+     ```powershell
+     C:\Users\Alexa\Documents\Work\Utiles\Android\start-all.ps1
+     ```
+     ou, un par un :
+     ```powershell
+     C:\Users\Alexa\Documents\Work\Utiles\Android\start-one.ps1 -Name Galaxy_S23_Ultra
+     C:\Users\Alexa\Documents\Work\Utiles\Android\start-one.ps1 -Name Galaxy_A12
+     C:\Users\Alexa\Documents\Work\Utiles\Android\start-one.ps1 -Name Galaxy_Tab_A7
+     ```
+   - Attendre que les 3 soient `device` avant d’installer.
+
+3. **Build** (depuis `Flutter/`)
+   ```powershell
+   flutter build apk --debug --dart-define-from-file=config/cognito.release.json
+   ```
+   Ne **jamais** omettre `--dart-define-from-file=config/cognito.release.json`.
+
+4. **Install + lancement** pour chaque `emulator-5554`, `emulator-5556`, `emulator-5558` :
+   ```powershell
+   flutter install -d <id> --debug
+   adb -s <id> shell monkey -p com.brokenveilprotocol.app -c android.intent.category.LAUNCHER 1
+   ```
+   Le flag `--debug` sur `flutter install` est **obligatoire**.
+
+## Après modifications sous `Flutter/`
+
+À la fin d’une série de changements Flutter demandant un redeploy, enchaîner la même procédure (`deploy-debug`).
