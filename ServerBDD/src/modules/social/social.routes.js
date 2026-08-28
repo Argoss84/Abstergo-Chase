@@ -53,7 +53,7 @@ socialRouter.post(
       throw new HttpError(404, 'Utilisateur introuvable, appelez /api/auth/sync');
     }
     if (requesterId === req.body.to_user_id) {
-      throw new HttpError(400, 'Impossible de s’ajouter soi-même');
+      throw new HttpError(400, "Impossible de s'ajouter soi-même");
     }
 
     const result = await pool.query(
