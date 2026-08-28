@@ -327,6 +327,7 @@ const clients = new Map();
 const socketsById = new Map();
 const disconnectedHosts = new Map(); // Stocke temporairement les lobbies dont le host s'est déconnecté
 const disconnectedGameHosts = new Map(); // Stocke temporairement les games dont le host s'est déconnecté
+const disconnectedLobbyPlayers = new Map(); // Stocke temporairement les joueurs lobby non-host déconnectés
 const awayHosts = new Map(); // Stocke les lobbies dont le host est absent (away)
 const lobbySocketMessageCounts = new Map();
 const gameSocketMessageCounts = new Map();
@@ -374,6 +375,28 @@ const forEachConnectedGameRecipient = (game, callback, { exceptId = null } = {})
   }
 };
 
+const forEachConnectedLobbyRecipient = (lobby, callback, { exceptId = null } = {}) => {
+  if (!lobby?.players) return;
+  for (const player of lobby.players.values()) {
+    if (!player?.id) continue;
+    if (exceptId && player.id === exceptId) continue;
+    const playerSocket = socketsById.get(player.id);
+    if (!playerSocket || !playerSocket.connected) continue;
+    callback(playerSocket, player);
+  }
+};
+
+const lobbyDisconnectKey = (code, playerId) => `${code}:${playerId}`;
+
+const clearDisconnectedLobbyPlayerTimeout = (code, playerId) => {
+  const key = lobbyDisconnectKey(code, playerId);
+  const timeoutId = disconnectedLobbyPlayers.get(key);
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+    disconnectedLobbyPlayers.delete(key);
+  }
+};
+
 const pruneDisconnectedGamePlayers = (game, now = Date.now()) => {
   if (!game?.players || game.players.size === 0) return 0;
   let removed = 0;
@@ -405,6 +428,12 @@ const closeLobby = (code, reason = 'Lobby expiré', notify = true) => {
   if (awayHosts.has(code)) {
     clearTimeout(awayHosts.get(code).timeoutId);
     awayHosts.delete(code);
+  }
+  for (const key of disconnectedLobbyPlayers.keys()) {
+    if (key.startsWith(`${code}:`)) {
+      clearTimeout(disconnectedLobbyPlayers.get(key));
+      disconnectedLobbyPlayers.delete(key);
+    }
   }
   lobbies.delete(code);
   lobbySocketMessageCounts.delete(code);
@@ -662,6 +691,41 @@ let persistQueued = false;
 let eventLogFlushTimer = null;
 let eventLogFlushInFlight = false;
 const pendingEventLogLines = [];
+const MAX_LOBBY_CHAT_MESSAGES = 100;
+const MAX_GAME_CHAT_MESSAGES = 150;
+const DEFAULT_PLAYER_NAME = 'Joueur';
+
+const normalizeLobbyChatMessages = (messages) => {
+  if (!Array.isArray(messages)) return [];
+  return messages
+    .filter((message) => message && typeof message === 'object')
+    .slice(-MAX_LOBBY_CHAT_MESSAGES)
+    .map((message) => ({
+      playerId: message.playerId || '',
+      playerName: message.playerName || DEFAULT_PLAYER_NAME,
+      text: message.text || '',
+      timestamp:
+        typeof message.timestamp === 'number'
+          ? message.timestamp
+          : Date.now()
+    }));
+};
+
+const normalizeGameChatMessages = (messages) => {
+  if (!Array.isArray(messages)) return [];
+  return messages
+    .filter((message) => message && typeof message === 'object')
+    .slice(-MAX_GAME_CHAT_MESSAGES)
+    .map((message) => ({
+      playerId: message.playerId || '',
+      playerName: message.playerName || DEFAULT_PLAYER_NAME,
+      text: message.text || '',
+      timestamp:
+        typeof message.timestamp === 'number'
+          ? message.timestamp
+          : Date.now()
+    }));
+};
 
 const serializeLobby = (lobby) => ({
   code: lobby.code,
@@ -670,6 +734,7 @@ const serializeLobby = (lobby) => ({
   createdAt: lobby.createdAt || Date.now(),
   expiresAt: lobby.expiresAt || Date.now() + LOBBY_TTL_MS,
   config: lobby.config || null,
+  chatMessages: normalizeLobbyChatMessages(lobby.chatMessages),
   players: Array.from(lobby.players.values()).map((p) => ({
     id: p.id,
     name: p.name,
@@ -702,7 +767,9 @@ const serializeGame = (game) => ({
   lastHostStateAt:
     typeof game.lastHostStateAt === 'number' ? game.lastHostStateAt : null,
   lastHostStateHostId: game.lastHostStateHostId || null,
-  reconnectedPlayerIds: game.reconnectedPlayerIds || {}
+  reconnectedPlayerIds: game.reconnectedPlayerIds || {},
+  agentChatMessages: normalizeGameChatMessages(game.agentChatMessages),
+  rogueChatMessages: normalizeGameChatMessages(game.rogueChatMessages)
 });
 
 const persistRuntimeStateNow = async (reason = 'unspecified') => {
@@ -837,6 +904,7 @@ const hydrateRuntimeState = async () => {
             ? lobby.expiresAt
             : Date.now() + LOBBY_TTL_MS,
         config: lobby.config || null,
+        chatMessages: normalizeLobbyChatMessages(lobby.chatMessages),
         players: playersMap
       });
       lobbySocketMessageCounts.set(lobby.code, 0);
@@ -879,7 +947,9 @@ const hydrateRuntimeState = async () => {
         lastHostStateAt:
           typeof game.lastHostStateAt === 'number' ? game.lastHostStateAt : null,
         lastHostStateHostId: game.lastHostStateHostId || null,
-        reconnectedPlayerIds: game.reconnectedPlayerIds || {}
+        reconnectedPlayerIds: game.reconnectedPlayerIds || {},
+        agentChatMessages: normalizeGameChatMessages(game.agentChatMessages),
+        rogueChatMessages: normalizeGameChatMessages(game.rogueChatMessages)
       });
       gameSocketMessageCounts.set(game.code, 0);
     }
@@ -1013,6 +1083,9 @@ const getLobbySnapshot = (lobby) => ({
   hostId: lobby.hostId,
   stateVersion: lobby.stateVersion || 1,
   config: lobby.config || null,
+  chatMessages: normalizeLobbyChatMessages(lobby.chatMessages),
+  agentChatMessages: normalizeGameChatMessages(lobby.agentChatMessages),
+  rogueChatMessages: normalizeGameChatMessages(lobby.rogueChatMessages),
   players: Array.from(lobby.players.values()).map(({ id, name, isHost, role, status }) => ({
     id,
     name,
@@ -1271,6 +1344,8 @@ const tryStartGameFromLobby = ({
     hostId: lobby.hostId,
     config: lobby.config || null,
     players: new Map(),
+    agentChatMessages: [],
+    rogueChatMessages: [],
     stateVersion: 1,
     createdAt: Date.now(),
     lastActivityAt: Date.now(),
@@ -1528,6 +1603,7 @@ io.on('connection', (socket) => {
         hostId: clientId,
         players: new Map(),
         config: payload?.gameConfig || null,
+        chatMessages: [],
         stateVersion: 1,
         createdAt: Date.now(),
         lastActivityAt: Date.now(),
@@ -1629,6 +1705,7 @@ io.on('connection', (socket) => {
         
         // Récupérer les infos de l'ancien joueur
         const existingPlayer = lobby.players.get(oldPlayerId);
+        clearDisconnectedLobbyPlayerTimeout(code, oldPlayerId);
         
         // Remplacer l'ancien playerId par le nouveau dans le lobby
         lobby.players.delete(oldPlayerId);
@@ -1637,7 +1714,8 @@ io.on('connection', (socket) => {
           name: payload?.playerName || existingPlayer?.name || 'Joueur',
           isHost: existingPlayer?.isHost || false,
           role: existingPlayer?.role ?? null,
-          status: existingPlayer?.status || 'active',
+          status: 'active',
+          disconnectedAt: null,
           cognitoSub: existingPlayer?.cognitoSub || payload?.cognitoSub || null
         });
         
@@ -1661,6 +1739,23 @@ io.on('connection', (socket) => {
             lobby: getLobbySnapshot(lobby)
           }
         });
+
+        forEachConnectedLobbyRecipient(lobby, (peerSocket) => {
+          send(peerSocket, {
+            type: 'lobby:peer-left',
+            payload: { playerId: oldPlayerId }
+          });
+          send(peerSocket, {
+            type: 'lobby:peer-joined',
+            payload: {
+              playerId: clientId,
+              playerName: payload?.playerName || existingPlayer?.name || 'Joueur',
+              isHost: existingPlayer?.isHost || false,
+              role: existingPlayer?.role ?? null,
+              status: 'active'
+            }
+          });
+        }, { exceptId: clientId });
 
         // Notifier le host qu'un peer s'est reconnecté pour rétablir la connexion WebRTC
         if (lobby.hostId !== clientId) {
@@ -1688,6 +1783,8 @@ io.on('connection', (socket) => {
         const existingPlayer = lobby.players.get(clientId);
         if (existingPlayer && payload?.playerName) {
           existingPlayer.name = payload.playerName;
+          existingPlayer.status = 'active';
+          existingPlayer.disconnectedAt = null;
           lobby.players.set(clientId, existingPlayer);
         }
         
@@ -1765,15 +1862,18 @@ io.on('connection', (socket) => {
           lobby: getLobbySnapshot(lobby)
         }
       });
-
-      const hostSocket = socketsById.get(lobby.hostId);
-      send(hostSocket, {
-        type: 'lobby:peer-joined',
-        payload: {
-          playerId: clientId,
-          playerName: payload?.playerName || 'Joueur'
-        }
-      });
+      forEachConnectedLobbyRecipient(lobby, (peerSocket) => {
+        send(peerSocket, {
+          type: 'lobby:peer-joined',
+          payload: {
+            playerId: clientId,
+            playerName: payload?.playerName || 'Joueur',
+            isHost: false,
+            role: null,
+            status: 'active'
+          }
+        });
+      }, { exceptId: clientId });
       return;
     }
 
@@ -2622,6 +2722,7 @@ io.on('connection', (socket) => {
 
       // Si c'est le host qui quitte, transférer le host si possible
       if (lobby.hostId === playerId) {
+        clearDisconnectedLobbyPlayerTimeout(code, playerId);
         lobby.players.delete(playerId);
         const transferred = transferLobbyHost({
           code,
@@ -2633,16 +2734,14 @@ io.on('connection', (socket) => {
         }
       } else {
         // Joueur normal qui quitte
+        clearDisconnectedLobbyPlayerTimeout(code, playerId);
         lobby.players.delete(playerId);
-        
-        // Notifier le host que le joueur a quitté
-        const hostSocket = socketsById.get(lobby.hostId);
-        if (hostSocket) {
-          send(hostSocket, { 
-            type: 'lobby:peer-left', 
-            payload: { playerId } 
+        forEachConnectedLobbyRecipient(lobby, (peerSocket) => {
+          send(peerSocket, {
+            type: 'lobby:peer-left',
+            payload: { playerId }
           });
-        }
+        }, { exceptId: playerId });
       }
 
       // Mettre à jour les infos du client
@@ -2879,6 +2978,16 @@ io.on('connection', (socket) => {
         text,
         timestamp: Date.now()
       };
+      if (!Array.isArray(lobby.chatMessages)) {
+        lobby.chatMessages = [];
+      }
+      lobby.chatMessages.push(msg);
+      if (lobby.chatMessages.length > MAX_LOBBY_CHAT_MESSAGES) {
+        lobby.chatMessages.splice(
+          0,
+          lobby.chatMessages.length - MAX_LOBBY_CHAT_MESSAGES
+        );
+      }
 
       lobby.players.forEach((p) => {
         const s = socketsById.get(p.id);
@@ -2903,12 +3012,23 @@ io.on('connection', (socket) => {
         text,
         timestamp: Date.now()
       };
+      if (!Array.isArray(game.agentChatMessages)) {
+        game.agentChatMessages = [];
+      }
+      game.agentChatMessages.push(msg);
+      if (game.agentChatMessages.length > MAX_GAME_CHAT_MESSAGES) {
+        game.agentChatMessages.splice(
+          0,
+          game.agentChatMessages.length - MAX_GAME_CHAT_MESSAGES
+        );
+      }
 
       game.players.forEach((p) => {
         if ((p.role || '').toUpperCase() !== 'AGENT') return;
         const s = socketsById.get(p.id);
         if (s) send(s, { type: 'game:chat-agent-message', payload: msg });
       });
+      markStateChanged('game:chat:agent', { code: gameCode, playerId: clientId });
       return;
     }
 
@@ -2927,12 +3047,23 @@ io.on('connection', (socket) => {
         text,
         timestamp: Date.now()
       };
+      if (!Array.isArray(game.rogueChatMessages)) {
+        game.rogueChatMessages = [];
+      }
+      game.rogueChatMessages.push(msg);
+      if (game.rogueChatMessages.length > MAX_GAME_CHAT_MESSAGES) {
+        game.rogueChatMessages.splice(
+          0,
+          game.rogueChatMessages.length - MAX_GAME_CHAT_MESSAGES
+        );
+      }
 
       game.players.forEach((p) => {
         if ((p.role || '').toUpperCase() !== 'ROGUE') return;
         const s = socketsById.get(p.id);
         if (s) send(s, { type: 'game:chat-rogue-message', payload: msg });
       });
+      markStateChanged('game:chat:rogue', { code: gameCode, playerId: clientId });
       return;
     }
 
@@ -3095,11 +3226,30 @@ io.on('connection', (socket) => {
           disconnectedAt: Date.now()
         });
       } else {
-        // Pour les non-hosts, supprimer immédiatement
-        lobby.players.delete(clientInfo.clientId);
-        log(`[JOUEUR PARTI] Lobby: ${lobbyCode}, Joueur: ${clientInfo.clientId}`);
-        const hostSocket = socketsById.get(lobby.hostId);
-        send(hostSocket, { type: 'lobby:peer-left', payload: { playerId: clientInfo.clientId } });
+        const player = lobby.players.get(clientInfo.clientId);
+        if (player) {
+          player.status = 'disconnected';
+          player.disconnectedAt = Date.now();
+          lobby.players.set(clientInfo.clientId, player);
+          clearDisconnectedLobbyPlayerTimeout(lobbyCode, clientInfo.clientId);
+          const timeoutId = setTimeout(() => {
+            if (!lobbies.has(lobbyCode)) return;
+            const currentLobby = lobbies.get(lobbyCode);
+            const currentPlayer = currentLobby.players.get(clientInfo.clientId);
+            if (!currentPlayer) return;
+            if ((currentPlayer.status || '').toLowerCase() !== 'disconnected') return;
+            currentLobby.players.delete(clientInfo.clientId);
+            forEachConnectedLobbyRecipient(currentLobby, (peerSocket) => {
+              send(peerSocket, {
+                type: 'lobby:peer-left',
+                payload: { playerId: clientInfo.clientId }
+              });
+            }, { exceptId: clientInfo.clientId });
+            disconnectedLobbyPlayers.delete(lobbyDisconnectKey(lobbyCode, clientInfo.clientId));
+          }, 30 * 1000);
+          disconnectedLobbyPlayers.set(lobbyDisconnectKey(lobbyCode, clientInfo.clientId), timeoutId);
+          log(`[JOUEUR DÉCONNECTÉ] Lobby: ${lobbyCode}, Joueur: ${clientInfo.clientId}`);
+        }
       }
     }
 
