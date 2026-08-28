@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import Joi from 'joi';
 import { validate } from '../../middleware/validate.js';
+import { asyncHandler } from '../../utils/async-handler.js';
 import {
   appendEvents,
   createGame,
@@ -30,137 +31,114 @@ const listGamesQuerySchema = Joi.object({
 
 export const gamesRouter = Router();
 
-gamesRouter.post('/games', validate(createGameSchema), async (req, res, next) => {
-  try {
+gamesRouter.post(
+  '/games',
+  validate(createGameSchema),
+  asyncHandler(async (req, res) => {
     const game = await createGame(req.body);
     res.status(201).json({ game });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
-gamesRouter.get('/games', validate(listGamesQuerySchema, 'query'), async (req, res, next) => {
-  try {
+gamesRouter.get(
+  '/games',
+  validate(listGamesQuerySchema, 'query'),
+  asyncHandler(async (req, res) => {
     const limit = Number(req.query.limit ?? 30);
     const games = await fetchRecentGames(limit);
     res.json({ games });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
-gamesRouter.get('/games/:gameCode', validate(gameCodeParamsSchema, 'params'), async (req, res, next) => {
-  try {
+gamesRouter.get(
+  '/games/:gameCode',
+  validate(gameCodeParamsSchema, 'params'),
+  asyncHandler(async (req, res) => {
     const details = await fetchGame(req.params.gameCode);
     res.json(details);
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
 gamesRouter.post(
   '/games/:gameCode/start',
   validate(gameCodeParamsSchema, 'params'),
-  async (req, res, next) => {
-    try {
-      const game = await startGame(req.params.gameCode);
-      res.json({ game });
-    } catch (error) {
-      next(error);
-    }
-  }
+  asyncHandler(async (req, res) => {
+    const game = await startGame(req.params.gameCode);
+    res.json({ game });
+  })
 );
 
 gamesRouter.post(
   '/games/:gameCode/end',
   validate(gameCodeParamsSchema, 'params'),
   validate(updateGameStatusSchema),
-  async (req, res, next) => {
-    try {
-      const game = await endGame(req.params.gameCode, req.body);
-      res.json({ game });
-    } catch (error) {
-      next(error);
-    }
-  }
+  asyncHandler(async (req, res) => {
+    const game = await endGame(req.params.gameCode, req.body);
+    res.json({ game });
+  })
 );
 
 gamesRouter.post(
   '/games/:gameCode/players',
   validate(gameCodeParamsSchema, 'params'),
   validate(upsertPlayerSchema),
-  async (req, res, next) => {
-    try {
-      const player = await upsertGameParticipant(req.params.gameCode, req.body);
-      res.status(201).json({ player });
-    } catch (error) {
-      next(error);
-    }
-  }
+  asyncHandler(async (req, res) => {
+    const player = await upsertGameParticipant(req.params.gameCode, req.body);
+    res.status(201).json({ player });
+  })
 );
 
 gamesRouter.post(
   '/games/:gameCode/events',
   validate(gameCodeParamsSchema, 'params'),
   validate(appendEventsSchema),
-  async (req, res, next) => {
-    try {
-      const events = await appendEvents(req.params.gameCode, req.body.events);
-      res.status(201).json({ events });
-    } catch (error) {
-      next(error);
-    }
-  }
+  asyncHandler(async (req, res) => {
+    const events = await appendEvents(req.params.gameCode, req.body.events);
+    res.status(201).json({ events });
+  })
 );
 
 gamesRouter.get(
   '/games/:gameCode/events',
   validate(gameCodeParamsSchema, 'params'),
   validate(listEventsQuerySchema, 'query'),
-  async (req, res, next) => {
-    try {
-      const details = await fetchGame(req.params.gameCode);
-      const offset = Number(req.query.offset ?? 0);
-      const limit = Number(req.query.limit ?? 200);
-      res.json({
-        events: details.events.slice(offset, offset + limit),
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
+  asyncHandler(async (req, res) => {
+    const details = await fetchGame(req.params.gameCode);
+    const offset = Number(req.query.offset ?? 0);
+    const limit = Number(req.query.limit ?? 200);
+    res.json({
+      events: details.events.slice(offset, offset + limit),
+    });
+  })
 );
 
 gamesRouter.post(
   '/games/:gameCode/results',
   validate(gameCodeParamsSchema, 'params'),
   validate(finalizeGameSchema),
-  async (req, res, next) => {
-    try {
-      const result = await finalizeGameWithResults(req.params.gameCode, req.body);
-      res.status(201).json(result);
-    } catch (error) {
-      next(error);
-    }
-  }
+  asyncHandler(async (req, res) => {
+    const result = await finalizeGameWithResults(req.params.gameCode, req.body);
+    res.status(201).json(result);
+  })
 );
 
-gamesRouter.get('/games/:gameCode/results', validate(gameCodeParamsSchema, 'params'), async (req, res, next) => {
-  try {
+gamesRouter.get(
+  '/games/:gameCode/results',
+  validate(gameCodeParamsSchema, 'params'),
+  asyncHandler(async (req, res) => {
     const details = await fetchGame(req.params.gameCode);
     res.json({
       game: details.game,
       result: details.result,
       player_results: details.playerResults,
     });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
 // Compatibility endpoints used by realtime signaling service.
-gamesRouter.post('/game-sessions', async (req, res, next) => {
-  try {
+gamesRouter.post(
+  '/game-sessions',
+  asyncHandler(async (req, res) => {
     const game = await createGame({
       game_code: req.body.game_code,
       config_json: req.body.config_json ?? null,
@@ -178,13 +156,12 @@ gamesRouter.post('/game-sessions', async (req, res, next) => {
       });
     }
     res.status(200).json({ success: true, game });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
-gamesRouter.post('/game-replay/snapshot', async (req, res, next) => {
-  try {
+gamesRouter.post(
+  '/game-replay/snapshot',
+  asyncHandler(async (req, res) => {
     await createGame({
       game_code: req.body.game_code,
       config_json: null,
@@ -202,13 +179,13 @@ gamesRouter.post('/game-replay/snapshot', async (req, res, next) => {
       },
     ]);
     res.status(201).json({ success: true, event_id: events[0].id });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
-gamesRouter.get('/game-replay/:gameCode', validate(gameCodeParamsSchema, 'params'), async (req, res, next) => {
-  try {
+gamesRouter.get(
+  '/game-replay/:gameCode',
+  validate(gameCodeParamsSchema, 'params'),
+  asyncHandler(async (req, res) => {
     const details = await fetchGame(req.params.gameCode);
     const snapshots = details.events
       .filter((event) => event.event_type === 'game:snapshot')
@@ -220,7 +197,5 @@ gamesRouter.get('/game-replay/:gameCode', validate(gameCodeParamsSchema, 'params
       session: details.game,
       snapshots,
     });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);

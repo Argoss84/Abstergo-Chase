@@ -2,6 +2,7 @@ import { Router } from 'express';
 import Joi from 'joi';
 import { requireAuth, requireAuthForSync } from '../../middleware/auth-cognito.js';
 import { validate } from '../../middleware/validate.js';
+import { asyncHandler } from '../../utils/async-handler.js';
 import { HttpError } from '../../utils/http-error.js';
 import { syncUserSchema, updateProfileSchema } from './users.schemas.js';
 import {
@@ -19,8 +20,11 @@ const connectedUserParamsSchema = Joi.object({
   userId: Joi.number().integer().positive().required(),
 });
 
-usersRouter.post('/auth/sync', requireAuthForSync, validate(syncUserSchema), async (req, res, next) => {
-  try {
+usersRouter.post(
+  '/auth/sync',
+  requireAuthForSync,
+  validate(syncUserSchema),
+  asyncHandler(async (req, res) => {
     const user = await upsertFromCognito({
       cognitoSub: req.auth.sub,
       email: req.auth.email,
@@ -35,31 +39,29 @@ usersRouter.post('/auth/sync', requireAuthForSync, validate(syncUserSchema), asy
       throw new HttpError(500, 'Impossible d\'activer la session utilisateur');
     }
     res.status(200).json({ user });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
-usersRouter.post('/auth/logout', requireAuthForSync, async (req, res, next) => {
-  try {
+usersRouter.post(
+  '/auth/logout',
+  requireAuthForSync,
+  asyncHandler(async (req, res) => {
     await disconnectSessionByCognitoSub(req.auth.sub, req.auth.accessTokenHash);
     res.json({ success: true });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
-usersRouter.get('/users/me', requireAuth, async (req, res, next) => {
-  try {
+usersRouter.get(
+  '/users/me',
+  requireAuth,
+  asyncHandler(async (req, res) => {
     const user = await getByCognitoSub(req.auth.sub);
     if (!user) {
       throw new HttpError(404, 'Utilisateur introuvable, appelez /api/auth/sync');
     }
     res.json({ user });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
 usersRouter.patch('/users/me', requireAuth, validate(updateProfileSchema), async (req, res, next) => {
   try {
@@ -76,27 +78,22 @@ usersRouter.patch('/users/me', requireAuth, validate(updateProfileSchema), async
   }
 });
 
-usersRouter.get('/admin/connected-users', async (_req, res, next) => {
-  try {
+usersRouter.get(
+  '/admin/connected-users',
+  asyncHandler(async (_req, res) => {
     const users = await listConnectedUsers();
     res.json({ users });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
 usersRouter.delete(
   '/admin/connected-users/:userId',
   validate(connectedUserParamsSchema, 'params'),
-  async (req, res, next) => {
-    try {
-      const disconnected = await disconnectUserSession(req.params.userId);
-      if (!disconnected) {
-        throw new HttpError(404, 'Session utilisateur introuvable');
-      }
-      res.json({ success: true });
-    } catch (error) {
-      next(error);
+  asyncHandler(async (req, res) => {
+    const disconnected = await disconnectUserSession(req.params.userId);
+    if (!disconnected) {
+      throw new HttpError(404, 'Session utilisateur introuvable');
     }
-  }
+    res.json({ success: true });
+  })
 );
