@@ -1584,6 +1584,8 @@ class _GamePageState extends State<GamePage>
                     final targeting = _controller.getRogueTargetForHeading(
                       heading,
                     );
+                    final maxCaptureDistance =
+                        _controller.configuredAgentTargetingRangeMeters;
                     final distance = targeting.distanceMeters;
                     final angle = targeting.angularDeltaDeg;
                     return Column(
@@ -1598,9 +1600,9 @@ class _GamePageState extends State<GamePage>
                           ),
                         ),
                         const SizedBox(height: 8),
-                        const Text(
+                        Text(
                           'Visez le rogue avec le haut du téléphone '
-                          '(distance <= 5 m).',
+                          '(distance <= ${maxCaptureDistance.toStringAsFixed(0)} m).',
                         ),
                         const SizedBox(height: 12),
                         Container(
