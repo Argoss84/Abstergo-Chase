@@ -415,50 +415,50 @@ class _PlayerGpsPin extends StatelessWidget {
       ),
     );
   }
+}
 
-  class _RolePingMarkerWidget extends StatelessWidget {
-    const _RolePingMarkerWidget({required this.ping});
+class _RolePingMarkerWidget extends StatelessWidget {
+  const _RolePingMarkerWidget({required this.ping});
 
-    final MapPingMarker ping;
+  final MapPingMarker ping;
 
-    @override
-    Widget build(BuildContext context) {
-      return IgnorePointer(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.72),
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    ping.playerName,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  Text(
-                    ping.message,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(9),
             ),
-            const SizedBox(height: 2),
-            Icon(Icons.wifi_tethering, color: ping.color, size: 26),
-          ],
-        ),
-      );
-    }
+            child: Column(
+              children: [
+                Text(
+                  ping.playerName,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  ping.message,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 2),
+          Icon(Icons.wifi_tethering, color: ping.color, size: 26),
+        ],
+      ),
+    );
   }
 }
