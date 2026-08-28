@@ -288,18 +288,6 @@ class _FpsCompassBar extends StatelessWidget {
     );
   }
 
-  static double _normalizeDeg(double v) {
-    var d = v % 360.0;
-    if (d < 0) d += 360.0;
-    return d;
-  }
-
-  static double _shortestAngleDeltaDeg(double fromDeg, double toDeg) {
-    var d = (toDeg - fromDeg) % 360.0;
-    if (d > 180) d -= 360;
-    if (d < -180) d += 360;
-    return d;
-  }
 }
 
 class _FpsCompassPainter extends CustomPainter {
@@ -389,19 +377,6 @@ class _FpsCompassPainter extends CustomPainter {
     }
   }
 
-  static double _normalizeDeg(double v) {
-    var d = v % 360.0;
-    if (d < 0) d += 360.0;
-    return d;
-  }
-
-  static double _shortestAngleDeltaDeg(double fromDeg, double toDeg) {
-    var d = (toDeg - fromDeg) % 360.0;
-    if (d > 180) d -= 360;
-    if (d < -180) d += 360;
-    return d;
-  }
-
   @override
   bool shouldRepaint(covariant _FpsCompassPainter oldDelegate) {
     return oldDelegate.headingDeg != headingDeg ||
@@ -409,4 +384,17 @@ class _FpsCompassPainter extends CustomPainter {
         oldDelegate.windowDeg != windowDeg ||
         oldDelegate.centerX != centerX;
   }
+}
+
+double _normalizeDeg(double v) {
+  var d = v % 360.0;
+  if (d < 0) d += 360.0;
+  return d;
+}
+
+double _shortestAngleDeltaDeg(double fromDeg, double toDeg) {
+  var d = (toDeg - fromDeg) % 360.0;
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  return d;
 }
