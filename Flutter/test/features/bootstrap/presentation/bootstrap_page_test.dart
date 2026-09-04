@@ -10,9 +10,13 @@ class _FakeBootstrapPermissionsService implements BootstrapPermissionsService {
   final List<BootstrapPermissionsResult> _results;
   int calls = 0;
   int openSettingsCalls = 0;
+  final List<bool> forceRequestValues = <bool>[];
 
   @override
-  Future<BootstrapPermissionsResult> ensureRequiredPermissions() async {
+  Future<BootstrapPermissionsResult> ensureRequiredPermissions({
+    bool forceRequest = false,
+  }) async {
+    forceRequestValues.add(forceRequest);
     final index = calls;
     calls += 1;
     if (index < _results.length) {
@@ -54,6 +58,7 @@ void main() {
       );
 
       expect(permissionsService.calls, 1);
+      expect(permissionsService.forceRequestValues, <bool>[true]);
       expect(createTile.onTap, isNull);
       expect(joinTile.onTap, isNull);
       expect(find.text('Autorisations requises'), findsOneWidget);
@@ -78,6 +83,7 @@ void main() {
     );
 
     expect(permissionsService.calls, 1);
+    expect(permissionsService.forceRequestValues, <bool>[true]);
     expect(createTile.onTap, isNotNull);
     expect(joinTile.onTap, isNotNull);
     expect(find.text('Autorisations requises'), findsNothing);
@@ -105,6 +111,7 @@ void main() {
     );
 
     expect(permissionsService.calls, 2);
+    expect(permissionsService.forceRequestValues, <bool>[true, true]);
     expect(createTile.onTap, isNotNull);
     expect(joinTile.onTap, isNotNull);
   });
@@ -124,6 +131,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(permissionsService.openSettingsCalls, 1);
+    expect(permissionsService.forceRequestValues, <bool>[true]);
   });
 
   testWidgets('Shows error state and retry action when check fails', (
@@ -154,6 +162,7 @@ void main() {
     );
 
     expect(permissionsService.calls, 2);
+    expect(permissionsService.forceRequestValues, <bool>[true, true]);
     expect(createTile.onTap, isNotNull);
     expect(joinTile.onTap, isNotNull);
   });

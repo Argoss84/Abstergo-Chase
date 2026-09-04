@@ -12,7 +12,9 @@ class BootstrapPermissionsResult {
 }
 
 abstract class BootstrapPermissionsService {
-  Future<BootstrapPermissionsResult> ensureRequiredPermissions();
+  Future<BootstrapPermissionsResult> ensureRequiredPermissions({
+    bool forceRequest = false,
+  });
 
   Future<void> openAppSettings();
 }
@@ -21,8 +23,12 @@ class DeviceBootstrapPermissionsService implements BootstrapPermissionsService {
   const DeviceBootstrapPermissionsService();
 
   @override
-  Future<BootstrapPermissionsResult> ensureRequiredPermissions() async {
-    final locationReady = await _ensureLocationPermission();
+  Future<BootstrapPermissionsResult> ensureRequiredPermissions({
+    bool forceRequest = false,
+  }) async {
+    final locationReady = await _ensureLocationPermission(
+      forceRequest: forceRequest,
+    );
     final microphoneReady = await _ensureMicrophonePermission();
     if (locationReady == _PermissionCheck.error ||
         microphoneReady == _PermissionCheck.error) {
@@ -50,14 +56,19 @@ class DeviceBootstrapPermissionsService implements BootstrapPermissionsService {
     await Geolocator.openAppSettings();
   }
 
-  Future<_PermissionCheck> _ensureLocationPermission() async {
+  Future<_PermissionCheck> _ensureLocationPermission({
+    required bool forceRequest,
+  }) async {
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         return _PermissionCheck.denied;
       }
       var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
+      final isGranted =
+          permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse;
+      if (!isGranted && forceRequest) {
         permission = await Geolocator.requestPermission();
       }
       if (permission == LocationPermission.deniedForever) {

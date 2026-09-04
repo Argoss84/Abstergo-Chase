@@ -9,7 +9,7 @@ import 'package:go_router/go_router.dart';
 
 class _AlwaysGrantedPermissionsService implements BootstrapPermissionsService {
   @override
-  Future<BootstrapPermissionsResult> ensureRequiredPermissions() async {
+  Future<BootstrapPermissionsResult> ensureRequiredPermissions({bool forceRequest = false}) async {
     return const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted);
   }
 

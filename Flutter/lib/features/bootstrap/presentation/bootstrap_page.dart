@@ -29,10 +29,10 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
   @override
   void initState() {
     super.initState();
-    _checkPermissions();
+    _checkPermissions(forceRequest: true);
   }
 
-  Future<void> _checkPermissions() async {
+  Future<void> _checkPermissions({bool forceRequest = false}) async {
     if (mounted) {
       setState(() {
         _isCheckingPermissions = true;
@@ -40,7 +40,9 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
     }
     var result = const BootstrapPermissionsResult(BootstrapPermissionsStatus.error);
     try {
-      result = await widget.permissionsService.ensureRequiredPermissions();
+      result = await widget.permissionsService.ensureRequiredPermissions(
+        forceRequest: forceRequest,
+      );
     } catch (_) {
       result = const BootstrapPermissionsResult(BootstrapPermissionsStatus.error);
     }
@@ -116,7 +118,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                           _permissionsStatus ==
                               BootstrapPermissionsStatus.deniedForever
                           ? _openSettings
-                          : _checkPermissions,
+                          : () => _checkPermissions(forceRequest: true),
                       child: Text(
                         _permissionsStatus ==
                                 BootstrapPermissionsStatus.deniedForever
