@@ -89,33 +89,6 @@ void main() {
     expect(find.text('Autorisations requises'), findsNothing);
   });
 
-  testWidgets('Retry rechecks permissions and can re-enable lobby actions', (
-    tester,
-  ) async {
-    final permissionsService = _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
-      const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
-      const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted),
-    ]);
-
-    await tester.pumpWidget(_app(permissionsService));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Réessayer'));
-    await tester.pumpAndSettle();
-
-    final createTile = tester.widget<ListTile>(
-      find.widgetWithText(ListTile, 'Créer une partie'),
-    );
-    final joinTile = tester.widget<ListTile>(
-      find.widgetWithText(ListTile, 'Rejoindre une partie'),
-    );
-
-    expect(permissionsService.calls, 2);
-    expect(permissionsService.forceRequestValues, <bool>[true, true]);
-    expect(createTile.onTap, isNotNull);
-    expect(joinTile.onTap, isNotNull);
-  });
-
   testWidgets('Uses settings action when permissions are denied forever', (
     tester,
   ) async {
@@ -134,12 +107,27 @@ void main() {
     expect(permissionsService.forceRequestValues, <bool>[true]);
   });
 
-  testWidgets('Shows error state and retry action when check fails', (
+  testWidgets('Uses settings action when permissions are denied', (
     tester,
   ) async {
     final permissionsService = _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
+      const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
+    ]);
+
+    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Réglages'), findsOneWidget);
+    await tester.tap(find.text('Réglages'));
+    await tester.pumpAndSettle();
+
+    expect(permissionsService.openSettingsCalls, 1);
+    expect(permissionsService.forceRequestValues, <bool>[true]);
+  });
+
+  testWidgets('Uses settings action when check fails', (tester) async {
+    final permissionsService = _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
       const BootstrapPermissionsResult(BootstrapPermissionsStatus.error),
-      const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted),
     ]);
 
     await tester.pumpWidget(_app(permissionsService));
@@ -147,23 +135,16 @@ void main() {
 
     expect(find.text('Erreur de vérification'), findsOneWidget);
     expect(
-      find.text('Impossible de vérifier les autorisations. Réessayez.'),
+      find.text(
+        'Impossible de vérifier les autorisations. Ouvrez les réglages de l’application.',
+      ),
       findsOneWidget,
     );
-
-    await tester.tap(find.text('Réessayer'));
+    expect(find.text('Réglages'), findsOneWidget);
+    await tester.tap(find.text('Réglages'));
     await tester.pumpAndSettle();
 
-    final createTile = tester.widget<ListTile>(
-      find.widgetWithText(ListTile, 'Créer une partie'),
-    );
-    final joinTile = tester.widget<ListTile>(
-      find.widgetWithText(ListTile, 'Rejoindre une partie'),
-    );
-
-    expect(permissionsService.calls, 2);
-    expect(permissionsService.forceRequestValues, <bool>[true, true]);
-    expect(createTile.onTap, isNotNull);
-    expect(joinTile.onTap, isNotNull);
+    expect(permissionsService.openSettingsCalls, 1);
+    expect(permissionsService.forceRequestValues, <bool>[true]);
   });
 }

@@ -110,21 +110,12 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                     ),
                     subtitle: Text(
                       _permissionsStatus == BootstrapPermissionsStatus.error
-                          ? 'Impossible de vérifier les autorisations. Réessayez.'
+                          ? 'Impossible de vérifier les autorisations. Ouvrez les réglages de l’application.'
                           : 'Activez la localisation et le micro pour créer ou rejoindre une partie.',
                     ),
                     trailing: TextButton(
-                      onPressed:
-                          _permissionsStatus ==
-                              BootstrapPermissionsStatus.deniedForever
-                          ? _openSettings
-                          : () => _checkPermissions(forceRequest: true),
-                      child: Text(
-                        _permissionsStatus ==
-                                BootstrapPermissionsStatus.deniedForever
-                            ? 'Réglages'
-                            : 'Réessayer',
-                      ),
+                      onPressed: _openSettings,
+                      child: const Text('Réglages'),
                     ),
                   ),
                 ),
