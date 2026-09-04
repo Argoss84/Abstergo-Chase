@@ -147,6 +147,17 @@ class _LobbyMessagesSocketService extends LobbySocketService {
   }
 }
 
+class _StartGameTrackingSocketService extends _LobbyMessagesSocketService {
+  int startGameCallCount = 0;
+  String? startedCode;
+
+  @override
+  void startGame(String code) {
+    startGameCallCount += 1;
+    startedCode = code;
+  }
+}
+
 void main() {
   test(
     'triggers game fallback route when lobby join returns lobby not found',
@@ -329,4 +340,62 @@ void main() {
     expect(peer.status, 'active');
     controller.dispose();
   });
+
+  test(
+    'cannot start game when at least one player has no role',
+    () async {
+      final socketService = _StartGameTrackingSocketService();
+      final controller = LobbyController(socketService: socketService);
+
+      await controller.initialize(
+        bootstrap: const LobbyBootstrapData(
+          code: 'ABC123',
+          serverUrl: 'http://localhost:3000',
+          socketPath: '/socket.io',
+          playerName: 'Player',
+        ),
+      );
+
+      socketService.emit(const <String, dynamic>{
+        'type': 'lobby:joined',
+        'payload': <String, dynamic>{
+          'code': 'ABC123',
+          'playerId': 'host',
+          'hostId': 'host',
+          'lobby': <String, dynamic>{
+            'players': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'id': 'host',
+                'name': 'Host',
+                'role': 'AGENT',
+                'status': 'active',
+                'isHost': true,
+              },
+              <String, dynamic>{
+                'id': 'rogue',
+                'name': 'Rogue',
+                'role': 'ROGUE',
+                'status': 'active',
+                'isHost': false,
+              },
+              <String, dynamic>{
+                'id': 'norole',
+                'name': 'NoRole',
+                'status': 'active',
+                'isHost': false,
+              },
+            ],
+          },
+        },
+      });
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.canStartGame, isFalse);
+
+      controller.startGame();
+
+      expect(socketService.startGameCallCount, 0);
+      controller.dispose();
+    },
+  );
 }
