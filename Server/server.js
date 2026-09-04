@@ -1095,6 +1095,24 @@ const getLobbySnapshot = (lobby) => ({
   }))
 });
 
+const replaceLobbyPlayerIdPreservingOrder = (lobby, oldPlayerId, nextPlayer) => {
+  if (!lobby?.players || !oldPlayerId || !nextPlayer?.id) return;
+  if (!lobby.players.has(oldPlayerId)) {
+    lobby.players.set(nextPlayer.id, nextPlayer);
+    return;
+  }
+
+  const updatedPlayers = new Map();
+  lobby.players.forEach((player, playerId) => {
+    if (playerId === oldPlayerId) {
+      updatedPlayers.set(nextPlayer.id, nextPlayer);
+      return;
+    }
+    updatedPlayers.set(playerId, player);
+  });
+  lobby.players = updatedPlayers;
+};
+
 const countRolesInLobby = (lobby) => {
   let agents = 0;
   let rogues = 0;
@@ -1708,8 +1726,7 @@ io.on('connection', (socket) => {
         clearDisconnectedLobbyPlayerTimeout(code, oldPlayerId);
         
         // Remplacer l'ancien playerId par le nouveau dans le lobby
-        lobby.players.delete(oldPlayerId);
-        lobby.players.set(clientId, { 
+        replaceLobbyPlayerIdPreservingOrder(lobby, oldPlayerId, {
           id: clientId,
           name: payload?.playerName || existingPlayer?.name || 'Joueur',
           isHost: existingPlayer?.isHost || false,
@@ -1904,8 +1921,7 @@ io.on('connection', (socket) => {
         lobby.hostId = clientId;
         const oldPlayer = lobby.players.get(oldPlayerId);
         if (oldPlayer) {
-          lobby.players.delete(oldPlayerId);
-          lobby.players.set(clientId, { 
+          replaceLobbyPlayerIdPreservingOrder(lobby, oldPlayerId, {
             id: clientId,
             name: payload?.playerName || oldPlayer.name || 'Host',
             isHost: true,
