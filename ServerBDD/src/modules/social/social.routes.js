@@ -3,6 +3,7 @@ import Joi from 'joi';
 import { pool } from '../../db/pool.js';
 import { requireAuth } from '../../middleware/auth-cognito.js';
 import { validate } from '../../middleware/validate.js';
+import { asyncHandler } from '../../utils/async-handler.js';
 import { HttpError } from '../../utils/http-error.js';
 import { blockUserSchema, createFriendRequestSchema } from './social.schemas.js';
 
@@ -17,8 +18,10 @@ async function getCurrentUserId(cognitoSub) {
 
 export const socialRouter = Router();
 
-socialRouter.get('/social/search', requireAuth, async (req, res, next) => {
-  try {
+socialRouter.get(
+  '/social/search',
+  requireAuth,
+  asyncHandler(async (req, res) => {
     const query = String(req.query.q ?? '').trim();
     if (!query) {
       throw new HttpError(400, 'Paramètre q requis');
@@ -37,74 +40,64 @@ socialRouter.get('/social/search', requireAuth, async (req, res, next) => {
     );
 
     res.json({ results: result.rows });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
 socialRouter.post(
   '/social/friend-requests',
   requireAuth,
   validate(createFriendRequestSchema),
-  async (req, res, next) => {
-    try {
-      const requesterId = await getCurrentUserId(req.auth.sub);
-      if (!requesterId) {
-        throw new HttpError(404, 'Utilisateur introuvable, appelez /api/auth/sync');
-      }
-      if (requesterId === req.body.to_user_id) {
-        throw new HttpError(400, 'Impossible de s’ajouter soi-même');
-      }
-
-      const result = await pool.query(
-        `
-        INSERT INTO friendships (requester_id, addressee_id, status)
-        VALUES ($1, $2, 'pending')
-        ON CONFLICT (requester_id, addressee_id) DO NOTHING
-        RETURNING id, requester_id, addressee_id, status, created_at
-        `,
-        [requesterId, req.body.to_user_id]
-      );
-
-      if (result.rowCount === 0) {
-        throw new HttpError(409, 'Demande déjà existante');
-      }
-      res.status(201).json({ request: result.rows[0] });
-    } catch (error) {
-      next(error);
+  asyncHandler(async (req, res) => {
+    const requesterId = await getCurrentUserId(req.auth.sub);
+    if (!requesterId) {
+      throw new HttpError(404, 'Utilisateur introuvable, appelez /api/auth/sync');
     }
-  }
+    if (requesterId === req.body.to_user_id) {
+      throw new HttpError(400, "Impossible de s'ajouter soi-même");
+    }
+
+    const result = await pool.query(
+      `
+      INSERT INTO friendships (requester_id, addressee_id, status)
+      VALUES ($1, $2, 'pending')
+      ON CONFLICT (requester_id, addressee_id) DO NOTHING
+      RETURNING id, requester_id, addressee_id, status, created_at
+      `,
+      [requesterId, req.body.to_user_id]
+    );
+
+    if (result.rowCount === 0) {
+      throw new HttpError(409, 'Demande déjà existante');
+    }
+    res.status(201).json({ request: result.rows[0] });
+  })
 );
 
 socialRouter.post(
   '/social/friend-requests/:requestId/accept',
   requireAuth,
   validate(paramsSchema, 'params'),
-  async (req, res, next) => {
-    try {
-      const addresseeId = await getCurrentUserId(req.auth.sub);
-      if (!addresseeId) {
-        throw new HttpError(404, 'Utilisateur introuvable, appelez /api/auth/sync');
-      }
-
-      const result = await pool.query(
-        `
-        UPDATE friendships
-        SET status = 'accepted', accepted_at = NOW(), updated_at = NOW()
-        WHERE id = $1 AND addressee_id = $2 AND status = 'pending'
-        RETURNING id, requester_id, addressee_id, status, accepted_at
-        `,
-        [req.params.requestId, addresseeId]
-      );
-
-      if (result.rowCount === 0) {
-        throw new HttpError(404, 'Demande introuvable');
-      }
-      res.json({ request: result.rows[0] });
-    } catch (error) {
-      next(error);
+  asyncHandler(async (req, res) => {
+    const addresseeId = await getCurrentUserId(req.auth.sub);
+    if (!addresseeId) {
+      throw new HttpError(404, 'Utilisateur introuvable, appelez /api/auth/sync');
     }
-  }
+
+    const result = await pool.query(
+      `
+      UPDATE friendships
+      SET status = 'accepted', accepted_at = NOW(), updated_at = NOW()
+      WHERE id = $1 AND addressee_id = $2 AND status = 'pending'
+      RETURNING id, requester_id, addressee_id, status, accepted_at
+      `,
+      [req.params.requestId, addresseeId]
+    );
+
+    if (result.rowCount === 0) {
+      throw new HttpError(404, 'Demande introuvable');
+    }
+    res.json({ request: result.rows[0] });
+  })
 );
 
 socialRouter.post('/social/block', requireAuth, validate(blockUserSchema), async (req, res, next) => {

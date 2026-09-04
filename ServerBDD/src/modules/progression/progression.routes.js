@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../../db/pool.js';
 import { requireAuth } from '../../middleware/auth-cognito.js';
 import { validate } from '../../middleware/validate.js';
+import { asyncHandler } from '../../utils/async-handler.js';
 import { HttpError } from '../../utils/http-error.js';
 import { updateProgressionSchema } from './progression.schemas.js';
 
@@ -12,8 +13,10 @@ async function getCurrentUserId(cognitoSub) {
 
 export const progressionRouter = Router();
 
-progressionRouter.get('/progression/me', requireAuth, async (req, res, next) => {
-  try {
+progressionRouter.get(
+  '/progression/me',
+  requireAuth,
+  asyncHandler(async (req, res) => {
     const userId = await getCurrentUserId(req.auth.sub);
     if (!userId) {
       throw new HttpError(404, 'Utilisateur introuvable, appelez /api/auth/sync');
@@ -34,49 +37,43 @@ progressionRouter.get('/progression/me', requireAuth, async (req, res, next) => 
       [userId]
     );
     res.json({ stats: stats.rows[0] });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
 progressionRouter.patch(
   '/progression/me',
   requireAuth,
   validate(updateProgressionSchema),
-  async (req, res, next) => {
-    try {
-      const userId = await getCurrentUserId(req.auth.sub);
-      if (!userId) {
-        throw new HttpError(404, 'Utilisateur introuvable, appelez /api/auth/sync');
-      }
-
-      await pool.query(
-        `
-        INSERT INTO player_stats (user_id)
-        VALUES ($1)
-        ON CONFLICT (user_id) DO NOTHING
-        `,
-        [userId]
-      );
-
-      const updated = await pool.query(
-        `
-        UPDATE player_stats
-        SET
-          xp = GREATEST(0, xp + $2),
-          wins = GREATEST(0, wins + $3),
-          losses = GREATEST(0, losses + $4),
-          level = GREATEST(1, ((GREATEST(0, xp + $2) / 1000) + 1)),
-          updated_at = NOW()
-        WHERE user_id = $1
-        RETURNING user_id, level, xp, rank_tier, wins, losses, updated_at
-        `,
-        [userId, req.body.xp_delta ?? 0, req.body.wins_delta ?? 0, req.body.losses_delta ?? 0]
-      );
-
-      res.json({ stats: updated.rows[0] });
-    } catch (error) {
-      next(error);
+  asyncHandler(async (req, res) => {
+    const userId = await getCurrentUserId(req.auth.sub);
+    if (!userId) {
+      throw new HttpError(404, 'Utilisateur introuvable, appelez /api/auth/sync');
     }
-  }
+
+    await pool.query(
+      `
+      INSERT INTO player_stats (user_id)
+      VALUES ($1)
+      ON CONFLICT (user_id) DO NOTHING
+      `,
+      [userId]
+    );
+
+    const updated = await pool.query(
+      `
+      UPDATE player_stats
+      SET
+        xp = GREATEST(0, xp + $2),
+        wins = GREATEST(0, wins + $3),
+        losses = GREATEST(0, losses + $4),
+        level = GREATEST(1, ((GREATEST(0, xp + $2) / 1000) + 1)),
+        updated_at = NOW()
+      WHERE user_id = $1
+      RETURNING user_id, level, xp, rank_tier, wins, losses, updated_at
+      `,
+      [userId, req.body.xp_delta ?? 0, req.body.wins_delta ?? 0, req.body.losses_delta ?? 0]
+    );
+
+    res.json({ stats: updated.rows[0] });
+  })
 );
