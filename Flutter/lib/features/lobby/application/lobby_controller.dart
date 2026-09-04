@@ -351,10 +351,7 @@ class LobbyController extends ChangeNotifier {
         notifyListeners();
         return;
       case 'socket:reconnected':
-        connectionStatus = 'connected';
-        requestLatestState();
-        _syncVoiceState();
-        notifyListeners();
+        unawaited(recoverAfterResume());
         return;
       default:
         return;
