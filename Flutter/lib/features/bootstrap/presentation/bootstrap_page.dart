@@ -24,7 +24,7 @@ class BootstrapPage extends ConsumerStatefulWidget {
 
 class _BootstrapPageState extends ConsumerState<BootstrapPage> {
   bool _isCheckingPermissions = true;
-  bool _hasRequiredPermissions = false;
+  BootstrapPermissionsStatus _permissionsStatus = BootstrapPermissionsStatus.denied;
 
   @override
   void initState() {
@@ -38,22 +38,31 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
         _isCheckingPermissions = true;
       });
     }
-    var granted = false;
+    var result = const BootstrapPermissionsResult(BootstrapPermissionsStatus.error);
     try {
-      granted = await widget.permissionsService.ensureRequiredPermissions();
+      result = await widget.permissionsService.ensureRequiredPermissions();
     } catch (_) {
-      granted = false;
+      result = const BootstrapPermissionsResult(BootstrapPermissionsStatus.error);
     }
     if (!mounted) return;
     setState(() {
-      _hasRequiredPermissions = granted;
+      _permissionsStatus = result.status;
       _isCheckingPermissions = false;
     });
   }
 
+  Future<void> _openSettings() async {
+    await widget.permissionsService.openAppSettings();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final canOpenLobbyFlows = !_isCheckingPermissions && _hasRequiredPermissions;
+    final canOpenLobbyFlows =
+        !_isCheckingPermissions &&
+        _permissionsStatus == BootstrapPermissionsStatus.granted;
+    final missingPermissions =
+        !_isCheckingPermissions &&
+        _permissionsStatus != BootstrapPermissionsStatus.granted;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Broken Veil Protocol'),
@@ -86,16 +95,35 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                   padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: LinearProgressIndicator(minHeight: 2),
                 )
-              else if (!_hasRequiredPermissions)
-                ListTile(
-                  leading: const Icon(Icons.warning_amber_rounded),
-                  title: const Text('Autorisations requises'),
-                  subtitle: const Text(
-                    'Activez la localisation et le micro pour créer ou rejoindre une partie.',
-                  ),
-                  trailing: TextButton(
-                    onPressed: _checkPermissions,
-                    child: const Text('Réessayer'),
+              else if (missingPermissions)
+                Semantics(
+                  label:
+                      'Créer et rejoindre une partie sont désactivés tant que la localisation et le micro ne sont pas autorisés.',
+                  child: ListTile(
+                    leading: const Icon(Icons.warning_amber_rounded),
+                    title: Text(
+                      _permissionsStatus == BootstrapPermissionsStatus.error
+                          ? 'Erreur de vérification'
+                          : 'Autorisations requises',
+                    ),
+                    subtitle: Text(
+                      _permissionsStatus == BootstrapPermissionsStatus.error
+                          ? 'Impossible de vérifier les autorisations. Réessayez.'
+                          : 'Activez la localisation et le micro pour créer ou rejoindre une partie.',
+                    ),
+                    trailing: TextButton(
+                      onPressed:
+                          _permissionsStatus ==
+                              BootstrapPermissionsStatus.deniedForever
+                          ? _openSettings
+                          : _checkPermissions,
+                      child: Text(
+                        _permissionsStatus ==
+                                BootstrapPermissionsStatus.deniedForever
+                            ? 'Réglages'
+                            : 'Réessayer',
+                      ),
+                    ),
                   ),
                 ),
               ListTile(

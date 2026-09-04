@@ -5,15 +5,25 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _FakeBootstrapPermissionsService implements BootstrapPermissionsService {
-  _FakeBootstrapPermissionsService(this._result);
+  _FakeBootstrapPermissionsService(this._results);
 
-  final bool _result;
+  final List<BootstrapPermissionsResult> _results;
   int calls = 0;
+  int openSettingsCalls = 0;
 
   @override
-  Future<bool> ensureRequiredPermissions() async {
+  Future<BootstrapPermissionsResult> ensureRequiredPermissions() async {
+    final index = calls;
     calls += 1;
-    return _result;
+    if (index < _results.length) {
+      return _results[index];
+    }
+    return _results.last;
+  }
+
+  @override
+  Future<void> openAppSettings() async {
+    openSettingsCalls += 1;
   }
 }
 
@@ -29,7 +39,9 @@ void main() {
   testWidgets(
     'Disables create/join when required permissions are not granted',
     (tester) async {
-      final permissionsService = _FakeBootstrapPermissionsService(false);
+      final permissionsService = _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
+        const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
+      ]);
 
       await tester.pumpWidget(_app(permissionsService));
       await tester.pumpAndSettle();
@@ -51,7 +63,9 @@ void main() {
   testWidgets('Enables create/join when required permissions are granted', (
     tester,
   ) async {
-    final permissionsService = _FakeBootstrapPermissionsService(true);
+    final permissionsService = _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
+      const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted),
+    ]);
 
     await tester.pumpWidget(_app(permissionsService));
     await tester.pumpAndSettle();
@@ -67,5 +81,80 @@ void main() {
     expect(createTile.onTap, isNotNull);
     expect(joinTile.onTap, isNotNull);
     expect(find.text('Autorisations requises'), findsNothing);
+  });
+
+  testWidgets('Retry rechecks permissions and can re-enable lobby actions', (
+    tester,
+  ) async {
+    final permissionsService = _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
+      const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
+      const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted),
+    ]);
+
+    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Réessayer'));
+    await tester.pumpAndSettle();
+
+    final createTile = tester.widget<ListTile>(
+      find.widgetWithText(ListTile, 'Créer une partie'),
+    );
+    final joinTile = tester.widget<ListTile>(
+      find.widgetWithText(ListTile, 'Rejoindre une partie'),
+    );
+
+    expect(permissionsService.calls, 2);
+    expect(createTile.onTap, isNotNull);
+    expect(joinTile.onTap, isNotNull);
+  });
+
+  testWidgets('Uses settings action when permissions are denied forever', (
+    tester,
+  ) async {
+    final permissionsService = _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
+      const BootstrapPermissionsResult(BootstrapPermissionsStatus.deniedForever),
+    ]);
+
+    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Réglages'), findsOneWidget);
+    await tester.tap(find.text('Réglages'));
+    await tester.pumpAndSettle();
+
+    expect(permissionsService.openSettingsCalls, 1);
+  });
+
+  testWidgets('Shows error state and retry action when check fails', (
+    tester,
+  ) async {
+    final permissionsService = _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
+      const BootstrapPermissionsResult(BootstrapPermissionsStatus.error),
+      const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted),
+    ]);
+
+    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Erreur de vérification'), findsOneWidget);
+    expect(
+      find.text('Impossible de vérifier les autorisations. Réessayez.'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Réessayer'));
+    await tester.pumpAndSettle();
+
+    final createTile = tester.widget<ListTile>(
+      find.widgetWithText(ListTile, 'Créer une partie'),
+    );
+    final joinTile = tester.widget<ListTile>(
+      find.widgetWithText(ListTile, 'Rejoindre une partie'),
+    );
+
+    expect(permissionsService.calls, 2);
+    expect(createTile.onTap, isNotNull);
+    expect(joinTile.onTap, isNotNull);
   });
 }
