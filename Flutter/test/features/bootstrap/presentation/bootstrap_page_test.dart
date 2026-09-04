@@ -147,4 +147,45 @@ void main() {
     expect(permissionsService.openSettingsCalls, 1);
     expect(permissionsService.forceRequestValues, <bool>[true]);
   });
+
+  testWidgets('Rechecks permissions on app resume after settings return', (
+    tester,
+  ) async {
+    final permissionsService = _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
+      const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
+      const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted),
+    ]);
+
+    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Autorisations requises'), findsOneWidget);
+    expect(
+      tester
+          .widget<ListTile>(find.widgetWithText(ListTile, 'Créer une partie'))
+          .onTap,
+      isNull,
+    );
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    expect(permissionsService.calls, 2);
+    expect(permissionsService.forceRequestValues, <bool>[true, false]);
+    expect(find.text('Autorisations requises'), findsNothing);
+    expect(
+      tester
+          .widget<ListTile>(find.widgetWithText(ListTile, 'Créer une partie'))
+          .onTap,
+      isNotNull,
+    );
+    expect(
+      tester
+          .widget<ListTile>(
+            find.widgetWithText(ListTile, 'Rejoindre une partie'),
+          )
+          .onTap,
+      isNotNull,
+    );
+  });
 }

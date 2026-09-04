@@ -22,14 +22,29 @@ class BootstrapPage extends ConsumerStatefulWidget {
   ConsumerState<BootstrapPage> createState() => _BootstrapPageState();
 }
 
-class _BootstrapPageState extends ConsumerState<BootstrapPage> {
+class _BootstrapPageState extends ConsumerState<BootstrapPage>
+    with WidgetsBindingObserver {
   bool _isCheckingPermissions = true;
   BootstrapPermissionsStatus _permissionsStatus = BootstrapPermissionsStatus.denied;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _checkPermissions(forceRequest: true);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkPermissions();
+    }
   }
 
   Future<void> _checkPermissions({bool forceRequest = false}) async {
