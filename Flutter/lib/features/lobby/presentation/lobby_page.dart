@@ -554,10 +554,15 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                                 style: TextStyle(fontWeight: FontWeight.w600),
                               ),
                               const SizedBox(height: 8),
-                              Text(
-                                _controller.canStartGame
-                                    ? 'OK: tous les joueurs ont un role (>=1 Agent et 1 Rogue)'
-                                    : 'Attribuez un role a chaque joueur (>=1 Agent et 1 Rogue)',
+                              Semantics(
+                                label: _controller.canStartGame
+                                    ? 'Démarrage autorisé: tous les joueurs ont un rôle attribué.'
+                                    : 'Démarrage bloqué: attribuez un rôle à chaque joueur.',
+                                child: Text(
+                                  _controller.canStartGame
+                                      ? 'OK: tous les joueurs ont un rôle (>=1 Agent et 1 Rogue)'
+                                      : 'Attribuez un rôle à chaque joueur (>=1 Agent et 1 Rogue)',
+                                ),
                               ),
                               const SizedBox(height: 10),
                               FilledButton(

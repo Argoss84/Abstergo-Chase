@@ -1324,7 +1324,7 @@ const tryStartGameFromLobby = ({
         payload: {
           action: 'start-game',
           requestId,
-          reason: 'Tous les joueurs doivent avoir un role avant de demarrer.'
+          reason: 'Tous les joueurs doivent avoir un rôle avant de démarrer.'
         }
       });
       return true;
