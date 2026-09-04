@@ -132,6 +132,14 @@ class LobbyController extends ChangeNotifier {
     return pool.take(min(count, pool.length)).toList(growable: false);
   }
 
+  void _sortPlayersByName() {
+    players.sort((a, b) {
+      final nameCompare = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      if (nameCompare != 0) return nameCompare;
+      return a.id.compareTo(b.id);
+    });
+  }
+
   void _onMessage(Map<String, dynamic> event) {
     final type = event['type']?.toString();
     final payload = event['payload'];
@@ -173,6 +181,7 @@ class LobbyController extends ChangeNotifier {
                     );
                   }),
                 );
+              _sortPlayersByName();
             }
           }
           playerId = payload['playerId']?.toString() ?? playerId;
@@ -196,6 +205,7 @@ class LobbyController extends ChangeNotifier {
                 status: payload['status']?.toString() ?? 'active',
               ),
             );
+            _sortPlayersByName();
             _syncVoiceState();
             notifyListeners();
           }
