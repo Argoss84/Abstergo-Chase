@@ -167,6 +167,9 @@ void main() {
       isNull,
     );
 
+    await tester.tap(find.text('Réglages'));
+    await tester.pumpAndSettle();
+
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
 
@@ -186,6 +189,30 @@ void main() {
           )
           .onTap,
       isNotNull,
+    );
+  });
+
+  testWidgets('Does not recheck on resume before opening settings', (tester) async {
+    final permissionsService = _FakeBootstrapPermissionsService(
+      <BootstrapPermissionsResult>[
+        const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
+      ],
+    );
+
+    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpAndSettle();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    expect(permissionsService.calls, 1);
+    expect(permissionsService.forceRequestValues, <bool>[true]);
+    expect(find.text('Autorisations requises'), findsOneWidget);
+    expect(
+      tester
+          .widget<ListTile>(find.widgetWithText(ListTile, 'Créer une partie'))
+          .onTap,
+      isNull,
     );
   });
 }

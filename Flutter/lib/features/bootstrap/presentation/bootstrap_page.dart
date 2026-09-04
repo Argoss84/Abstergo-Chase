@@ -26,6 +26,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage>
     with WidgetsBindingObserver {
   bool _isCheckingPermissions = true;
   BootstrapPermissionsStatus _permissionsStatus = BootstrapPermissionsStatus.denied;
+  bool _shouldRefreshPermissionsOnResume = false;
 
   @override
   void initState() {
@@ -42,7 +43,9 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.resumed &&
+        _shouldRefreshPermissionsOnResume) {
+      _shouldRefreshPermissionsOnResume = false;
       _checkPermissions();
     }
   }
@@ -69,6 +72,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage>
   }
 
   Future<void> _openSettings() async {
+    _shouldRefreshPermissionsOnResume = true;
     await widget.permissionsService.openAppSettings();
   }
 
