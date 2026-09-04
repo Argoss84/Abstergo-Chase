@@ -1,19 +1,89 @@
 import 'package:broken_veil_protocol/app/providers.dart';
 import 'package:broken_veil_protocol/features/account/presentation/account_page.dart';
+import 'package:broken_veil_protocol/features/bootstrap/data/bootstrap_permissions_service.dart';
 import 'package:broken_veil_protocol/features/create_lobby/presentation/create_lobby_page.dart';
+import 'package:broken_veil_protocol/features/home/presentation/home_menu_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:broken_veil_protocol/features/home/presentation/home_menu_page.dart';
 
-class BootstrapPage extends ConsumerWidget {
-  const BootstrapPage({super.key});
+class BootstrapPage extends ConsumerStatefulWidget {
+  const BootstrapPage({
+    super.key,
+    this.permissionsService = const DeviceBootstrapPermissionsService(),
+  });
 
   static const String routeName = 'bootstrap';
   static const String routePath = '/';
 
+  final BootstrapPermissionsService permissionsService;
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<BootstrapPage> createState() => _BootstrapPageState();
+}
+
+class _BootstrapPageState extends ConsumerState<BootstrapPage>
+    with WidgetsBindingObserver {
+  bool _isCheckingPermissions = true;
+  BootstrapPermissionsStatus _permissionsStatus = BootstrapPermissionsStatus.denied;
+  bool _shouldRefreshPermissionsOnResume = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _checkPermissions(forceRequest: true);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        _shouldRefreshPermissionsOnResume) {
+      _shouldRefreshPermissionsOnResume = false;
+      _checkPermissions();
+    }
+  }
+
+  Future<void> _checkPermissions({bool forceRequest = false}) async {
+    if (mounted) {
+      setState(() {
+        _isCheckingPermissions = true;
+      });
+    }
+    var result = const BootstrapPermissionsResult(BootstrapPermissionsStatus.error);
+    try {
+      result = await widget.permissionsService.ensureRequiredPermissions(
+        forceRequest: forceRequest,
+      );
+    } catch (_) {
+      result = const BootstrapPermissionsResult(BootstrapPermissionsStatus.error);
+    }
+    if (!mounted) return;
+    setState(() {
+      _permissionsStatus = result.status;
+      _isCheckingPermissions = false;
+    });
+  }
+
+  Future<void> _openSettings() async {
+    _shouldRefreshPermissionsOnResume = true;
+    await widget.permissionsService.openAppSettings();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canOpenLobbyFlows =
+        !_isCheckingPermissions &&
+        _permissionsStatus == BootstrapPermissionsStatus.granted;
+    final missingPermissions =
+        !_isCheckingPermissions &&
+        _permissionsStatus != BootstrapPermissionsStatus.granted;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Broken Veil Protocol'),
@@ -41,13 +111,44 @@ class BootstrapPage extends ConsumerWidget {
                   style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
                 ),
               ),
+              if (_isCheckingPermissions)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: LinearProgressIndicator(minHeight: 2),
+                )
+              else if (missingPermissions)
+                Semantics(
+                  label:
+                      'Créer et rejoindre une partie sont désactivés tant que la localisation et le micro ne sont pas autorisés.',
+                  child: ListTile(
+                    leading: const Icon(Icons.warning_amber_rounded),
+                    title: Text(
+                      _permissionsStatus == BootstrapPermissionsStatus.error
+                          ? 'Erreur de vérification'
+                          : 'Autorisations requises',
+                    ),
+                    subtitle: Text(
+                      _permissionsStatus == BootstrapPermissionsStatus.error
+                          ? 'Impossible de vérifier les autorisations. Ouvrez les réglages de l’application.'
+                          : 'Activez la localisation et le micro pour créer ou rejoindre une partie.',
+                    ),
+                    trailing: TextButton(
+                      onPressed: _openSettings,
+                      child: const Text('Réglages'),
+                    ),
+                  ),
+                ),
               ListTile(
                 title: const Text('Créer une partie'),
-                onTap: () => context.push(CreateLobbyPage.routePath),
+                onTap: canOpenLobbyFlows
+                    ? () => context.push(CreateLobbyPage.routePath)
+                    : null,
               ),
               ListTile(
                 title: const Text('Rejoindre une partie'),
-                onTap: () => context.push(HomeMenuPage.joinLobbyPath),
+                onTap: canOpenLobbyFlows
+                    ? () => context.push(HomeMenuPage.joinLobbyPath)
+                    : null,
               ),
               ListTile(
                 title: const Text('Paramètres'),
