@@ -329,4 +329,102 @@ void main() {
     expect(peer.status, 'active');
     controller.dispose();
   });
+
+  test('sorts lobby players alphabetically on lobby snapshot', () async {
+    final socketService = _LobbyMessagesSocketService();
+    final controller = LobbyController(socketService: socketService);
+
+    await controller.initialize(
+      bootstrap: const LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Player',
+      ),
+    );
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:joined',
+      'payload': <String, dynamic>{
+        'code': 'ABC123',
+        'playerId': 'me',
+        'hostId': 'h1',
+        'lobby': <String, dynamic>{
+          'players': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'p2',
+              'name': 'zoe',
+              'role': null,
+              'status': 'active',
+              'isHost': false,
+            },
+            <String, dynamic>{
+              'id': 'p1',
+              'name': 'Alice',
+              'role': null,
+              'status': 'active',
+              'isHost': true,
+            },
+          ],
+        },
+      },
+    });
+
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.players.map((p) => p.name).toList(), ['Alice', 'zoe']);
+    controller.dispose();
+  });
+
+  test('sorts lobby players alphabetically when peer joins', () async {
+    final socketService = _LobbyMessagesSocketService();
+    final controller = LobbyController(socketService: socketService);
+
+    await controller.initialize(
+      bootstrap: const LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Player',
+      ),
+    );
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:joined',
+      'payload': <String, dynamic>{
+        'code': 'ABC123',
+        'playerId': 'me',
+        'hostId': 'h1',
+        'lobby': <String, dynamic>{
+          'players': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'p2',
+              'name': 'Charlie',
+              'role': null,
+              'status': 'active',
+              'isHost': false,
+            },
+          ],
+        },
+      },
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:peer-joined',
+      'payload': <String, dynamic>{
+        'playerId': 'p1',
+        'playerName': 'Alice',
+        'role': null,
+        'status': 'active',
+      },
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.players.map((p) => p.name).toList(), [
+      'Alice',
+      'Charlie',
+    ]);
+    controller.dispose();
+  });
 }
