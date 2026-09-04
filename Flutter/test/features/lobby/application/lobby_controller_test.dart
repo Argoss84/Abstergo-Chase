@@ -147,6 +147,54 @@ class _LobbyMessagesSocketService extends LobbySocketService {
   }
 }
 
+class _ReconnectingLobbySocketService extends LobbySocketService {
+  final StreamController<Map<String, dynamic>> _messagesController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final List<String?> joinPreviousPlayerIds = <String?>[];
+  int joinCalls = 0;
+
+  @override
+  Stream<Map<String, dynamic>> get messages => _messagesController.stream;
+
+  @override
+  bool get isConnected => true;
+
+  @override
+  Future<void> connect({
+    required Uri serverUrl,
+    required String socketPath,
+    Duration timeout = const Duration(seconds: 12),
+  }) async {}
+
+  @override
+  Future<JoinLobbyResult> joinLobby({
+    required String code,
+    required String playerName,
+    String? cognitoSub,
+    String? previousPlayerId,
+    bool reconnectAsHost = false,
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
+    joinCalls += 1;
+    joinPreviousPlayerIds.add(previousPlayerId);
+    return const JoinLobbyResult(
+      code: 'ABC123',
+      playerId: 'player-1',
+      hostId: 'host-1',
+    );
+  }
+
+  void emit(Map<String, dynamic> message) => _messagesController.add(message);
+
+  @override
+  void requestLatestState() {}
+
+  @override
+  void dispose() {
+    _messagesController.close();
+  }
+}
+
 void main() {
   test(
     'triggers game fallback route when lobby join returns lobby not found',
@@ -327,6 +375,38 @@ void main() {
     final peer = controller.players.firstWhere((player) => player.id == 'p2');
     expect(peer.role, 'ROGUE');
     expect(peer.status, 'active');
+    controller.dispose();
+  });
+
+  test('rejoins lobby after socket reconnect to recover peer updates', () async {
+    final socketService = _ReconnectingLobbySocketService();
+    final controller = LobbyController(socketService: socketService);
+
+    await controller.initialize(
+      bootstrap: const LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Player',
+        previousPlayerId: 'stored-player-id',
+      ),
+    );
+
+    expect(socketService.joinCalls, 1);
+    expect(socketService.joinPreviousPlayerIds, <String?>['stored-player-id']);
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'socket:reconnected',
+      'payload': <String, dynamic>{},
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+
+    expect(socketService.joinCalls, 2);
+    expect(
+      socketService.joinPreviousPlayerIds,
+      <String?>['stored-player-id', 'player-1'],
+    );
+    expect(controller.connectionStatus, 'connected');
     controller.dispose();
   });
 }
