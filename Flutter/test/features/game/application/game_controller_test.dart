@@ -42,6 +42,23 @@ class _NoopGameSocketService extends GameSocketService {
   }
 }
 
+class _VoiceAwareGameController extends GameController {
+  _VoiceAwareGameController({required super.socketService});
+
+  final Set<String> _activeVoicePlayerIds = <String>{};
+
+  void setActiveVoicePlayers(Iterable<String> ids) {
+    _activeVoicePlayerIds
+      ..clear()
+      ..addAll(ids);
+  }
+
+  @override
+  bool isPlayerVoiceActive(String playerId) {
+    return _activeVoicePlayerIds.contains(playerId);
+  }
+}
+
 void main() {
   test(
     'reuses server objectives from game config when bootstrap has none',
@@ -136,4 +153,70 @@ void main() {
       controller.dispose();
     },
   );
+
+  test('activeSameRoleVoicePlayers returns only active same-role teammates', () {
+    final controller = _VoiceAwareGameController(
+      socketService: _NoopGameSocketService(),
+    );
+    controller.playerId = 'me';
+    controller.playerRole = 'AGENT';
+    controller.players
+      ..clear()
+      ..addAll(const <GamePlayer>[
+        GamePlayer(
+          id: 'me',
+          name: 'Me',
+          isHost: false,
+          role: 'AGENT',
+          status: 'active',
+        ),
+        GamePlayer(
+          id: 'ally-active',
+          name: 'Ally Active',
+          isHost: false,
+          role: 'AGENT',
+          status: 'active',
+        ),
+        GamePlayer(
+          id: 'ally-inactive',
+          name: 'Ally Inactive',
+          isHost: false,
+          role: 'AGENT',
+          status: 'active',
+        ),
+        GamePlayer(
+          id: 'rogue-active',
+          name: 'Rogue Active',
+          isHost: false,
+          role: 'ROGUE',
+          status: 'active',
+        ),
+        GamePlayer(
+          id: 'ally-disconnected',
+          name: 'Ally Disconnected',
+          isHost: false,
+          role: 'AGENT',
+          status: 'disconnected',
+        ),
+      ]);
+    controller.setActiveVoicePlayers(<String>{
+      'ally-active',
+      'ally-inactive',
+      'rogue-active',
+      'ally-disconnected',
+    });
+
+    expect(
+      controller.activeSameRoleVoicePlayers.map((p) => p.id).toList(),
+      <String>['ally-active', 'ally-inactive'],
+    );
+
+    controller.setActiveVoicePlayers(<String>{
+      'rogue-active',
+      'ally-disconnected',
+    });
+    expect(controller.activeSameRoleVoicePlayers, isEmpty);
+
+    controller.dispose();
+  });
 }

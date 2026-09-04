@@ -274,7 +274,7 @@ class _GamePageState extends State<GamePage>
         final myPos = _controller.myPosition;
         _syncCompassMapCenter(myPos);
         final startCountdownSeconds = _startCountdownSeconds();
-        final sameRolePlayers = _controller.sameRoleVoicePlayers;
+        final activeSameRolePlayers = _controller.activeSameRoleVoicePlayers;
         _handleGameVibrationSignals(
           startCountdownSeconds: startCountdownSeconds,
           outOfZone: outOfZone,
@@ -834,7 +834,7 @@ class _GamePageState extends State<GamePage>
                           ),
                         if ((!_controller.isHost || _controller.gameStarted) &&
                             winnerType == null &&
-                            sameRolePlayers.isNotEmpty)
+                            activeSameRolePlayers.isNotEmpty)
                           Positioned(
                             top: topInset,
                             left: 12,
@@ -851,9 +851,8 @@ class _GamePageState extends State<GamePage>
                                         CrossAxisAlignment.start,
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      ...sameRolePlayers.map((player) {
-                                        final activeVoice = _controller
-                                            .isPlayerVoiceActive(player.id);
+                                      ...activeSameRolePlayers.map((player) {
+                                        const activeVoice = true;
                                         return Container(
                                           margin: const EdgeInsets.only(
                                             bottom: 4,
