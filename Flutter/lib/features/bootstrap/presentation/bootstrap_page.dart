@@ -1,19 +1,59 @@
 import 'package:broken_veil_protocol/app/providers.dart';
 import 'package:broken_veil_protocol/features/account/presentation/account_page.dart';
+import 'package:broken_veil_protocol/features/bootstrap/data/bootstrap_permissions_service.dart';
 import 'package:broken_veil_protocol/features/create_lobby/presentation/create_lobby_page.dart';
+import 'package:broken_veil_protocol/features/home/presentation/home_menu_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:broken_veil_protocol/features/home/presentation/home_menu_page.dart';
 
-class BootstrapPage extends ConsumerWidget {
-  const BootstrapPage({super.key});
+class BootstrapPage extends ConsumerStatefulWidget {
+  const BootstrapPage({
+    super.key,
+    this.permissionsService = const DeviceBootstrapPermissionsService(),
+  });
 
   static const String routeName = 'bootstrap';
   static const String routePath = '/';
 
+  final BootstrapPermissionsService permissionsService;
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<BootstrapPage> createState() => _BootstrapPageState();
+}
+
+class _BootstrapPageState extends ConsumerState<BootstrapPage> {
+  bool _isCheckingPermissions = true;
+  bool _hasRequiredPermissions = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkPermissions();
+  }
+
+  Future<void> _checkPermissions() async {
+    if (mounted) {
+      setState(() {
+        _isCheckingPermissions = true;
+      });
+    }
+    var granted = false;
+    try {
+      granted = await widget.permissionsService.ensureRequiredPermissions();
+    } catch (_) {
+      granted = false;
+    }
+    if (!mounted) return;
+    setState(() {
+      _hasRequiredPermissions = granted;
+      _isCheckingPermissions = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canOpenLobbyFlows = !_isCheckingPermissions && _hasRequiredPermissions;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Broken Veil Protocol'),
@@ -41,13 +81,34 @@ class BootstrapPage extends ConsumerWidget {
                   style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
                 ),
               ),
+              if (_isCheckingPermissions)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: LinearProgressIndicator(minHeight: 2),
+                )
+              else if (!_hasRequiredPermissions)
+                ListTile(
+                  leading: const Icon(Icons.warning_amber_rounded),
+                  title: const Text('Autorisations requises'),
+                  subtitle: const Text(
+                    'Activez la localisation et le micro pour créer ou rejoindre une partie.',
+                  ),
+                  trailing: TextButton(
+                    onPressed: _checkPermissions,
+                    child: const Text('Réessayer'),
+                  ),
+                ),
               ListTile(
                 title: const Text('Créer une partie'),
-                onTap: () => context.push(CreateLobbyPage.routePath),
+                onTap: canOpenLobbyFlows
+                    ? () => context.push(CreateLobbyPage.routePath)
+                    : null,
               ),
               ListTile(
                 title: const Text('Rejoindre une partie'),
-                onTap: () => context.push(HomeMenuPage.joinLobbyPath),
+                onTap: canOpenLobbyFlows
+                    ? () => context.push(HomeMenuPage.joinLobbyPath)
+                    : null,
               ),
               ListTile(
                 title: const Text('Paramètres'),

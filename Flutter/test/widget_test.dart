@@ -1,20 +1,23 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
+import 'package:broken_veil_protocol/features/bootstrap/data/bootstrap_permissions_service.dart';
+import 'package:broken_veil_protocol/features/bootstrap/presentation/bootstrap_page.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:broken_veil_protocol/app/app.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+class _AlwaysGrantedPermissionsService implements BootstrapPermissionsService {
+  @override
+  Future<bool> ensureRequiredPermissions() async => true;
+}
 
 void main() {
   testWidgets('Home actions are displayed', (WidgetTester tester) async {
     await tester.pumpWidget(
-      const ProviderScope(
-        child: BrokenVeilProtocolApp(),
+      ProviderScope(
+        child: MaterialApp(
+          home: BootstrapPage(
+            permissionsService: _AlwaysGrantedPermissionsService(),
+          ),
+        ),
       ),
     );
 
