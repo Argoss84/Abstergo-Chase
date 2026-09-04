@@ -399,8 +399,16 @@ class LobbyController extends ChangeNotifier {
   }
 
   bool get canStartGame {
-    final agents = players.where((p) => p.role == 'AGENT').length;
-    final rogues = players.where((p) => p.role == 'ROGUE').length;
+    final hasUnassignedPlayer = players.any(
+      (player) => (player.role ?? '').trim().isEmpty,
+    );
+    if (hasUnassignedPlayer) return false;
+    final agents = players
+        .where((p) => (p.role ?? '').toUpperCase() == 'AGENT')
+        .length;
+    final rogues = players
+        .where((p) => (p.role ?? '').toUpperCase() == 'ROGUE')
+        .length;
     return agents >= 1 && rogues >= 1;
   }
 

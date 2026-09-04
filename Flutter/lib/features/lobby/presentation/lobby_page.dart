@@ -556,8 +556,8 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                               const SizedBox(height: 8),
                               Text(
                                 _controller.canStartGame
-                                    ? 'OK: au moins 1 Agent et 1 Rogue'
-                                    : 'Attribuez au moins 1 Agent et 1 Rogue',
+                                    ? 'OK: tous les joueurs ont un role (>=1 Agent et 1 Rogue)'
+                                    : 'Attribuez un role a chaque joueur (>=1 Agent et 1 Rogue)',
                               ),
                               const SizedBox(height: 10),
                               FilledButton(
