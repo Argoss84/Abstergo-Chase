@@ -7,6 +7,7 @@ import 'package:broken_veil_protocol/features/game/application/game_controller.d
 import 'package:broken_veil_protocol/features/game/domain/game_models.dart';
 import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
 import 'package:broken_veil_protocol/features/join_lobby/presentation/join_lobby_page.dart';
+import 'package:broken_veil_protocol/features/lobby/data/player_session_store.dart';
 import 'package:broken_veil_protocol/features/lobby/presentation/widgets/lobby_map_preview.dart';
 import 'package:broken_veil_protocol/shared/services/tts_service.dart';
 import 'package:broken_veil_protocol/shared/services/vibration_service.dart';
@@ -96,6 +97,7 @@ class _GamePageState extends State<GamePage>
   bool _isActionFabOpen = false;
   final VibrationService _vibrationService = VibrationService();
   final TtsService _ttsService = TtsService.instance;
+  final PlayerSessionStore _playerSessionStore = PlayerSessionStore();
   bool _prevRogueObjectiveInRange = false;
   bool _prevSelfInStartZone = false;
   final Map<String, bool> _hostPlayerInStartZone = <String, bool>{};
@@ -179,6 +181,14 @@ class _GamePageState extends State<GamePage>
     _chatController.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  Future<void> _quitGame({required bool clearSavedLobbyCode}) async {
+    _controller.leaveGame();
+    if (clearSavedLobbyCode) {
+      await _playerSessionStore.clearLastLobbyCode();
+    }
+    if (mounted) context.go('/');
   }
 
   @override
@@ -379,10 +389,7 @@ class _GamePageState extends State<GamePage>
                   ),
                 ),
               TextButton(
-                onPressed: () {
-                  _controller.leaveGame();
-                  if (mounted) context.go('/');
-                },
+                onPressed: () => _quitGame(clearSavedLobbyCode: false),
                 child: const Text('Quitter'),
               ),
             ],
@@ -971,10 +978,8 @@ class _GamePageState extends State<GamePage>
                                 ),
                                 const SizedBox(height: 16),
                                 FilledButton(
-                                  onPressed: () {
-                                    _controller.leaveGame();
-                                    if (mounted) context.go('/');
-                                  },
+                                  onPressed: () =>
+                                      _quitGame(clearSavedLobbyCode: true),
                                   child: const Text('Quitter'),
                                 ),
                               ],
