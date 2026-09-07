@@ -147,6 +147,17 @@ class _LobbyMessagesSocketService extends LobbySocketService {
   }
 }
 
+class _StartGameTrackingSocketService extends _LobbyMessagesSocketService {
+  int startGameCallCount = 0;
+  String? startedCode;
+
+  @override
+  void startGame(String code) {
+    startGameCallCount += 1;
+    startedCode = code;
+  }
+}
+
 class _ReconnectingLobbySocketService extends LobbySocketService {
   final StreamController<Map<String, dynamic>> _messagesController =
       StreamController<Map<String, dynamic>>.broadcast();
@@ -382,6 +393,63 @@ void main() {
     controller.dispose();
   });
 
+  test(
+    'cannot start game when at least one player has no role',
+    () async {
+      final socketService = _StartGameTrackingSocketService();
+      final controller = LobbyController(socketService: socketService);
+
+      await controller.initialize(
+        bootstrap: const LobbyBootstrapData(
+          code: 'ABC123',
+          serverUrl: 'http://localhost:3000',
+          socketPath: '/socket.io',
+          playerName: 'Player',
+        ),
+      );
+
+      socketService.emit(const <String, dynamic>{
+        'type': 'lobby:joined',
+        'payload': <String, dynamic>{
+          'code': 'ABC123',
+          'playerId': 'host',
+          'hostId': 'host',
+          'lobby': <String, dynamic>{
+            'players': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'id': 'host',
+                'name': 'Host',
+                'role': 'AGENT',
+                'status': 'active',
+                'isHost': true,
+              },
+              <String, dynamic>{
+                'id': 'rogue',
+                'name': 'Rogue',
+                'role': 'ROGUE',
+                'status': 'active',
+                'isHost': false,
+              },
+              <String, dynamic>{
+                'id': 'norole',
+                'name': 'NoRole',
+                'status': 'active',
+                'isHost': false,
+              },
+            ],
+          },
+        },
+      });
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.canStartGame, isFalse);
+
+      controller.startGame();
+
+      expect(socketService.startGameCallCount, 0);
+      controller.dispose();
+    },
+  );
 test('rejoins lobby after socket reconnect to recover peer updates', () async {
   final socketService = _ReconnectingLobbySocketService();
   final controller = LobbyController(socketService: socketService);

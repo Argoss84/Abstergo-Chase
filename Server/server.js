@@ -1241,12 +1241,17 @@ const replaceLobbyPlayerIdPreservingOrder = (lobby, oldPlayerId, nextPlayer) => 
 const countRolesInLobby = (lobby) => {
   let agents = 0;
   let rogues = 0;
+  let unassigned = 0;
   lobby.players.forEach((p) => {
-    const role = (p.role || '').toUpperCase();
+    const role = (p.role || '').trim().toUpperCase();
+    if (!role) {
+      unassigned += 1;
+      return;
+    }
     if (role === 'AGENT') agents += 1;
     if (role === 'ROGUE') rogues += 1;
   });
-  return { agents, rogues };
+  return { agents, rogues, unassigned };
 };
 
 const applyLobbyRoleUpdate = ({
@@ -1451,7 +1456,18 @@ const tryStartGameFromLobby = ({
   }
 
   if (requireRoleCheck) {
-    const { agents, rogues } = countRolesInLobby(lobby);
+    const { agents, rogues, unassigned } = countRolesInLobby(lobby);
+    if (unassigned > 0) {
+      send(socket, {
+        type: 'lobby:action-rejected',
+        payload: {
+          action: 'start-game',
+          requestId,
+          reason: 'Tous les joueurs doivent avoir un rôle avant de démarrer.'
+        }
+      });
+      return true;
+    }
     if (agents < 1 || rogues < 1) {
       send(socket, {
         type: 'lobby:action-rejected',
@@ -2152,7 +2168,7 @@ io.on('connection', (socket) => {
         clientId,
         code: lobbyCode?.toUpperCase(),
         requestId,
-        requireRoleCheck: false
+        requireRoleCheck: true
       });
       return;
     }
@@ -2163,7 +2179,7 @@ io.on('connection', (socket) => {
         socket,
         clientId,
         code,
-        requireRoleCheck: false
+        requireRoleCheck: true
       });
       return;
     }
