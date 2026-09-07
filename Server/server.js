@@ -375,14 +375,125 @@ const forEachConnectedGameRecipient = (game, callback, { exceptId = null } = {})
   }
 };
 
+const lobbyRoomName = (code) => `lobby:${String(code || '').toUpperCase()}`;
+
+const bindSocketToLobbyPlayer = (socket, lobby, playerId) => {
+  if (!socket || !lobby?.code || !playerId) return;
+  const info = clients.get(socket.id);
+  if (info) {
+    info.lobbyCode = lobby.code;
+  }
+  socketsById.set(playerId, socket);
+  const player = lobby.players.get(playerId);
+  if (player) {
+    player.status = 'active';
+    player.disconnectedAt = null;
+    lobby.players.set(playerId, player);
+    clearDisconnectedLobbyPlayerTimeout(lobby.code, playerId);
+  }
+  socket.join(lobbyRoomName(lobby.code));
+};
+
+const leaveLobbyRoom = (socket, code) => {
+  if (!socket || !code) return;
+  socket.leave(lobbyRoomName(code));
+};
+
+const rebindLobbySocket = (
+  socket,
+  lobby,
+  { clientId, oldPlayerId, cognitoSub, playerName }
+) => {
+  if (!socket || !lobby?.players || !clientId) {
+    return { playerId: null, remappedFrom: null, existingPlayer: null };
+  }
+
+  let sourceId = null;
+  if (cognitoSub) {
+    const bySubCandidate = Array.from(lobby.players.values()).find((player) => {
+      if (!player?.id) return false;
+      if ((player.cognitoSub || null) !== cognitoSub) return false;
+      const existingSocket = socketsById.get(player.id);
+      return !existingSocket || !existingSocket.connected || existingSocket.id === socket.id;
+    });
+    if (bySubCandidate?.id) {
+      sourceId = bySubCandidate.id;
+    }
+  }
+  if (!sourceId && oldPlayerId && lobby.players.has(oldPlayerId)) {
+    sourceId = oldPlayerId;
+  }
+  if (!sourceId && lobby.players.has(clientId)) {
+    sourceId = clientId;
+  }
+  if (!sourceId) {
+    return { playerId: null, remappedFrom: null, existingPlayer: null };
+  }
+
+  const existingPlayer = lobby.players.get(sourceId);
+  if (sourceId !== clientId) {
+    clearDisconnectedLobbyPlayerTimeout(lobby.code, sourceId);
+    replaceLobbyPlayerIdPreservingOrder(lobby, sourceId, {
+      id: clientId,
+      name: playerName || existingPlayer?.name || 'Joueur',
+      isHost: existingPlayer?.isHost || lobby.hostId === sourceId,
+      role: existingPlayer?.role ?? null,
+      status: 'active',
+      disconnectedAt: null,
+      cognitoSub: existingPlayer?.cognitoSub || cognitoSub || null
+    });
+    if (lobby.hostId === sourceId) {
+      lobby.hostId = clientId;
+    }
+    socketsById.delete(sourceId);
+    bindSocketToLobbyPlayer(socket, lobby, clientId);
+    return {
+      playerId: clientId,
+      remappedFrom: sourceId,
+      existingPlayer: lobby.players.get(clientId) || existingPlayer
+    };
+  }
+
+  if (existingPlayer && playerName) {
+    existingPlayer.name = playerName;
+    existingPlayer.status = 'active';
+    existingPlayer.disconnectedAt = null;
+    if (cognitoSub) {
+      existingPlayer.cognitoSub = existingPlayer.cognitoSub || cognitoSub;
+    }
+    lobby.players.set(clientId, existingPlayer);
+  }
+  bindSocketToLobbyPlayer(socket, lobby, clientId);
+  return {
+    playerId: clientId,
+    remappedFrom: null,
+    existingPlayer: lobby.players.get(clientId) || existingPlayer
+  };
+};
+
 const forEachConnectedLobbyRecipient = (lobby, callback, { exceptId = null } = {}) => {
-  if (!lobby?.players) return;
-  for (const player of lobby.players.values()) {
-    if (!player?.id) continue;
-    if (exceptId && player.id === exceptId) continue;
-    const playerSocket = socketsById.get(player.id);
+  if (!lobby) return;
+  const seenSocketIds = new Set();
+  if (lobby.players) {
+    for (const player of lobby.players.values()) {
+      if (!player?.id) continue;
+      if (exceptId && player.id === exceptId) continue;
+      const playerSocket = socketsById.get(player.id);
+      if (!playerSocket || !playerSocket.connected) continue;
+      seenSocketIds.add(playerSocket.id);
+      callback(playerSocket, player);
+    }
+  }
+  const room = io.sockets.adapter.rooms.get(lobbyRoomName(lobby.code));
+  if (!room) return;
+  for (const socketId of room) {
+    if (seenSocketIds.has(socketId)) continue;
+    const playerSocket = io.sockets.sockets.get(socketId);
     if (!playerSocket || !playerSocket.connected) continue;
-    callback(playerSocket, player);
+    const info = clients.get(socketId);
+    if (exceptId && info?.clientId === exceptId) continue;
+    const player = info?.clientId ? lobby.players.get(info.clientId) : null;
+    callback(playerSocket, player || { id: info?.clientId || socketId });
   }
 };
 
@@ -416,8 +527,7 @@ const closeLobby = (code, reason = 'Lobby expiré', notify = true) => {
   const lobby = lobbies.get(code);
   if (!lobby) return false;
   if (notify) {
-    lobby.players.forEach((player) => {
-      const playerSocket = socketsById.get(player.id);
+    forEachConnectedLobbyRecipient(lobby, (playerSocket) => {
       send(playerSocket, { type: 'lobby:closed', payload: { code, reason } });
     });
   }
@@ -1095,6 +1205,21 @@ const getLobbySnapshot = (lobby) => ({
   }))
 });
 
+const broadcastLobbySnapshot = (lobby) => {
+  if (!lobby) return;
+  const snapshot = getLobbySnapshot(lobby);
+  forEachConnectedLobbyRecipient(lobby, (playerSocket) => {
+    send(playerSocket, {
+      type: 'lobby:snapshot',
+      payload: {
+        code: lobby.code,
+        hostId: lobby.hostId,
+        lobby: snapshot
+      }
+    });
+  });
+};
+
 const replaceLobbyPlayerIdPreservingOrder = (lobby, oldPlayerId, nextPlayer) => {
   if (!lobby?.players || !oldPlayerId || !nextPlayer?.id) return;
   if (!lobby.players.has(oldPlayerId)) {
@@ -1153,28 +1278,24 @@ const applyLobbyRoleUpdate = ({
       }
     ]
   });
-  lobby.players.forEach((p) => {
-    const s = socketsById.get(p.id);
-    if (s) {
-      send(s, {
-        type: 'lobby:role-updated',
-        payload: {
-          playerId: targetId,
-          role,
-          stateVersion: lobby.stateVersion,
-          requestId: requestId || null
-        }
-      });
-      // Compat backward with existing listeners.
-      send(s, {
-        type: 'lobby:player-updated',
-        payload: {
-          playerId: targetId,
-          changes: { role: role },
-          stateVersion: lobby.stateVersion
-        }
-      });
-    }
+  forEachConnectedLobbyRecipient(lobby, (s) => {
+    send(s, {
+      type: 'lobby:role-updated',
+      payload: {
+        playerId: targetId,
+        role,
+        stateVersion: lobby.stateVersion,
+        requestId: requestId || null
+      }
+    });
+    send(s, {
+      type: 'lobby:player-updated',
+      payload: {
+        playerId: targetId,
+        changes: { role: role },
+        stateVersion: lobby.stateVersion
+      }
+    });
   });
   return true;
 };
@@ -1636,7 +1757,7 @@ io.on('connection', (socket) => {
       }
       lobbies.set(code, lobby);
       lobbySocketMessageCounts.set(code, lobbySocketMessageCounts.get(code) || 0);
-      clients.get(socket.id).lobbyCode = code;
+      bindSocketToLobbyPlayer(socket, lobby, clientId);
 
       log(`[LOBBY CRÉÉ] Code: ${code}, Host: ${clientId}, Nom: ${payload?.playerName || 'Host'}`);
       incrementLobbySocketMessages(code);
@@ -1696,8 +1817,6 @@ io.on('connection', (socket) => {
 
     if (type === 'lobby:join') {
       const code = payload?.code?.toUpperCase();
-      let oldPlayerId = payload?.oldPlayerId; // Pour reconnexion
-      const cognitoSub = payload?.cognitoSub || null;
       const lobby = lobbies.get(code);
       if (!lobby) {
         log(`[ERREUR LOBBY] Client ${clientId} tente de rejoindre un lobby inexistant: ${code}`);
@@ -1705,48 +1824,22 @@ io.on('connection', (socket) => {
         return;
       }
 
-      if (cognitoSub) {
-        const bySubCandidate = Array.from(lobby.players.values()).find((player) => {
-          if (!player?.id) return false;
-          if ((player.cognitoSub || null) !== cognitoSub) return false;
-          const existingSocket = socketsById.get(player.id);
-          return !existingSocket || !existingSocket.connected;
-        });
-        if (bySubCandidate?.id) {
-          oldPlayerId = bySubCandidate.id;
-        }
-      }
+      const rebound = rebindLobbySocket(socket, lobby, {
+        clientId,
+        oldPlayerId: payload?.oldPlayerId,
+        cognitoSub: payload?.cognitoSub || null,
+        playerName: payload?.playerName
+      });
 
-      // Vérifier si c'est une reconnexion (avec oldPlayerId)
-      if (oldPlayerId && lobby.players.has(oldPlayerId)) {
-        log(`[RECONNEXION] Client ${oldPlayerId} se reconnecte avec nouveau ID ${clientId} au lobby ${code}`);
-        
-        // Récupérer les infos de l'ancien joueur
-        const existingPlayer = lobby.players.get(oldPlayerId);
-        clearDisconnectedLobbyPlayerTimeout(code, oldPlayerId);
-        
-        // Remplacer l'ancien playerId par le nouveau dans le lobby
-        replaceLobbyPlayerIdPreservingOrder(lobby, oldPlayerId, {
-          id: clientId,
-          name: payload?.playerName || existingPlayer?.name || 'Joueur',
-          isHost: existingPlayer?.isHost || false,
-          role: existingPlayer?.role ?? null,
-          status: 'active',
-          disconnectedAt: null,
-          cognitoSub: existingPlayer?.cognitoSub || payload?.cognitoSub || null
-        });
-        
-        // Si c'était le host, mettre à jour le hostId
-        if (lobby.hostId === oldPlayerId) {
-          lobby.hostId = clientId;
-          log(`[RECONNEXION HOST] Mise à jour du hostId de ${oldPlayerId} vers ${clientId}`);
-        }
-        
-        // Mettre à jour les mappings
-        socketsById.delete(oldPlayerId);
-        socketsById.set(clientId, socket);
-        clients.get(socket.id).lobbyCode = code;
-        
+      if (rebound.playerId) {
+        const remappedFrom = rebound.remappedFrom;
+        const existingPlayer = rebound.existingPlayer;
+        log(
+          remappedFrom
+            ? `[RECONNEXION] Client ${remappedFrom} se reconnecte avec nouveau ID ${clientId} au lobby ${code}`
+            : `[RECONNEXION] Client ${clientId} déjà dans le lobby ${code} - mise à jour du socket`
+        );
+
         send(socket, {
           type: 'lobby:joined',
           payload: {
@@ -1757,28 +1850,28 @@ io.on('connection', (socket) => {
           }
         });
 
-        forEachConnectedLobbyRecipient(lobby, (peerSocket) => {
-          send(peerSocket, {
-            type: 'lobby:peer-left',
-            payload: { playerId: oldPlayerId }
-          });
-          send(peerSocket, {
-            type: 'lobby:peer-joined',
-            payload: {
-              playerId: clientId,
-              playerName: payload?.playerName || existingPlayer?.name || 'Joueur',
-              isHost: existingPlayer?.isHost || false,
-              role: existingPlayer?.role ?? null,
-              status: 'active'
-            }
-          });
-        }, { exceptId: clientId });
+        if (remappedFrom) {
+          forEachConnectedLobbyRecipient(lobby, (peerSocket) => {
+            send(peerSocket, {
+              type: 'lobby:peer-left',
+              payload: { playerId: remappedFrom }
+            });
+            send(peerSocket, {
+              type: 'lobby:peer-joined',
+              payload: {
+                playerId: clientId,
+                playerName: payload?.playerName || existingPlayer?.name || 'Joueur',
+                isHost: existingPlayer?.isHost || false,
+                role: existingPlayer?.role ?? null,
+                status: 'active'
+              }
+            });
+          }, { exceptId: clientId });
+        }
 
-        // Notifier le host qu'un peer s'est reconnecté pour rétablir la connexion WebRTC
         if (lobby.hostId !== clientId) {
           const hostSocket = socketsById.get(lobby.hostId);
-          if (hostSocket) {
-            log(`[RECONNEXION] Notification du host ${lobby.hostId} que ${clientId} (ancien ${oldPlayerId}) s'est reconnecté`);
+          if (hostSocket && hostSocket.id !== socket.id) {
             send(hostSocket, {
               type: 'lobby:peer-reconnected',
               payload: {
@@ -1788,54 +1881,10 @@ io.on('connection', (socket) => {
             });
           }
         }
-        
+        broadcastLobbySnapshot(lobby);
         return;
       }
 
-      // Vérifier si le joueur est déjà dans le lobby avec le même clientId (rare)
-      if (lobby.players.has(clientId)) {
-        log(`[RECONNEXION] Client ${clientId} déjà dans le lobby ${code} - mise à jour du socket`);
-        
-        // Mettre à jour les informations du joueur (notamment le nom s'il a changé)
-        const existingPlayer = lobby.players.get(clientId);
-        if (existingPlayer && payload?.playerName) {
-          existingPlayer.name = payload.playerName;
-          existingPlayer.status = 'active';
-          existingPlayer.disconnectedAt = null;
-          lobby.players.set(clientId, existingPlayer);
-        }
-        
-        // Mettre à jour le mapping socket
-        clients.get(socket.id).lobbyCode = code;
-        socketsById.set(clientId, socket);
-        
-        send(socket, {
-          type: 'lobby:joined',
-          payload: {
-            code,
-            playerId: clientId,
-            hostId: lobby.hostId,
-            lobby: getLobbySnapshot(lobby)
-          }
-        });
-
-        // Notifier le host qu'un peer s'est reconnecté pour rétablir la connexion WebRTC
-        const hostSocket = socketsById.get(lobby.hostId);
-        if (hostSocket && hostSocket.id !== socket.id) {
-          log(`[RECONNEXION] Notification du host ${lobby.hostId} que ${clientId} s'est reconnecté`);
-          send(hostSocket, {
-            type: 'lobby:peer-reconnected',
-            payload: {
-              playerId: clientId,
-              playerName: existingPlayer?.name || payload?.playerName || 'Joueur'
-            }
-          });
-        }
-        
-        return;
-      }
-
-      // Nouveau joueur
       lobby.players.set(clientId, {
         id: clientId,
         name: payload?.playerName || 'Joueur',
@@ -1848,7 +1897,7 @@ io.on('connection', (socket) => {
         joinedLobbyPlayer.cognitoSub = payload?.cognitoSub || null;
         lobby.players.set(clientId, joinedLobbyPlayer);
       }
-      clients.get(socket.id).lobbyCode = code;
+      bindSocketToLobbyPlayer(socket, lobby, clientId);
 
       log(`[LOBBY REJOINT] Code: ${code}, Joueur: ${clientId}, Nom: ${payload?.playerName || 'Joueur'}`);
       markStateChanged('lobby:join', { code, playerId: clientId });
@@ -1891,6 +1940,7 @@ io.on('connection', (socket) => {
           }
         });
       }, { exceptId: clientId });
+      broadcastLobbySnapshot(lobby);
       return;
     }
 
@@ -1940,15 +1990,16 @@ io.on('connection', (socket) => {
           });
         }
         
-        // Mettre à jour les maps globales
-        socketsById.delete(oldPlayerId);
-        socketsById.set(clientId, socket);
+        if (oldPlayerId && oldPlayerId !== clientId) {
+          socketsById.delete(oldPlayerId);
+        }
         clients.set(socket.id, {
           clientId,
           lobbyCode: code,
           gameCode: null,
           clientVersion: clients.get(socket.id)?.clientVersion || null
         });
+        bindSocketToLobbyPlayer(socket, lobby, clientId);
 
         send(socket, {
           type: 'lobby:joined',
@@ -1960,18 +2011,13 @@ io.on('connection', (socket) => {
           }
         });
         
-        // Notifier les autres joueurs de la reconnexion du host
-        lobby.players.forEach((player) => {
-          if (player.id !== clientId) {
-            const playerSocket = socketsById.get(player.id);
-            if (playerSocket) {
-              send(playerSocket, {
-                type: 'lobby:host-reconnected',
-                payload: { newHostId: clientId }
-              });
-            }
-          }
-        });
+        forEachConnectedLobbyRecipient(lobby, (playerSocket) => {
+          send(playerSocket, {
+            type: 'lobby:host-reconnected',
+            payload: { newHostId: clientId }
+          });
+        }, { exceptId: clientId });
+        broadcastLobbySnapshot(lobby);
         return;
       } else {
         log(`[ERREUR LOBBY] Client ${clientId} tente de se reconnecter en tant que host mais n'est pas le host du lobby ${code}`);
@@ -2080,18 +2126,15 @@ io.on('connection', (socket) => {
         ...incomingConfig
       };
       lobby.stateVersion = (lobby.stateVersion || 1) + 1;
-      lobby.players.forEach((p) => {
-        const s = socketsById.get(p.id);
-        if (s) {
-          send(s, {
-            type: 'lobby:config-updated',
-            payload: {
-              config: lobby.config,
-              stateVersion: lobby.stateVersion,
-              requestId
-            }
-          });
-        }
+      forEachConnectedLobbyRecipient(lobby, (s) => {
+        send(s, {
+          type: 'lobby:config-updated',
+          payload: {
+            config: lobby.config,
+            stateVersion: lobby.stateVersion,
+            requestId
+          }
+        });
       });
       markStateChanged('lobby:config-update-request', {
         code: lobbyCode,
@@ -2474,17 +2517,56 @@ io.on('connection', (socket) => {
     }
 
     if (type === 'lobby:request-resync') {
-      const { lobbyCode } = clients.get(socket.id) || {};
-      if (!lobbyCode || !lobbies.has(lobbyCode)) {
+      const info = clients.get(socket.id) || {};
+      const requestedCode = (
+        payload?.code ||
+        payload?.lobbyCode ||
+        info.lobbyCode ||
+        ''
+      )
+        .toString()
+        .toUpperCase();
+      const lobby =
+        (requestedCode && lobbies.get(requestedCode)) ||
+        (info.lobbyCode && lobbies.get(info.lobbyCode)) ||
+        null;
+      if (!lobby) {
         log(`[ERREUR RESYNC] Client ${clientId} demande resync sans lobby actif`);
         send(socket, { type: 'lobby:error', payload: { message: 'Lobby introuvable pour resync.' } });
         return;
       }
-      const lobby = lobbies.get(lobbyCode);
-      const hostSocket = socketsById.get(lobby.hostId);
-      send(hostSocket, {
-        type: 'lobby:request-resync',
-        payload: { playerId: clientId }
+
+      const rebound = rebindLobbySocket(socket, lobby, {
+        clientId,
+        oldPlayerId: payload?.oldPlayerId || payload?.playerId,
+        cognitoSub: payload?.cognitoSub || null
+      });
+      const boundPlayerId = rebound.playerId || (lobby.players.has(clientId) ? clientId : null);
+      if (!boundPlayerId) {
+        log(`[ERREUR RESYNC] Client ${clientId} n'est pas membre du lobby ${lobby.code}`);
+        send(socket, { type: 'lobby:error', payload: { message: 'Lobby introuvable pour resync.' } });
+        return;
+      }
+      if (!rebound.playerId) {
+        bindSocketToLobbyPlayer(socket, lobby, boundPlayerId);
+      }
+
+      send(socket, {
+        type: 'lobby:joined',
+        payload: {
+          code: lobby.code,
+          playerId: boundPlayerId,
+          hostId: lobby.hostId,
+          lobby: getLobbySnapshot(lobby)
+        }
+      });
+      send(socket, {
+        type: 'lobby:snapshot',
+        payload: {
+          code: lobby.code,
+          hostId: lobby.hostId,
+          lobby: getLobbySnapshot(lobby)
+        }
       });
       return;
     }
@@ -2759,12 +2841,16 @@ io.on('connection', (socket) => {
           });
         }, { exceptId: playerId });
       }
+      if (lobbies.has(code)) {
+        broadcastLobbySnapshot(lobbies.get(code));
+      }
 
       // Mettre à jour les infos du client
       const clientInfo = clients.get(socket.id);
       if (clientInfo) {
         clientInfo.lobbyCode = null;
       }
+      leaveLobbyRoom(socket, code);
       markStateChanged('lobby:leave', { code, playerId });
       
       return;
@@ -3005,9 +3091,8 @@ io.on('connection', (socket) => {
         );
       }
 
-      lobby.players.forEach((p) => {
-        const s = socketsById.get(p.id);
-        if (s) send(s, { type: 'lobby:chat-message', payload: msg });
+      forEachConnectedLobbyRecipient(lobby, (s) => {
+        send(s, { type: 'lobby:chat-message', payload: msg });
       });
       markStateChanged('lobby:chat', { code: lobbyCode, playerId: clientId });
       return;
@@ -3261,6 +3346,7 @@ io.on('connection', (socket) => {
                 payload: { playerId: clientInfo.clientId }
               });
             }, { exceptId: clientInfo.clientId });
+            broadcastLobbySnapshot(currentLobby);
             disconnectedLobbyPlayers.delete(lobbyDisconnectKey(lobbyCode, clientInfo.clientId));
           }, 30 * 1000);
           disconnectedLobbyPlayers.set(lobbyDisconnectKey(lobbyCode, clientInfo.clientId), timeoutId);

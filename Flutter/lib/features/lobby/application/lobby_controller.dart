@@ -3,14 +3,18 @@ import 'dart:math';
 
 import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_form_data.dart';
 import 'package:broken_veil_protocol/features/lobby/data/lobby_socket_service.dart';
+import 'package:broken_veil_protocol/features/lobby/data/player_session_store.dart';
 import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
 import 'package:broken_veil_protocol/shared/services/voice_chat_service.dart';
 import 'package:broken_veil_protocol/shared/services/voice_settings_service.dart';
 import 'package:flutter/foundation.dart';
 
 class LobbyController extends ChangeNotifier {
-  LobbyController({LobbySocketService? socketService})
-    : _socketService = socketService ?? LobbySocketService() {
+  LobbyController({
+    LobbySocketService? socketService,
+    PlayerSessionStore? playerSessionStore,
+  }) : _socketService = socketService ?? LobbySocketService(),
+       _playerSessionStore = playerSessionStore ?? PlayerSessionStore() {
     _voiceChatService = VoiceChatService(
       signalSender: (targetId, signal) {
         return _socketService.sendWebRtcSignal(
@@ -23,6 +27,7 @@ class LobbyController extends ChangeNotifier {
   }
 
   final LobbySocketService _socketService;
+  final PlayerSessionStore _playerSessionStore;
   late final VoiceChatService _voiceChatService;
   final VoiceSettingsService _voiceSettingsService = VoiceSettingsService();
   StreamSubscription<Map<String, dynamic>>? _messagesSub;
@@ -44,7 +49,12 @@ class LobbyController extends ChangeNotifier {
   int _turnExpiresAtMs = 0;
   final Map<String, int> _voiceActiveSeenAtMs = <String, int>{};
   Timer? _voiceActivityGcTimer;
+  Timer? _disconnectRecoveryTimer;
+  Timer? _resyncHeartbeatTimer;
+  bool _isBindingSession = false;
   bool _isRecoveringSession = false;
+  int _recoveryAttempts = 0;
+  static const Duration _resyncHeartbeatInterval = Duration(seconds: 8);
 
   static const List<String> _objectiveNamePool = <String>[
     'Serveur de donnees',
@@ -83,26 +93,11 @@ class LobbyController extends ChangeNotifier {
     shouldOpenGameForCode = false;
     notifyListeners();
 
-    try {
-      final serverUri = Uri.parse(bootstrap.serverUrl);
-      await _socketService.connect(
-        serverUrl: serverUri,
-        socketPath: bootstrap.socketPath,
-      );
-      _messagesSub?.cancel();
-      _messagesSub = _socketService.messages.listen(_onMessage);
+    _messagesSub?.cancel();
+    _messagesSub = _socketService.messages.listen(_onMessage);
 
-      final joined = await _socketService.joinLobby(
-        code: bootstrap.code,
-        playerName: bootstrap.playerName,
-        cognitoSub: bootstrap.cognitoSub,
-        previousPlayerId: bootstrap.previousPlayerId,
-        reconnectAsHost: bootstrap.reconnectAsHost,
-      );
-      lobbyCode = joined.code;
-      playerId = joined.playerId;
-      isHost = joined.playerId == joined.hostId;
-      connectionStatus = 'connected';
+    try {
+      await _bindToLobby(bootstrap, isInitial: true);
       _regenerateObjectiveNames();
       final voiceSettings = await _voiceSettingsService.load();
       isVoiceChatEnabled = voiceSettings.enabled;
@@ -111,6 +106,7 @@ class LobbyController extends ChangeNotifier {
       // Keep lobby join UX responsive even if microphone permission stalls.
       _syncVoiceState();
       _startVoiceActivityGcTimer();
+      _startResyncHeartbeat();
     } catch (e) {
       error = e.toString();
       connectionStatus = 'error';
@@ -146,51 +142,22 @@ class LobbyController extends ChangeNotifier {
     switch (type) {
       case 'lobby:joined':
       case 'lobby:created':
-        if (payload is Map) {
-          final hostId = payload['hostId']?.toString();
-          final lobby = payload['lobby'];
-          if (lobby is Map) {
-            final config = lobby['config'];
-            if (config is Map) {
-              final configMap = Map<String, dynamic>.from(
-                config.map((k, v) => MapEntry(k.toString(), v)),
-              );
-              gameConfig = LobbyGameConfig.fromMap(configMap);
-              bootstrapData = bootstrapData?.copyWith(
-                form: _formFromConfigMap(configMap),
-              );
-            }
-            final lobbyChatMessages = lobby['chatMessages'];
-            if (lobbyChatMessages is List) {
-              chatMessages
-                ..clear()
-                ..addAll(_parseLobbyChatMessages(lobbyChatMessages));
-            }
-            final playersRaw = lobby['players'];
-            if (playersRaw is List) {
-              players
-                ..clear()
-                ..addAll(
-                  playersRaw.whereType<Map>().map((raw) {
-                    return LobbyPlayer(
-                      id: raw['id']?.toString() ?? '',
-                      name: raw['name']?.toString() ?? 'Joueur',
-                      isHost: raw['isHost'] == true,
-                      role: raw['role']?.toString(),
-                      status: raw['status']?.toString() ?? 'active',
-                    );
-                  }),
-                );
-              _sortPlayersByName();
-            }
-          }
-          playerId = payload['playerId']?.toString() ?? playerId;
-          isHost = playerId != null && hostId != null && playerId == hostId;
-        }
+        _applyLobbyStateFromPayload(payload, updateIdentity: true);
         connectionStatus = 'connected';
         error = null;
         _syncVoiceState();
         notifyListeners();
+        return;
+      case 'lobby:snapshot':
+        _applyLobbyStateFromPayload(payload, updateIdentity: false);
+        connectionStatus = 'connected';
+        error = null;
+        notifyListeners();
+        return;
+      case 'server:hello':
+        if (playerId != null && bootstrapData != null && !_isBindingSession) {
+          unawaited(recoverAfterResume());
+        }
         return;
       case 'lobby:peer-joined':
         if (payload is Map) {
@@ -231,6 +198,7 @@ class LobbyController extends ChangeNotifier {
               );
             }
             isHost = playerId == newHost;
+            bootstrapData = bootstrapData?.copyWith(reconnectAsHost: isHost);
             _syncVoiceState();
             notifyListeners();
           }
@@ -358,13 +326,11 @@ class LobbyController extends ChangeNotifier {
         return;
       case 'socket:disconnected':
         connectionStatus = 'connecting';
+        _scheduleDisconnectRecovery();
         notifyListeners();
         return;
       case 'socket:reconnected':
-        connectionStatus = 'connected';
-        requestLatestState();
-        _syncVoiceState();
-        notifyListeners();
+        unawaited(recoverAfterResume());
         return;
       default:
         return;
@@ -420,14 +386,52 @@ class LobbyController extends ChangeNotifier {
     _socketService.startGame(code);
   }
 
-  void requestLatestState() => _socketService.requestLatestState();
+  void requestLatestState() => _socketService.requestLatestState(
+    code: lobbyCode ?? bootstrapData?.code,
+    oldPlayerId: playerId ?? bootstrapData?.previousPlayerId,
+    cognitoSub: bootstrapData?.cognitoSub,
+  );
+
+  void _scheduleDisconnectRecovery({Duration delay = const Duration(seconds: 1)}) {
+    _disconnectRecoveryTimer?.cancel();
+    _disconnectRecoveryTimer = Timer(delay, () {
+      if (_isBindingSession) return;
+      unawaited(recoverAfterResume());
+    });
+  }
 
   Future<void> recoverAfterResume() async {
     final bootstrap = bootstrapData;
-    if (_isRecoveringSession || bootstrap == null) return;
+    if (_isBindingSession || bootstrap == null) return;
     _isRecoveringSession = true;
-    connectionStatus = 'connecting';
-    notifyListeners();
+    try {
+      await _bindToLobby(bootstrap, isInitial: false);
+      requestLatestState();
+      await _syncVoiceState();
+      _startResyncHeartbeat();
+    } catch (_) {
+      connectionStatus = _socketService.isConnected ? 'connected' : 'error';
+      notifyListeners();
+      _recoveryAttempts += 1;
+      if (_recoveryAttempts <= 5) {
+        final seconds = min(8, _recoveryAttempts * 2);
+        _scheduleDisconnectRecovery(delay: Duration(seconds: seconds));
+      }
+    } finally {
+      _isRecoveringSession = false;
+    }
+  }
+
+  Future<void> _bindToLobby(
+    LobbyBootstrapData bootstrap, {
+    required bool isInitial,
+  }) async {
+    if (_isBindingSession) return;
+    _isBindingSession = true;
+    if (!isInitial) {
+      connectionStatus = 'connecting';
+      notifyListeners();
+    }
     try {
       if (!_socketService.isConnected) {
         await _socketService.connect(
@@ -440,22 +444,120 @@ class LobbyController extends ChangeNotifier {
         playerName: bootstrap.playerName,
         cognitoSub: bootstrap.cognitoSub,
         previousPlayerId: playerId ?? bootstrap.previousPlayerId,
-        reconnectAsHost: isHost,
+        reconnectAsHost: isHost || (playerId == null && bootstrap.reconnectAsHost),
       );
       lobbyCode = joined.code;
       playerId = joined.playerId;
       isHost = joined.playerId == joined.hostId;
+      bootstrapData = (bootstrapData ?? bootstrap).copyWith(
+        previousPlayerId: joined.playerId,
+        reconnectAsHost: isHost,
+      );
       error = null;
       connectionStatus = 'connected';
-      requestLatestState();
-      await _syncVoiceState();
-    } catch (_) {
-      // Keep previous UI state; socket auto-reconnect may still recover.
-      connectionStatus = _socketService.isConnected ? 'connected' : 'error';
-    } finally {
-      _isRecoveringSession = false;
+      _recoveryAttempts = 0;
+      _disconnectRecoveryTimer?.cancel();
+      await _persistPlayerId();
       notifyListeners();
+    } finally {
+      _isBindingSession = false;
     }
+  }
+
+  Future<void> _persistPlayerId() async {
+    final code = lobbyCode;
+    final id = playerId;
+    if (code == null || id == null || id.isEmpty) return;
+    try {
+      await _playerSessionStore.savePlayerIdForCode(code: code, playerId: id);
+    } catch (_) {}
+  }
+
+  void _startResyncHeartbeat() {
+    _resyncHeartbeatTimer?.cancel();
+    _resyncHeartbeatTimer = Timer.periodic(_resyncHeartbeatInterval, (_) {
+      if (_isBindingSession) return;
+      if (connectionStatus != 'connected') return;
+      requestLatestState();
+    });
+  }
+
+  void _applyLobbyStateFromPayload(
+    dynamic payload, {
+    required bool updateIdentity,
+  }) {
+    if (payload is! Map) return;
+    final hostId = payload['hostId']?.toString();
+    final lobby = payload['lobby'];
+    var rosterChanged = false;
+    if (lobby is Map) {
+      final config = lobby['config'];
+      if (config is Map) {
+        final configMap = Map<String, dynamic>.from(
+          config.map((k, v) => MapEntry(k.toString(), v)),
+        );
+        gameConfig = LobbyGameConfig.fromMap(configMap);
+        bootstrapData = bootstrapData?.copyWith(
+          form: _formFromConfigMap(configMap),
+        );
+      }
+      final lobbyChatMessages = lobby['chatMessages'];
+      if (lobbyChatMessages is List) {
+        chatMessages
+          ..clear()
+          ..addAll(_parseLobbyChatMessages(lobbyChatMessages));
+      }
+      final playersRaw = lobby['players'];
+      if (playersRaw is List) {
+        rosterChanged = _replacePlayersFromRaw(playersRaw);
+      }
+    }
+    if (updateIdentity) {
+      final incomingId = payload['playerId']?.toString();
+      if (incomingId != null && incomingId.isNotEmpty) {
+        if (playerId == null || playerId == incomingId) {
+          playerId = incomingId;
+        }
+      }
+    }
+    if (playerId != null && hostId != null) {
+      isHost = playerId == hostId;
+    }
+    if (rosterChanged) {
+      _syncVoiceState();
+    }
+  }
+
+  bool _replacePlayersFromRaw(List playersRaw) {
+    final next = playersRaw.whereType<Map>().map((raw) {
+      return LobbyPlayer(
+        id: raw['id']?.toString() ?? '',
+        name: raw['name']?.toString() ?? 'Joueur',
+        isHost: raw['isHost'] == true,
+        role: raw['role']?.toString(),
+        status: raw['status']?.toString() ?? 'active',
+      );
+    }).toList();
+    next.sort((a, b) {
+      final nameCompare = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      if (nameCompare != 0) return nameCompare;
+      return a.id.compareTo(b.id);
+    });
+    final unchanged =
+        next.length == players.length &&
+        [
+          for (var i = 0; i < next.length; i++)
+            next[i].id == players[i].id &&
+                next[i].name == players[i].name &&
+                next[i].role == players[i].role &&
+                next[i].status == players[i].status &&
+                next[i].isHost == players[i].isHost,
+        ].every((match) => match);
+    if (unchanged) return false;
+    players
+      ..clear()
+      ..addAll(next);
+    return true;
   }
 
   Future<void> toggleVoiceChat() async {
@@ -626,6 +728,8 @@ class LobbyController extends ChangeNotifier {
   void dispose() {
     _messagesSub?.cancel();
     _voiceActivityGcTimer?.cancel();
+    _disconnectRecoveryTimer?.cancel();
+    _resyncHeartbeatTimer?.cancel();
     _voiceChatService.dispose();
     _socketService.dispose();
     super.dispose();

@@ -23,5 +23,6 @@ C:\Users\Alexa\Documents\Work\Utiles\Flutter\build-abstergo.ps1 -Action deploy-d
 ```
 
 - Build **debug** avec `Flutter/config/cognito.release.json`
+- Démarre automatiquement le Docker signaling (`localhost:5174`) s’il est arrêté
 - Lance automatiquement les AVD manquants
 - Installe et ouvre `com.brokenveilprotocol.app` sur les 3 émulateurs

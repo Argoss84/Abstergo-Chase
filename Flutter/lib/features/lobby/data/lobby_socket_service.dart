@@ -10,6 +10,7 @@ class LobbySocketService {
   String? _connectedOrigin;
   String? _connectedPath;
   StreamController<Map<String, dynamic>>? _messageController;
+  bool _hasConnectedAtLeastOnce = false;
 
   Stream<Map<String, dynamic>> get messages {
     _messageController ??= StreamController<Map<String, dynamic>>.broadcast();
@@ -18,11 +19,19 @@ class LobbySocketService {
 
   bool get isConnected => _socket?.connected == true;
 
+  void _emitReconnected() {
+    _messageController?.add(const <String, dynamic>{
+      'type': 'socket:reconnected',
+      'payload': <String, dynamic>{},
+    });
+  }
+
   Future<void> connect({
     required Uri serverUrl,
     required String socketPath,
     Duration timeout = const Duration(seconds: 12),
   }) async {
+    _messageController ??= StreamController<Map<String, dynamic>>.broadcast();
     final origin = serverUrl.toString();
     final sameEndpoint =
         _connectedOrigin == origin && _connectedPath == socketPath;
@@ -34,6 +43,7 @@ class LobbySocketService {
     if (_socket != null && !sameEndpoint) {
       _socket!.dispose();
       _socket = null;
+      _hasConnectedAtLeastOnce = false;
     }
 
     if (_socket == null) {
@@ -42,12 +52,15 @@ class LobbySocketService {
         io.OptionBuilder()
             .setPath(socketPath)
             .setTransports(<String>['websocket'])
+            .enableForceNew()
+            .disableMultiplex()
             .disableAutoConnect()
             .enableReconnection()
             .build(),
       );
       _connectedOrigin = origin;
       _connectedPath = socketPath;
+      _hasConnectedAtLeastOnce = false;
       _socket!.on('message', (data) {
         if (data is Map) {
           final normalized = Map<String, dynamic>.from(
@@ -56,15 +69,19 @@ class LobbySocketService {
           _messageController?.add(normalized);
         }
       });
+      _socket!.on('connect', (_) {
+        if (_hasConnectedAtLeastOnce) {
+          _emitReconnected();
+        }
+        _hasConnectedAtLeastOnce = true;
+      });
+      _socket!.on('reconnect', (_) {
+        _hasConnectedAtLeastOnce = true;
+        _emitReconnected();
+      });
       _socket!.on('disconnect', (_) {
         _messageController?.add(const <String, dynamic>{
           'type': 'socket:disconnected',
-          'payload': <String, dynamic>{},
-        });
-      });
-      _socket!.on('reconnect', (_) {
-        _messageController?.add(const <String, dynamic>{
-          'type': 'socket:reconnected',
           'payload': <String, dynamic>{},
         });
       });
@@ -147,7 +164,8 @@ class LobbySocketService {
               'code': code.toUpperCase(),
               'playerName': playerName,
               'playerId': previousPlayerId,
-              if (cognitoSub != null && cognitoSub.isNotEmpty) 'cognitoSub': cognitoSub,
+              if (cognitoSub != null && cognitoSub.isNotEmpty)
+                'cognitoSub': cognitoSub,
             },
           }
         : <String, dynamic>{
@@ -155,7 +173,8 @@ class LobbySocketService {
             'payload': <String, dynamic>{
               'code': code.toUpperCase(),
               'playerName': playerName,
-              if (cognitoSub != null && cognitoSub.isNotEmpty) 'cognitoSub': cognitoSub,
+              if (cognitoSub != null && cognitoSub.isNotEmpty)
+                'cognitoSub': cognitoSub,
               if (previousPlayerId != null && previousPlayerId.isNotEmpty)
                 'oldPlayerId': previousPlayerId,
             },
@@ -252,10 +271,19 @@ class LobbySocketService {
     }
   }
 
-  void requestLatestState() {
-    _emitMessage(const <String, dynamic>{
+  void requestLatestState({
+    String? code,
+    String? oldPlayerId,
+    String? cognitoSub,
+  }) {
+    _emitMessage(<String, dynamic>{
       'type': 'lobby:request-resync',
-      'payload': <String, dynamic>{},
+      'payload': <String, dynamic>{
+        if (code != null && code.isNotEmpty) 'code': code.toUpperCase(),
+        if (oldPlayerId != null && oldPlayerId.isNotEmpty)
+          'oldPlayerId': oldPlayerId,
+        if (cognitoSub != null && cognitoSub.isNotEmpty) 'cognitoSub': cognitoSub,
+      },
     });
   }
 
@@ -297,6 +325,7 @@ class LobbySocketService {
   void dispose() {
     _socket?.dispose();
     _socket = null;
+    _hasConnectedAtLeastOnce = false;
     _messageController?.close();
     _messageController = null;
   }

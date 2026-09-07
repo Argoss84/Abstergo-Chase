@@ -262,6 +262,7 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
                                       outerStreetContour:
                                           _controller.outerStreetContour,
                                     );
+                                    _controller.releaseSignalingSocket();
                                     router.go(
                                       '${LobbyPage.routePath}?code=${_controller.createdLobbyCode}',
                                       extra: bootstrap,
