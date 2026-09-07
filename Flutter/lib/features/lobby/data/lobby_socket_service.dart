@@ -10,6 +10,7 @@ class LobbySocketService {
   String? _connectedOrigin;
   String? _connectedPath;
   StreamController<Map<String, dynamic>>? _messageController;
+  bool _hasConnectedAtLeastOnce = false;
 
   Stream<Map<String, dynamic>> get messages {
     _messageController ??= StreamController<Map<String, dynamic>>.broadcast();
@@ -34,6 +35,7 @@ class LobbySocketService {
     if (_socket != null && !sameEndpoint) {
       _socket!.dispose();
       _socket = null;
+      _hasConnectedAtLeastOnce = false;
     }
 
     if (_socket == null) {
@@ -48,6 +50,7 @@ class LobbySocketService {
       );
       _connectedOrigin = origin;
       _connectedPath = socketPath;
+      _hasConnectedAtLeastOnce = false;
       _socket!.on('message', (data) {
         if (data is Map) {
           final normalized = Map<String, dynamic>.from(
@@ -56,15 +59,18 @@ class LobbySocketService {
           _messageController?.add(normalized);
         }
       });
+      _socket!.on('connect', (_) {
+        if (_hasConnectedAtLeastOnce) {
+          _messageController?.add(const <String, dynamic>{
+            'type': 'socket:reconnected',
+            'payload': <String, dynamic>{},
+          });
+        }
+        _hasConnectedAtLeastOnce = true;
+      });
       _socket!.on('disconnect', (_) {
         _messageController?.add(const <String, dynamic>{
           'type': 'socket:disconnected',
-          'payload': <String, dynamic>{},
-        });
-      });
-      _socket!.on('reconnect', (_) {
-        _messageController?.add(const <String, dynamic>{
-          'type': 'socket:reconnected',
           'payload': <String, dynamic>{},
         });
       });
@@ -297,6 +303,7 @@ class LobbySocketService {
   void dispose() {
     _socket?.dispose();
     _socket = null;
+    _hasConnectedAtLeastOnce = false;
     _messageController?.close();
     _messageController = null;
   }
