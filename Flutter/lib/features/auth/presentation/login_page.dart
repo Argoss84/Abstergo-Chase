@@ -24,6 +24,57 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     );
   }
 
+  void _showAuthError(String message) {
+    final friendlyMessage = _buildFriendlyCredentialsMessage(message);
+    if (friendlyMessage == null) {
+      _showInfo(message);
+      return;
+    }
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return AlertDialog(
+          titlePadding: const EdgeInsets.fromLTRB(24, 16, 8, 0),
+          title: Row(
+            children: [
+              const Expanded(child: Text('Échec de connexion')),
+              IconButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                icon: const Icon(Icons.close),
+                tooltip: 'Fermer',
+              ),
+            ],
+          ),
+          content: Text(friendlyMessage),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Fermer'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String? _buildFriendlyCredentialsMessage(String message) {
+    final normalized = message.toLowerCase();
+    final isCredentialsError =
+        normalized.contains('notauthorizedexception') ||
+        normalized.contains('incorrect username or password') ||
+        normalized.contains('incorrect username/password') ||
+        normalized.contains('user does not exist') ||
+        normalized.contains('usernotfoundexception') ||
+        normalized.contains('password attempts exceeded');
+    if (!isCredentialsError) {
+      return null;
+    }
+    return 'Le nom d’utilisateur ou le mot de passe est incorrect. '
+        'Vérifiez vos identifiants Cognito puis réessayez.';
+  }
+
   Future<void> _submitLogin() async {
     if (_isSubmittingLocal) return;
     setState(() {
@@ -41,10 +92,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         _showInfo('Renseignez utilisateur et mot de passe avant de continuer.');
         return;
       }
-      final ok = await auth.signIn(username: username, password: password);
-      if (!ok && mounted && auth.error != null) {
-        _showInfo(auth.error!);
-      }
+      await auth.signIn(username: username, password: password);
     } finally {
       if (mounted) {
         setState(() {
@@ -65,13 +113,16 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   Widget build(BuildContext context) {
     final auth = ref.watch(authControllerProvider);
     final isSubmitting = _isSubmittingLocal || auth.isSubmitting;
+    if (auth.error == null || auth.error!.isEmpty) {
+      _lastShownAuthError = null;
+    }
     if (!isSubmitting &&
         auth.error != null &&
         auth.error!.isNotEmpty &&
         auth.error != _lastShownAuthError) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        _showInfo(auth.error!);
+        _showAuthError(auth.error!);
       });
       _lastShownAuthError = auth.error;
     }
