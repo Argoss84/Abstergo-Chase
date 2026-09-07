@@ -1992,12 +1992,24 @@ class _GamePageState extends State<GamePage>
               children: [
                 Padding(
                   padding: const EdgeInsets.all(12),
-                  child: Text(
-                    'Chat équipe',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Chat équipe',
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close),
+                        tooltip: 'Fermer',
+                      ),
+                    ],
                   ),
                 ),
                 Expanded(

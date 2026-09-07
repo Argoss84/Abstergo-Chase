@@ -1,5 +1,5 @@
 ---
-description: Procédure debug — build APK avec cognito.release.json, lancer les 3 émulateurs si besoin, installer et ouvrir l’app
+description: Procédure debug — signaling Docker, build APK avec cognito.release.json, 3 émulateurs, install + launch
 alwaysApply: true
 ---
 
@@ -14,6 +14,7 @@ Quand l’utilisateur demande de déployer / republier / tester en debug sur les
 | Defines | `Flutter/config/cognito.release.json` (**toujours**) |
 | Variante | **debug** uniquement (jamais release / profile pour les émulateurs) |
 | Package | `com.brokenveilprotocol.app` |
+| Signaling | Docker `Docker/docker-compose.signaling.yml` sur **localhost:5174** |
 | Emulators | `emulator-5554` (Galaxy_S23_Ultra), `emulator-5556` (Galaxy_A12), `emulator-5558` (Galaxy_Tab_A7) |
 
 ## Raccourci (préféré)
@@ -22,7 +23,7 @@ Quand l’utilisateur demande de déployer / republier / tester en debug sur les
 C:\Users\Alexa\Documents\Work\Utiles\Flutter\build-abstergo.ps1 -Action deploy-debug
 ```
 
-Ce script : vérifie / lance les 3 AVD manquants → build APK debug avec `config/cognito.release.json` → `flutter install --debug` → ouvre l’app sur chaque appareil.
+Ce script : vérifie / démarre le **Docker signaling** (port 5174) → vérifie / lance les 3 AVD manquants → build APK debug avec `config/cognito.release.json` → `flutter install --debug` → ouvre l’app sur chaque appareil.
 
 ## Procédure manuelle (si le script n’est pas utilisable)
 
@@ -31,7 +32,15 @@ Ce script : vérifie / lance les 3 AVD manquants → build APK debug avec `confi
    . C:\Users\Alexa\Documents\Work\Utiles\Flutter\env.ps1
    ```
 
-2. **Émulateurs** — `adb devices` doit montrer les 3 serials en état `device`.
+2. **Signaling Docker** — `localhost:5174` doit répondre (TCP).
+   - Si indisponible :
+     ```powershell
+     cd C:\Users\Alexa\Documents\Work\Projets\Repos\Abstergo-Chase\Docker
+     docker compose -f docker-compose.signaling.yml up --build -d
+     ```
+   - Attendre que le port 5174 soit joignable avant de continuer.
+
+3. **Émulateurs** — `adb devices` doit montrer les 3 serials en état `device`.
    - Aucun lancé, ou il en manque : démarrer les manquants
      ```powershell
      C:\Users\Alexa\Documents\Work\Utiles\Android\start-all.ps1
@@ -44,13 +53,13 @@ Ce script : vérifie / lance les 3 AVD manquants → build APK debug avec `confi
      ```
    - Attendre que les 3 soient `device` avant d’installer.
 
-3. **Build** (depuis `Flutter/`)
+4. **Build** (depuis `Flutter/`)
    ```powershell
    flutter build apk --debug --dart-define-from-file=config/cognito.release.json
    ```
    Ne **jamais** omettre `--dart-define-from-file=config/cognito.release.json`.
 
-4. **Install + lancement** pour chaque `emulator-5554`, `emulator-5556`, `emulator-5558` :
+5. **Install + lancement** pour chaque `emulator-5554`, `emulator-5556`, `emulator-5558` :
    ```powershell
    flutter install -d <id> --debug
    adb -s <id> shell monkey -p com.brokenveilprotocol.app -c android.intent.category.LAUNCHER 1

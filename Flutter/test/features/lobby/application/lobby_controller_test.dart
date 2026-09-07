@@ -158,6 +158,58 @@ class _StartGameTrackingSocketService extends _LobbyMessagesSocketService {
   }
 }
 
+class _ReconnectingLobbySocketService extends LobbySocketService {
+  final StreamController<Map<String, dynamic>> _messagesController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final List<String?> joinPreviousPlayerIds = <String?>[];
+  int joinCalls = 0;
+
+  @override
+  Stream<Map<String, dynamic>> get messages => _messagesController.stream;
+
+  @override
+  bool get isConnected => true;
+
+  @override
+  Future<void> connect({
+    required Uri serverUrl,
+    required String socketPath,
+    Duration timeout = const Duration(seconds: 12),
+  }) async {}
+
+  @override
+  Future<JoinLobbyResult> joinLobby({
+    required String code,
+    required String playerName,
+    String? cognitoSub,
+    String? previousPlayerId,
+    bool reconnectAsHost = false,
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
+    joinCalls += 1;
+    joinPreviousPlayerIds.add(previousPlayerId);
+    return const JoinLobbyResult(
+      code: 'ABC123',
+      playerId: 'player-1',
+      hostId: 'host-1',
+    );
+  }
+
+  void emit(Map<String, dynamic> message) => _messagesController.add(message);
+
+  @override
+  void requestLatestState({
+    String? code,
+    String? oldPlayerId,
+    String? cognitoSub,
+  }) {}
+
+  @override
+  void dispose() {
+    _messagesController.close();
+  }
+}
+
 void main() {
   test(
     'triggers game fallback route when lobby join returns lobby not found',
@@ -398,4 +450,312 @@ void main() {
       controller.dispose();
     },
   );
+test('rejoins lobby after socket reconnect to recover peer updates', () async {
+  final socketService = _ReconnectingLobbySocketService();
+  final controller = LobbyController(socketService: socketService);
+
+  await controller.initialize(
+    bootstrap: const LobbyBootstrapData(
+      code: 'ABC123',
+      serverUrl: 'http://localhost:3000',
+      socketPath: '/socket.io',
+      playerName: 'Player',
+      previousPlayerId: 'stored-player-id',
+    ),
+  );
+
+    expect(socketService.joinCalls, 1);
+    expect(socketService.joinPreviousPlayerIds, <String?>['stored-player-id']);
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'socket:reconnected',
+      'payload': <String, dynamic>{},
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+
+    expect(socketService.joinCalls, 2);
+    expect(
+      socketService.joinPreviousPlayerIds,
+      <String?>['stored-player-id', 'player-1'],
+    );
+    expect(controller.connectionStatus, 'connected');
+    controller.dispose();
+  });
+
+  test('recovers lobby automatically after socket disconnect', () async {
+    final socketService = _ReconnectingLobbySocketService();
+    final controller = LobbyController(socketService: socketService);
+
+    await controller.initialize(
+      bootstrap: const LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Player',
+        previousPlayerId: 'stored-player-id',
+      ),
+    );
+
+    expect(socketService.joinCalls, 1);
+    socketService.emit(const <String, dynamic>{
+      'type': 'socket:disconnected',
+      'payload': <String, dynamic>{},
+    });
+
+    await Future<void>.delayed(const Duration(milliseconds: 1100));
+
+    expect(socketService.joinCalls, 2);
+    expect(controller.connectionStatus, 'connected');
+    controller.dispose();
+  });
+
+  test('sorts lobby players alphabetically on lobby snapshot', () async {
+    final socketService = _LobbyMessagesSocketService();
+    final controller = LobbyController(socketService: socketService);
+
+    await controller.initialize(
+      bootstrap: const LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Player',
+      ),
+    );
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:joined',
+      'payload': <String, dynamic>{
+        'code': 'ABC123',
+        'playerId': 'me',
+        'hostId': 'h1',
+        'lobby': <String, dynamic>{
+          'players': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'p2',
+              'name': 'zoe',
+              'role': null,
+              'status': 'active',
+              'isHost': false,
+            },
+            <String, dynamic>{
+              'id': 'p1',
+              'name': 'Alice',
+              'role': null,
+              'status': 'active',
+              'isHost': true,
+            },
+          ],
+        },
+      },
+    });
+
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.players.map((p) => p.name).toList(), ['Alice', 'zoe']);
+    controller.dispose();
+  });
+
+  test('sorts lobby players alphabetically when peer joins', () async {
+    final socketService = _LobbyMessagesSocketService();
+    final controller = LobbyController(socketService: socketService);
+
+    await controller.initialize(
+      bootstrap: const LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Player',
+      ),
+    );
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:joined',
+      'payload': <String, dynamic>{
+        'code': 'ABC123',
+        'playerId': 'me',
+        'hostId': 'h1',
+        'lobby': <String, dynamic>{
+          'players': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'p2',
+              'name': 'Charlie',
+              'role': null,
+              'status': 'active',
+              'isHost': false,
+            },
+          ],
+        },
+      },
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:peer-joined',
+      'payload': <String, dynamic>{
+        'playerId': 'p1',
+        'playerName': 'Alice',
+        'role': null,
+        'status': 'active',
+      },
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.players.map((p) => p.name).toList(), [
+      'Alice',
+      'Charlie',
+    ]);
+    controller.dispose();
+  });
+
+  test('rejoins lobby when server hello arrives after a guest is bound', () async {
+    final socketService = _ReconnectingLobbySocketService();
+    final controller = LobbyController(socketService: socketService);
+
+    await controller.initialize(
+      bootstrap: const LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Player',
+        previousPlayerId: 'stored-player-id',
+      ),
+    );
+
+    expect(socketService.joinCalls, 1);
+    expect(controller.playerId, 'player-1');
+    expect(controller.isHost, isFalse);
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'server:hello',
+      'payload': <String, dynamic>{'clientId': 'new-socket-id'},
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+
+    expect(socketService.joinCalls, 2);
+    expect(
+      socketService.joinPreviousPlayerIds,
+      <String?>['stored-player-id', 'player-1'],
+    );
+    controller.dispose();
+  });
+
+  test('applies lobby snapshot roster for a non-host without requiring isHost', () async {
+    final socketService = _LobbyMessagesSocketService();
+    final controller = LobbyController(socketService: socketService);
+
+    await controller.initialize(
+      bootstrap: const LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Guest',
+      ),
+    );
+
+    expect(controller.isHost, isFalse);
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:snapshot',
+      'payload': <String, dynamic>{
+        'code': 'ABC123',
+        'hostId': 'host-1',
+        'lobby': <String, dynamic>{
+          'players': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'host-1',
+              'name': 'Host',
+              'role': null,
+              'status': 'active',
+              'isHost': true,
+            },
+            <String, dynamic>{
+              'id': 'player-1',
+              'name': 'Guest',
+              'role': null,
+              'status': 'active',
+              'isHost': false,
+            },
+            <String, dynamic>{
+              'id': 'player-3',
+              'name': 'Newcomer',
+              'role': 'ROGUE',
+              'status': 'active',
+              'isHost': false,
+            },
+          ],
+        },
+      },
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.isHost, isFalse);
+    expect(controller.playerId, 'player-1');
+    expect(controller.players.map((p) => p.name).toList(), [
+      'Guest',
+      'Host',
+      'Newcomer',
+    ]);
+    controller.dispose();
+  });
+
+  test('keeps local identity when a broadcast lobby:joined targets another player', () async {
+    final socketService = _LobbyMessagesSocketService();
+    final controller = LobbyController(socketService: socketService);
+
+    await controller.initialize(
+      bootstrap: const LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Guest',
+      ),
+    );
+
+    expect(controller.playerId, 'player-1');
+    expect(controller.isHost, isFalse);
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:joined',
+      'payload': <String, dynamic>{
+        'code': 'ABC123',
+        'playerId': 'someone-else',
+        'hostId': 'host-1',
+        'lobby': <String, dynamic>{
+          'players': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'host-1',
+              'name': 'Host',
+              'role': null,
+              'status': 'active',
+              'isHost': true,
+            },
+            <String, dynamic>{
+              'id': 'player-1',
+              'name': 'Guest',
+              'role': null,
+              'status': 'active',
+              'isHost': false,
+            },
+            <String, dynamic>{
+              'id': 'someone-else',
+              'name': 'Intruder',
+              'role': null,
+              'status': 'active',
+              'isHost': false,
+            },
+          ],
+        },
+      },
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.playerId, 'player-1');
+    expect(controller.isHost, isFalse);
+    expect(controller.players.map((p) => p.name).toList(), [
+      'Guest',
+      'Host',
+      'Intruder',
+    ]);
+    controller.dispose();
+  });
 }
