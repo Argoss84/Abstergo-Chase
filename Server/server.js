@@ -1095,6 +1095,22 @@ const getLobbySnapshot = (lobby) => ({
   }))
 });
 
+const broadcastLobbySnapshot = (lobby) => {
+  if (!lobby?.players) return;
+  const snapshot = getLobbySnapshot(lobby);
+  forEachConnectedLobbyRecipient(lobby, (playerSocket, player) => {
+    send(playerSocket, {
+      type: 'lobby:joined',
+      payload: {
+        code: lobby.code,
+        playerId: player.id,
+        hostId: lobby.hostId,
+        lobby: snapshot
+      }
+    });
+  });
+};
+
 const replaceLobbyPlayerIdPreservingOrder = (lobby, oldPlayerId, nextPlayer) => {
   if (!lobby?.players || !oldPlayerId || !nextPlayer?.id) return;
   if (!lobby.players.has(oldPlayerId)) {
@@ -1773,6 +1789,7 @@ io.on('connection', (socket) => {
             }
           });
         }, { exceptId: clientId });
+        broadcastLobbySnapshot(lobby);
 
         // Notifier le host qu'un peer s'est reconnecté pour rétablir la connexion WebRTC
         if (lobby.hostId !== clientId) {
@@ -1831,6 +1848,7 @@ io.on('connection', (socket) => {
             }
           });
         }
+        broadcastLobbySnapshot(lobby);
         
         return;
       }
@@ -1891,6 +1909,7 @@ io.on('connection', (socket) => {
           }
         });
       }, { exceptId: clientId });
+      broadcastLobbySnapshot(lobby);
       return;
     }
 
@@ -2759,6 +2778,9 @@ io.on('connection', (socket) => {
           });
         }, { exceptId: playerId });
       }
+      if (lobbies.has(code)) {
+        broadcastLobbySnapshot(lobbies.get(code));
+      }
 
       // Mettre à jour les infos du client
       const clientInfo = clients.get(socket.id);
@@ -3261,6 +3283,7 @@ io.on('connection', (socket) => {
                 payload: { playerId: clientInfo.clientId }
               });
             }, { exceptId: clientInfo.clientId });
+            broadcastLobbySnapshot(currentLobby);
             disconnectedLobbyPlayers.delete(lobbyDisconnectKey(lobbyCode, clientInfo.clientId));
           }, 30 * 1000);
           disconnectedLobbyPlayers.set(lobbyDisconnectKey(lobbyCode, clientInfo.clientId), timeoutId);
