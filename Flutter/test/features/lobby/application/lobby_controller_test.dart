@@ -410,6 +410,33 @@ test('rejoins lobby after socket reconnect to recover peer updates', () async {
     controller.dispose();
   });
 
+  test('recovers lobby automatically after socket disconnect', () async {
+    final socketService = _ReconnectingLobbySocketService();
+    final controller = LobbyController(socketService: socketService);
+
+    await controller.initialize(
+      bootstrap: const LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Player',
+        previousPlayerId: 'stored-player-id',
+      ),
+    );
+
+    expect(socketService.joinCalls, 1);
+    socketService.emit(const <String, dynamic>{
+      'type': 'socket:disconnected',
+      'payload': <String, dynamic>{},
+    });
+
+    await Future<void>.delayed(const Duration(milliseconds: 1100));
+
+    expect(socketService.joinCalls, 2);
+    expect(controller.connectionStatus, 'connected');
+    controller.dispose();
+  });
+
   test('sorts lobby players alphabetically on lobby snapshot', () async {
     final socketService = _LobbyMessagesSocketService();
     final controller = LobbyController(socketService: socketService);

@@ -44,6 +44,7 @@ class LobbyController extends ChangeNotifier {
   int _turnExpiresAtMs = 0;
   final Map<String, int> _voiceActiveSeenAtMs = <String, int>{};
   Timer? _voiceActivityGcTimer;
+  Timer? _disconnectRecoveryTimer;
   bool _isRecoveringSession = false;
 
   static const List<String> _objectiveNamePool = <String>[
@@ -358,6 +359,7 @@ class LobbyController extends ChangeNotifier {
         return;
       case 'socket:disconnected':
         connectionStatus = 'connecting';
+        _scheduleDisconnectRecovery();
         notifyListeners();
         return;
       case 'socket:reconnected':
@@ -419,6 +421,14 @@ class LobbyController extends ChangeNotifier {
 
   void requestLatestState() => _socketService.requestLatestState();
 
+  void _scheduleDisconnectRecovery() {
+    _disconnectRecoveryTimer?.cancel();
+    _disconnectRecoveryTimer = Timer(const Duration(seconds: 1), () {
+      if (_isRecoveringSession) return;
+      unawaited(recoverAfterResume());
+    });
+  }
+
   Future<void> recoverAfterResume() async {
     final bootstrap = bootstrapData;
     if (_isRecoveringSession || bootstrap == null) return;
@@ -446,6 +456,7 @@ class LobbyController extends ChangeNotifier {
       connectionStatus = 'connected';
       requestLatestState();
       await _syncVoiceState();
+      _disconnectRecoveryTimer?.cancel();
     } catch (_) {
       // Keep previous UI state; socket auto-reconnect may still recover.
       connectionStatus = _socketService.isConnected ? 'connected' : 'error';
@@ -623,6 +634,7 @@ class LobbyController extends ChangeNotifier {
   void dispose() {
     _messagesSub?.cancel();
     _voiceActivityGcTimer?.cancel();
+    _disconnectRecoveryTimer?.cancel();
     _voiceChatService.dispose();
     _socketService.dispose();
     super.dispose();

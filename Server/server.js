@@ -2500,10 +2500,14 @@ io.on('connection', (socket) => {
         return;
       }
       const lobby = lobbies.get(lobbyCode);
-      const hostSocket = socketsById.get(lobby.hostId);
-      send(hostSocket, {
-        type: 'lobby:request-resync',
-        payload: { playerId: clientId }
+      send(socket, {
+        type: 'lobby:joined',
+        payload: {
+          code: lobby.code,
+          playerId: clientId,
+          hostId: lobby.hostId,
+          lobby: getLobbySnapshot(lobby)
+        }
       });
       return;
     }
