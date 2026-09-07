@@ -253,4 +253,8 @@ class CreateLobbyController extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  void releaseSignalingSocket() {
+    _service.disconnect();
+  }
 }

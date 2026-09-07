@@ -38,6 +38,8 @@ class CreateLobbyService {
         io.OptionBuilder()
             .setPath(socketPath)
             .setTransports(<String>['websocket'])
+            .enableForceNew()
+            .disableMultiplex()
             .disableAutoConnect()
             .enableReconnection()
             .build(),
@@ -75,6 +77,13 @@ class CreateLobbyService {
       socket.off('connect', onConnected);
       socket.off('connect_error', onError);
     }
+  }
+
+  void disconnect() {
+    _socket?.dispose();
+    _socket = null;
+    _connectedOrigin = null;
+    _connectedPath = null;
   }
 
   Future<CreatedLobbySession> createLobby({

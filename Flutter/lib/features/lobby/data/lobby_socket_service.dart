@@ -19,11 +19,19 @@ class LobbySocketService {
 
   bool get isConnected => _socket?.connected == true;
 
+  void _emitReconnected() {
+    _messageController?.add(const <String, dynamic>{
+      'type': 'socket:reconnected',
+      'payload': <String, dynamic>{},
+    });
+  }
+
   Future<void> connect({
     required Uri serverUrl,
     required String socketPath,
     Duration timeout = const Duration(seconds: 12),
   }) async {
+    _messageController ??= StreamController<Map<String, dynamic>>.broadcast();
     final origin = serverUrl.toString();
     final sameEndpoint =
         _connectedOrigin == origin && _connectedPath == socketPath;
@@ -44,6 +52,8 @@ class LobbySocketService {
         io.OptionBuilder()
             .setPath(socketPath)
             .setTransports(<String>['websocket'])
+            .enableForceNew()
+            .disableMultiplex()
             .disableAutoConnect()
             .enableReconnection()
             .build(),
@@ -61,12 +71,13 @@ class LobbySocketService {
       });
       _socket!.on('connect', (_) {
         if (_hasConnectedAtLeastOnce) {
-          _messageController?.add(const <String, dynamic>{
-            'type': 'socket:reconnected',
-            'payload': <String, dynamic>{},
-          });
+          _emitReconnected();
         }
         _hasConnectedAtLeastOnce = true;
+      });
+      _socket!.on('reconnect', (_) {
+        _hasConnectedAtLeastOnce = true;
+        _emitReconnected();
       });
       _socket!.on('disconnect', (_) {
         _messageController?.add(const <String, dynamic>{
@@ -153,7 +164,8 @@ class LobbySocketService {
               'code': code.toUpperCase(),
               'playerName': playerName,
               'playerId': previousPlayerId,
-              if (cognitoSub != null && cognitoSub.isNotEmpty) 'cognitoSub': cognitoSub,
+              if (cognitoSub != null && cognitoSub.isNotEmpty)
+                'cognitoSub': cognitoSub,
             },
           }
         : <String, dynamic>{
@@ -161,7 +173,8 @@ class LobbySocketService {
             'payload': <String, dynamic>{
               'code': code.toUpperCase(),
               'playerName': playerName,
-              if (cognitoSub != null && cognitoSub.isNotEmpty) 'cognitoSub': cognitoSub,
+              if (cognitoSub != null && cognitoSub.isNotEmpty)
+                'cognitoSub': cognitoSub,
               if (previousPlayerId != null && previousPlayerId.isNotEmpty)
                 'oldPlayerId': previousPlayerId,
             },
@@ -258,10 +271,19 @@ class LobbySocketService {
     }
   }
 
-  void requestLatestState() {
-    _emitMessage(const <String, dynamic>{
+  void requestLatestState({
+    String? code,
+    String? oldPlayerId,
+    String? cognitoSub,
+  }) {
+    _emitMessage(<String, dynamic>{
       'type': 'lobby:request-resync',
-      'payload': <String, dynamic>{},
+      'payload': <String, dynamic>{
+        if (code != null && code.isNotEmpty) 'code': code.toUpperCase(),
+        if (oldPlayerId != null && oldPlayerId.isNotEmpty)
+          'oldPlayerId': oldPlayerId,
+        if (cognitoSub != null && cognitoSub.isNotEmpty) 'cognitoSub': cognitoSub,
+      },
     });
   }
 
