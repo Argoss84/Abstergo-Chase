@@ -1438,6 +1438,12 @@ class GameController extends ChangeNotifier {
         .toList(growable: false);
   }
 
+  List<GamePlayer> get activeSameRoleVoicePlayers {
+    return sameRoleVoicePlayers
+        .where((player) => isPlayerVoiceActive(player.id))
+        .toList(growable: false);
+  }
+
   Future<void> toggleVoiceChatEnabled() async {
     final settings = await _voiceSettingsService.load();
     if (!settings.enabled) {
