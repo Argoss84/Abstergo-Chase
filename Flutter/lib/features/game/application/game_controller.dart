@@ -1710,12 +1710,15 @@ class GameController extends ChangeNotifier {
       isVoiceChatEnabled = true;
       _isMicrophoneMuted = false;
       _pushToTalkPressed = false;
-      await _syncVoiceState();
     } else {
       _isMicrophoneMuted = !_isMicrophoneMuted;
       if (_isMicrophoneMuted) {
         _pushToTalkPressed = false;
       }
+    }
+    if (isMicrophoneEnabled && !_voiceChatService.isEnabled) {
+      await _syncVoiceState();
+    } else {
       await _applyTransmissionGate();
     }
     notifyListeners();

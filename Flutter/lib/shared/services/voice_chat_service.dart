@@ -25,6 +25,7 @@ class VoiceChatService {
   MediaStream? _localStream;
   Future<MediaStream>? _localStreamInitFuture;
   bool _enabled = false;
+  bool get isEnabled => _enabled;
   bool _transmissionActive = true;
   DateTime? _lastLocalStreamFailureAt;
   List<Map<String, dynamic>> _iceServers = <Map<String, dynamic>>[

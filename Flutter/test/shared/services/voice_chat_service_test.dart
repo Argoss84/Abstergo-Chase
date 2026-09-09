@@ -53,6 +53,8 @@ void main() {
   final peerEvents = <MethodChannel>[];
   final audioEnabledWhenAttached = <bool>[];
   var microphoneEnabled = true;
+  var failNextUserMedia = false;
+  var failNextPeerConnection = false;
 
   Iterable<MethodCall> callsFor(String method) =>
       calls.where((call) => call.method == method);
@@ -73,11 +75,17 @@ void main() {
     peerEvents.clear();
     audioEnabledWhenAttached.clear();
     microphoneEnabled = true;
+    failNextUserMedia = false;
+    failNextPeerConnection = false;
     messenger.setMockMethodCallHandler(events, (_) async => null);
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       switch (call.method) {
         case 'getUserMedia':
+          if (failNextUserMedia) {
+            failNextUserMedia = false;
+            throw PlatformException(code: 'PermissionDenied');
+          }
           return <String, dynamic>{
             'streamId': 'local-stream',
             'audioTracks': <Map<String, dynamic>>[
@@ -91,6 +99,10 @@ void main() {
             'videoTracks': <dynamic>[],
           };
         case 'createPeerConnection':
+          if (failNextPeerConnection) {
+            failNextPeerConnection = false;
+            throw PlatformException(code: 'PeerConnectionFailed');
+          }
           final id = 'pc-${peerEvents.length}';
           final eventChannel = MethodChannel(
             'FlutterWebRTC/peerConnectionEvent$id',
@@ -187,6 +199,7 @@ void main() {
       await service.disable();
       await service.setTransmissionActive(true);
 
+      expect(service.isEnabled, isFalse);
       expect(microphoneEnabled, isFalse);
       expect(callsFor('peerConnectionClose'), hasLength(1));
     },
@@ -273,6 +286,23 @@ void main() {
       expect(microphoneEnabled, isTrue);
       expectConnectionRetained();
     });
+
+    test('unmute retries microphone initialization after a failure', () async {
+      failNextUserMedia = true;
+      await controller.refreshVoiceSettings();
+      expect(callsFor('getUserMedia'), hasLength(1));
+      expect(callsFor('createPeerConnection'), isEmpty);
+      await controller.toggleVoiceChatEnabled();
+      expect(controller.isMicrophoneEnabled, isFalse);
+      await Future<void>.delayed(const Duration(seconds: 3));
+      await controller.toggleVoiceChatEnabled();
+
+      expect(controller.isMicrophoneEnabled, isTrue);
+      expect(microphoneEnabled, isTrue);
+      expect(callsFor('getUserMedia'), hasLength(2));
+      expect(callsFor('createPeerConnection'), hasLength(1));
+      expect(callsFor('peerConnectionClose'), isEmpty);
+    });
   });
 
   test('lobby mute survives resync and unmute retains the connection', () async {
@@ -312,5 +342,30 @@ void main() {
     expect(controller.isMicrophoneEnabled, isTrue);
     expect(microphoneEnabled, isTrue);
     expect(callsFor('createPeerConnection'), hasLength(2));
+  });
+
+  test('lobby unmute retries a failed voice connection', () async {
+    final controller = LobbyController(socketService: _VoiceLobbySocketService())
+      ..bootstrapData = const LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Self',
+      )
+      ..players.add(
+        const LobbyPlayer(id: 'peer-a', name: 'Ally', isHost: false),
+      );
+    addTearDown(controller.dispose);
+    failNextPeerConnection = true;
+    await controller.recoverAfterResume();
+    expect(microphoneEnabled, isFalse);
+    await controller.toggleVoiceChat();
+    await controller.toggleVoiceChat();
+
+    expect(controller.isMicrophoneEnabled, isTrue);
+    expect(microphoneEnabled, isTrue);
+    expect(callsFor('getUserMedia'), hasLength(1));
+    expect(callsFor('createPeerConnection'), hasLength(2));
+    expect(callsFor('peerConnectionClose'), isEmpty);
   });
 }

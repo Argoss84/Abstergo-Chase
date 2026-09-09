@@ -625,9 +625,12 @@ class LobbyController extends ChangeNotifier {
     if (!isVoiceChatEnabled) {
       isVoiceChatEnabled = true;
       _isMicrophoneMuted = false;
-      await _syncVoiceState();
     } else {
       _isMicrophoneMuted = !_isMicrophoneMuted;
+    }
+    if (isMicrophoneEnabled && !_voiceChatService.isEnabled) {
+      await _syncVoiceState();
+    } else {
       await _voiceChatService.setTransmissionActive(isMicrophoneEnabled);
     }
     notifyListeners();
