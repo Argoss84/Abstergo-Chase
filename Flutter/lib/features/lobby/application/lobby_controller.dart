@@ -44,6 +44,8 @@ class LobbyController extends ChangeNotifier {
   final List<LobbyChatMessage> chatMessages = <LobbyChatMessage>[];
   String connectionStatus = 'idle';
   bool isVoiceChatEnabled = true;
+  bool _isMicrophoneMuted = false;
+  bool get isMicrophoneEnabled => isVoiceChatEnabled && !_isMicrophoneMuted;
   LobbyBootstrapData? bootstrapData;
   final List<String> objectiveNames = <String>[];
   bool shouldOpenGameForCode = false;
@@ -620,8 +622,14 @@ class LobbyController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    isVoiceChatEnabled = !isVoiceChatEnabled;
-    await _syncVoiceState();
+    if (!isVoiceChatEnabled) {
+      isVoiceChatEnabled = true;
+      _isMicrophoneMuted = false;
+      await _syncVoiceState();
+    } else {
+      _isMicrophoneMuted = !_isMicrophoneMuted;
+      await _voiceChatService.setTransmissionActive(isMicrophoneEnabled);
+    }
     notifyListeners();
   }
 
@@ -637,8 +645,8 @@ class LobbyController extends ChangeNotifier {
           .where((p) => p.id != me && p.status.toLowerCase() != 'disconnected')
           .map((p) => p.id)
           .toList(growable: false);
+      await _voiceChatService.setTransmissionActive(isMicrophoneEnabled);
       await _voiceChatService.enable(selfId: me, peerIds: peerIds);
-      await _voiceChatService.setTransmissionActive(true);
     } catch (_) {
       isVoiceChatEnabled = false;
       await _voiceChatService.disable();
