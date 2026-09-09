@@ -37,6 +37,7 @@ void main() {
   const holdDelay = Duration(milliseconds: 600);
   const firstPosition = Offset(300, 300);
   const secondPosition = Offset(420, 300);
+  const mapCenter = GeoPoint(latitude: 45.764043, longitude: 4.835659);
   late Directory tileCacheDirectory;
   late BuiltInMapCachingProvider tileCache;
 
@@ -90,13 +91,11 @@ void main() {
               serverUrl: 'http://localhost:3000',
               socketPath: '/socket.io',
               playerName: 'Agent',
+              agentStartZone: mapCenter,
             ),
             playerId: 'agent-1',
             players: <LobbyPlayer>[],
-            initialPlayerPosition: GeoPoint(
-              latitude: 45.764043,
-              longitude: 4.835659,
-            ),
+            initialPlayerPosition: mapCenter,
           ),
         ),
       ),
