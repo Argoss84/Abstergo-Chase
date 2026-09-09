@@ -47,6 +47,14 @@ class AppRuntimeConfig {
     'VOICE_STUN_URL',
     defaultValue: 'stun:35.181.228.185:3478',
   );
+  static const String signalingWakeUrl = String.fromEnvironment(
+    'SIGNALING_WAKE_URL',
+    defaultValue: '',
+  );
+  static const String signalingWakeToken = String.fromEnvironment(
+    'SIGNALING_WAKE_TOKEN',
+    defaultValue: '',
+  );
 
   // ServerBDD profile API configuration.
   static const String serverBddProductionUrl = String.fromEnvironment(

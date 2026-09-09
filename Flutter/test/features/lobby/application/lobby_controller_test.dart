@@ -698,6 +698,143 @@ test('rejoins lobby after socket reconnect to recover peer updates', () async {
     controller.dispose();
   });
 
+  test('non-host roster updates on peer join and leave like the host', () async {
+    final socketService = _LobbyMessagesSocketService();
+    final controller = LobbyController(socketService: socketService);
+
+    await controller.initialize(
+      bootstrap: const LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Guest',
+      ),
+    );
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:joined',
+      'payload': <String, dynamic>{
+        'code': 'ABC123',
+        'playerId': 'player-1',
+        'hostId': 'host-1',
+        'lobby': <String, dynamic>{
+          'players': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'host-1',
+              'name': 'Host',
+              'role': null,
+              'status': 'active',
+              'isHost': true,
+            },
+            <String, dynamic>{
+              'id': 'player-1',
+              'name': 'Guest',
+              'role': null,
+              'status': 'active',
+              'isHost': false,
+            },
+          ],
+        },
+      },
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.isHost, isFalse);
+    expect(controller.players.map((p) => p.name).toList(), ['Guest', 'Host']);
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:peer-joined',
+      'payload': <String, dynamic>{
+        'playerId': 'player-3',
+        'playerName': 'Third',
+        'isHost': false,
+        'role': 'AGENT',
+        'status': 'active',
+      },
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.players.map((p) => p.name).toList(), [
+      'Guest',
+      'Host',
+      'Third',
+    ]);
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:peer-left',
+      'payload': <String, dynamic>{'playerId': 'player-3'},
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.players.map((p) => p.name).toList(), ['Guest', 'Host']);
+    controller.dispose();
+  });
+
+  test('non-host applies peer-reconnected by replacing the previous id', () async {
+    final socketService = _LobbyMessagesSocketService();
+    final controller = LobbyController(socketService: socketService);
+
+    await controller.initialize(
+      bootstrap: const LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Guest',
+      ),
+    );
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:joined',
+      'payload': <String, dynamic>{
+        'code': 'ABC123',
+        'playerId': 'player-1',
+        'hostId': 'host-1',
+        'lobby': <String, dynamic>{
+          'players': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'host-1',
+              'name': 'Host',
+              'isHost': true,
+              'status': 'active',
+            },
+            <String, dynamic>{
+              'id': 'player-1',
+              'name': 'Guest',
+              'isHost': false,
+              'status': 'active',
+            },
+            <String, dynamic>{
+              'id': 'player-3',
+              'name': 'Third',
+              'isHost': false,
+              'status': 'disconnected',
+            },
+          ],
+        },
+      },
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    socketService.emit(const <String, dynamic>{
+      'type': 'lobby:peer-reconnected',
+      'payload': <String, dynamic>{
+        'playerId': 'player-3b',
+        'oldPlayerId': 'player-3',
+        'playerName': 'Third',
+        'isHost': false,
+        'status': 'active',
+      },
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.players.any((p) => p.id == 'player-3'), isFalse);
+    expect(
+      controller.players.firstWhere((p) => p.id == 'player-3b').name,
+      'Third',
+    );
+    controller.dispose();
+  });
+
   test('keeps local identity when a broadcast lobby:joined targets another player', () async {
     final socketService = _LobbyMessagesSocketService();
     final controller = LobbyController(socketService: socketService);

@@ -54,7 +54,6 @@ class _CompassBanner extends StatelessWidget {
       required Color color,
     }) {
       if (meId != null && p.id == meId) return;
-      if ((p.status).toLowerCase() == 'disconnected') return;
       if ((p.status).toUpperCase() == 'CAPTURED') return;
       if (p.latitude == null || p.longitude == null) return;
       final bearing = Geolocator.bearingBetween(

@@ -1,5 +1,5 @@
 output "turn_public_ip" {
-  description = "Current public IP of the TURN server instance."
+  description = "Ephemeral public IP of the coturn EC2 (empty when stopped). Clients must use the signaling NLB EIP instead."
   value       = aws_instance.turn.public_ip
 }
 

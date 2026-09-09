@@ -5,9 +5,9 @@ variable "aws_region" {
 }
 
 variable "name_prefix" {
-  description = "Prefix used for created resources."
+  description = "Prefix used for created resources. Live SG is abstergo-turn-sg; renaming replaces it."
   type        = string
-  default     = "broken-veil-protocol-turn"
+  default     = "abstergo-turn"
 }
 
 variable "subnet_id" {

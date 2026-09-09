@@ -474,26 +474,41 @@ const rebindLobbySocket = (
 const forEachConnectedLobbyRecipient = (lobby, callback, { exceptId = null } = {}) => {
   if (!lobby) return;
   const seenSocketIds = new Set();
+  const visit = (playerSocket, player) => {
+    if (!playerSocket || seenSocketIds.has(playerSocket.id)) return;
+    const info = clients.get(playerSocket.id);
+    if (
+      exceptId &&
+      (player?.id === exceptId || info?.clientId === exceptId)
+    ) {
+      return;
+    }
+    seenSocketIds.add(playerSocket.id);
+    callback(playerSocket, player || { id: info?.clientId || playerSocket.id });
+  };
+
   if (lobby.players) {
     for (const player of lobby.players.values()) {
       if (!player?.id) continue;
       if (exceptId && player.id === exceptId) continue;
-      const playerSocket = socketsById.get(player.id);
-      if (!playerSocket || !playerSocket.connected) continue;
-      seenSocketIds.add(playerSocket.id);
-      callback(playerSocket, player);
+      visit(socketsById.get(player.id), player);
     }
   }
-  const room = io.sockets.adapter.rooms.get(lobbyRoomName(lobby.code));
-  if (!room) return;
-  for (const socketId of room) {
-    if (seenSocketIds.has(socketId)) continue;
-    const playerSocket = io.sockets.sockets.get(socketId);
-    if (!playerSocket || !playerSocket.connected) continue;
-    const info = clients.get(socketId);
-    if (exceptId && info?.clientId === exceptId) continue;
-    const player = info?.clientId ? lobby.players.get(info.clientId) : null;
-    callback(playerSocket, player || { id: info?.clientId || socketId });
+
+  const room = io.sockets?.adapter?.rooms?.get(lobbyRoomName(lobby.code));
+  if (room) {
+    for (const socketId of room) {
+      const playerSocket = io.sockets.sockets.get(socketId);
+      const info = clients.get(socketId);
+      const player = info?.clientId ? lobby.players.get(info.clientId) : null;
+      visit(playerSocket, player);
+    }
+  }
+
+  for (const [socketId, info] of clients.entries()) {
+    if (!info || info.lobbyCode !== lobby.code) continue;
+    const player = info.clientId ? lobby.players.get(info.clientId) : null;
+    visit(io.sockets.sockets.get(socketId), player);
   }
 };
 
@@ -1173,19 +1188,18 @@ const getRawMessagePreview = (raw) => {
 };
 
 const send = (socket, message) => {
-  if (socket && socket.connected) {
-    incrementTotalSocketMessages();
-    const clientInfo = clients.get(socket.id);
-    incrementLobbySocketMessages(clientInfo?.lobbyCode || null);
-    const recipientId = clientInfo?.clientId || 'unknown';
-    const finalMessage = enrichMessageWithVersion(message);
-    if (Math.random() < MESSAGE_DEBUG_SAMPLE_RATE) {
-      logDebug(
-        `[MESSAGE ENVOYE] to=${recipientId} type=${finalMessage.type} version=${SIGNALING_VERSION}`
-      );
-    }
-    socket.emit('message', finalMessage);
+  if (!socket) return;
+  incrementTotalSocketMessages();
+  const clientInfo = clients.get(socket.id);
+  incrementLobbySocketMessages(clientInfo?.lobbyCode || null);
+  const recipientId = clientInfo?.clientId || 'unknown';
+  const finalMessage = enrichMessageWithVersion(message);
+  if (Math.random() < MESSAGE_DEBUG_SAMPLE_RATE) {
+    logDebug(
+      `[MESSAGE ENVOYE] to=${recipientId} type=${finalMessage.type} version=${SIGNALING_VERSION}`
+    );
   }
+  socket.emit('message', finalMessage);
 };
 
 const getLobbySnapshot = (lobby) => ({
@@ -1886,16 +1900,19 @@ io.on('connection', (socket) => {
         }
 
         if (lobby.hostId !== clientId) {
-          const hostSocket = socketsById.get(lobby.hostId);
-          if (hostSocket && hostSocket.id !== socket.id) {
-            send(hostSocket, {
+          forEachConnectedLobbyRecipient(lobby, (peerSocket) => {
+            send(peerSocket, {
               type: 'lobby:peer-reconnected',
               payload: {
                 playerId: clientId,
-                playerName: existingPlayer?.name || payload?.playerName || 'Joueur'
+                oldPlayerId: remappedFrom || clientId,
+                playerName: existingPlayer?.name || payload?.playerName || 'Joueur',
+                isHost: existingPlayer?.isHost || false,
+                role: existingPlayer?.role ?? null,
+                status: 'active'
               }
             });
-          }
+          }, { exceptId: clientId });
         }
         broadcastLobbySnapshot(lobby);
         return;
@@ -2489,10 +2506,7 @@ io.on('connection', (socket) => {
       const targetId = payload?.targetId;
       const targetSocket = socketsById.get(targetId);
       if (!targetSocket) {
-        send(socket, {
-          type: 'game:error',
-          payload: { message: 'Destinataire WebRTC introuvable.' }
-        });
+        log(`[WEBRTC] Signal de ${clientId} vers ${targetId} ignore: destinataire introuvable`);
         return;
       }
 
@@ -2511,11 +2525,7 @@ io.on('connection', (socket) => {
       const targetId = payload?.targetId;
       const targetSocket = socketsById.get(targetId);
       if (!targetSocket) {
-        log(`[ERREUR WEBRTC] Signal de ${clientId} vers ${targetId} échoué: destinataire introuvable`);
-        send(socket, {
-          type: 'lobby:error',
-          payload: { message: 'Destinataire WebRTC introuvable.' }
-        });
+        log(`[WEBRTC] Signal de ${clientId} vers ${targetId} ignore: destinataire introuvable`);
         return;
       }
 

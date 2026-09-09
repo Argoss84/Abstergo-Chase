@@ -1,64 +1,40 @@
 # TURN voice infrastructure (OpenTofu)
 
-This stack deploys a minimal `coturn` instance on EC2 for voice relay fallback.
-The instance is deployed without a dedicated Elastic IP and with IMDSv2 required.
+Instance `coturn` sur EC2 (`t3.micro`), IMDSv2 obligatoire, **sans EIP dédiée**.
 
-## 1) AWS CLI prerequisites
+En prod, les clients n’utilisent **pas** l’IP publique de cette instance. STUN/TURN passent par l’EIP du NLB signaling (`35.181.228.185:3478`). Cette instance est la cible du target group `abstergo-signaling-service-t3478`.
 
-Authenticate first:
+`hibernate-controller` **stop/start** cette instance. Ne pas la terminer. `lifecycle.ignore_changes` sur AMI / user_data évite un replace après import.
+
+## 1) AWS CLI
 
 ```bash
 aws login
 ```
 
-Discover VPC and subnet IDs (same account/region as signaling):
-
-```bash
-aws ec2 describe-vpcs --region eu-west-3 --query "Vpcs[?IsDefault==\`true\`].VpcId | [0]" --output text
-aws ec2 describe-subnets --region eu-west-3 --filters Name=vpc-id,Values=<VPC_ID> --query "Subnets[0].SubnetId" --output text
-```
-
-## 2) Configure variables
+## 2) Variables
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
 ```
 
-Then edit:
-- `vpc_id`
-- `subnet_id`
-- `turn_secret` (random long secret)
+`vpc_id` / `subnet_id` doivent être la même AZ que le NLB. `name_prefix` live = `abstergo-turn` (renommer recréerait le SG).
 
 ## 3) Deploy
 
 ```bash
+cd infra/opentofu/voice-turn
 tofu init
 tofu plan
 tofu apply
 ```
 
-## 4) Client + signaling integration
+## 4) Intégration
 
-If TURN is exposed directly, use outputs to configure your app/signaling:
-- `stun:<ip>:3478`
-- `turn:<ip>:3478?transport=udp`
-- `turn:<ip>:3478?transport=tcp`
+Signaling mint des credentials TURN temporaires :
 
-If you are migrating to a single shared EIP via the signaling NLB, set signaling `TURN_URLS` to the shared NLB EIP instead of this instance EIP.
+- `TURN_URLS` = URLs via l’EIP du NLB (stack `ecs-signaling`)
+- `TURN_SECRET` / `TURN_REALM` identiques ici et dans `ecs-signaling`
+- `TURN_TTL_SECONDS` (ex. 600)
 
-Signaling server should mint temporary TURN credentials with:
-- shared secret = `turn_secret`
-- short TTL (ex: 10 min)
-
-Recommended signaling env vars:
-- `TURN_URLS` (comma separated)
-- `TURN_SECRET`
-- `TURN_REALM`
-- `TURN_TTL_SECONDS`
-
-## 5) Single-EIP migration note
-
-When fronting TURN through a shared NLB EIP:
-- Keep this TURN instance in place (`turn_secret` and `turn_realm` unchanged).
-- Route TCP/UDP 3478 from NLB to this instance.
-- Keep ingress limited to `3478` (TCP/UDP) and relay UDP range; do not expose SSH/5349 publicly unless explicitly needed.
+Les outputs `stun_url` / `turn_url_*` de ce stack sont l’IP **éphémère** de l’EC2 (vide si l’instance est stopped). Ne pas les copier dans Flutter.

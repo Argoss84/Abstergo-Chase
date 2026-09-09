@@ -167,6 +167,11 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Le serveur prod s\'éteint après 1 h sans partie et peut mettre jusqu\'à 2 min à redémarrer.',
+                      style: TextStyle(fontSize: 13, color: Colors.white70),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),

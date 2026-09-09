@@ -27,11 +27,11 @@ resource "aws_lb_target_group" "this" {
   health_check {
     enabled             = true
     healthy_threshold   = 2
-    unhealthy_threshold = 3
-    interval            = 30
+    unhealthy_threshold = 2
+    interval            = 10
     protocol            = "HTTP"
-    path                = "/"
-    matcher             = "200-499"
+    path                = "/monitoring/cost"
+    matcher             = "200"
     timeout             = 6
   }
 }
@@ -58,19 +58,17 @@ resource "aws_lb_target_group" "turn_tcp_udp" {
   health_check {
     enabled             = true
     healthy_threshold   = 2
-    unhealthy_threshold = 3
-    interval            = 30
+    unhealthy_threshold = 2
+    interval            = 10
     protocol            = "TCP"
-    timeout             = 10
+    timeout             = 6
   }
 }
 
-resource "aws_lb_target_group_attachment" "turn_instance" {
-  count            = var.turn_backend_instance_id != "" ? 1 : 0
-  target_group_arn = aws_lb_target_group.turn_tcp_udp[0].arn
-  target_id        = var.turn_backend_instance_id
-  port             = 3478
-}
+# The coturn instance is already registered on this target group. AWS provider 5.x
+# cannot import aws_lb_target_group_attachment, so it is left unmanaged. If the
+# target group is recreated, register it once:
+#   aws elbv2 register-targets --target-group-arn <arn> --targets Id=<instance-id>,Port=3478
 
 resource "aws_lb_listener" "turn_tcp_udp" {
   count             = var.turn_backend_instance_id != "" ? 1 : 0

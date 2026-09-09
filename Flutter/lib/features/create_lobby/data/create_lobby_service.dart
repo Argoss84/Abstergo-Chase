@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:broken_veil_protocol/shared/services/signaling_wake_service.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 class CreateLobbyService {
@@ -26,6 +27,8 @@ class CreateLobbyService {
     if (_socket != null && _socket!.connected && sameEndpoint) {
       return;
     }
+
+    await SignalingWakeService.instance.ensureAwake(serverUrl);
 
     if (_socket != null && !sameEndpoint) {
       _socket!.dispose();
