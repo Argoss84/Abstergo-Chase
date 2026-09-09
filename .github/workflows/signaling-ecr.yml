@@ -3,7 +3,7 @@ name: Publish Signaling Image To ECR
 on:
   push:
     branches:
-      - PortageAndroid
+      - main
     paths:
       - "Docker/Dockerfile.signaling"
       - "Server/**"
@@ -18,6 +18,8 @@ env:
   AWS_ACCOUNT_ID: "812607972480"
   ECR_REPOSITORY: abstergo/signaling
   IMAGE_NAME: 812607972480.dkr.ecr.eu-west-3.amazonaws.com/abstergo/signaling
+  ECS_CLUSTER: abstergo-signaling-cluster
+  ECS_SERVICE: abstergo-signaling-service
 
 jobs:
   build-and-push:
@@ -51,9 +53,18 @@ jobs:
             .
           docker push "${IMAGE_NAME}:latest"
           docker push "${IMAGE_NAME}:sha-${{ steps.tags.outputs.sha_short }}"
+      - name: Force ECS to pick up :latest
+        run: |
+          aws ecs update-service \
+            --cluster "${ECS_CLUSTER}" \
+            --service "${ECS_SERVICE}" \
+            --force-new-deployment \
+            --region "${AWS_REGION}"
+
 
       - name: Summary
         run: |
           echo "Published images:"
           echo "- ${IMAGE_NAME}:latest"
           echo "- ${IMAGE_NAME}:sha-${{ steps.tags.outputs.sha_short }}"
+          echo "Forced new deployment of ${ECS_CLUSTER}/${ECS_SERVICE}"
