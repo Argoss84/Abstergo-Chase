@@ -15,6 +15,9 @@ class _AlwaysGrantedPermissionsService implements BootstrapPermissionsService {
 
   @override
   Future<void> openAppSettings() async {}
+
+  @override
+  Future<void> openLocationSettings() async {}
 }
 
 void main() {
