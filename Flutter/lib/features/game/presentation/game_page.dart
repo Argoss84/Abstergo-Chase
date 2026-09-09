@@ -75,11 +75,12 @@ const double _kDefaultGameMapZoom = 16.5;
 const double _kCompassCenterToleranceLatLng = 0.000001;
 
 class GamePage extends StatefulWidget {
-  const GamePage({super.key, required this.bootstrap});
+  const GamePage({super.key, required this.bootstrap, this.controller});
 
   static const String routePath = '/game';
   static const String routeName = 'game';
   final GameBootstrapData bootstrap;
+  final GameController? controller;
 
   @override
   State<GamePage> createState() => _GamePageState();
@@ -122,6 +123,7 @@ class _GamePageState extends State<GamePage>
   Timer? _pingPressTimer;
   Offset? _pingPressOrigin;
   GeoPoint? _pingLocation;
+  final Set<int> _mapPointers = <int>{};
   int? _pingActivePointer;
   int? _selectedPingOptionIndex;
   bool _pingWheelVisible = false;
@@ -167,7 +169,8 @@ class _GamePageState extends State<GamePage>
       upperBound: 1,
     )..repeat(reverse: true);
     _mapController = MapController();
-    _controller = GameController()..initialize(widget.bootstrap);
+    _controller = (widget.controller ?? GameController())
+      ..initialize(widget.bootstrap);
     _compassSub = FlutterCompass.events?.listen((event) {
       // heading is degrees, clockwise from north
       _headingDeg.value = event.heading;
@@ -547,6 +550,7 @@ class _GamePageState extends State<GamePage>
                     Positioned.fill(
                       child: IgnorePointer(
                         child: CustomPaint(
+                          key: const ValueKey('ping-wheel'),
                           painter: _PingWheelPainter(
                             center: _pingPressOrigin!,
                             options: _pingOptions,
@@ -1725,7 +1729,12 @@ class _GamePageState extends State<GamePage>
   }
 
   void _onMapPointerDown(PointerDownEvent event, LatLng point) {
+    _mapPointers.add(event.pointer);
     _pingPressTimer?.cancel();
+    if (_mapPointers.length > 1) {
+      _resetPingWheel();
+      return;
+    }
     _pingActivePointer = event.pointer;
     _pingPressOrigin = event.localPosition;
     _pingLocation = GeoPoint(
@@ -1758,6 +1767,7 @@ class _GamePageState extends State<GamePage>
   }
 
   void _onMapPointerUp(PointerUpEvent event, LatLng point) {
+    _mapPointers.remove(event.pointer);
     if (_pingActivePointer != event.pointer) return;
     _pingPressTimer?.cancel();
     final selectedIndex = _selectedPingOptionIndex;
@@ -1775,6 +1785,7 @@ class _GamePageState extends State<GamePage>
   }
 
   void _onMapPointerCancel(PointerCancelEvent event, LatLng point) {
+    _mapPointers.remove(event.pointer);
     if (_pingActivePointer != event.pointer) return;
     _pingPressTimer?.cancel();
     _resetPingWheel();
