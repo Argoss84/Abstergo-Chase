@@ -161,31 +161,21 @@ class LobbyController extends ChangeNotifier {
         }
         return;
       case 'lobby:peer-joined':
+      case 'lobby:peer-reconnected':
         if (payload is Map) {
-          final id = payload['playerId']?.toString();
-          if (id != null && players.every((p) => p.id != id)) {
-            players.add(
-              LobbyPlayer(
-                id: id,
-                name: payload['playerName']?.toString() ?? 'Joueur',
-                isHost: payload['isHost'] == true,
-                role: payload['role']?.toString(),
-                status: payload['status']?.toString() ?? 'active',
-              ),
-            );
-            _sortPlayersByName();
-            _syncVoiceState();
-            notifyListeners();
-          }
+          _upsertPeerFromPayload(payload);
         }
         return;
       case 'lobby:peer-left':
         if (payload is Map) {
           final id = payload['playerId']?.toString();
-          if (id != null) {
-            players.removeWhere((p) => p.id == id);
-            _syncVoiceState();
-            notifyListeners();
+          if (id != null && id.isNotEmpty) {
+            final removed = players.any((p) => p.id == id);
+            if (removed) {
+              players.removeWhere((p) => p.id == id);
+              _syncVoiceState();
+              notifyListeners();
+            }
           }
         }
         return;
@@ -318,6 +308,13 @@ class LobbyController extends ChangeNotifier {
           fallback: 'Lobby indisponible.',
         );
         if (isTransientVoiceSignalingError(message)) {
+          return;
+        }
+        final isResyncMiss =
+            message.toLowerCase().contains('resync') &&
+            playerId != null &&
+            players.isNotEmpty;
+        if (isResyncMiss) {
           return;
         }
         if (_isRecoveringSession) {
@@ -475,6 +472,7 @@ class LobbyController extends ChangeNotifier {
       _recoveryAttempts = 0;
       _disconnectRecoveryTimer?.cancel();
       await _persistPlayerId();
+      requestLatestState();
       notifyListeners();
     } finally {
       _isBindingSession = false;
@@ -494,7 +492,7 @@ class LobbyController extends ChangeNotifier {
     _resyncHeartbeatTimer?.cancel();
     _resyncHeartbeatTimer = Timer.periodic(_resyncHeartbeatInterval, (_) {
       if (_isBindingSession) return;
-      if (connectionStatus != 'connected') return;
+      if (lobbyCode == null && bootstrapData == null) return;
       requestLatestState();
     });
   }
@@ -575,6 +573,43 @@ class LobbyController extends ChangeNotifier {
       ..clear()
       ..addAll(next);
     return true;
+  }
+
+  void _upsertPeerFromPayload(Map payload) {
+    final id = payload['playerId']?.toString();
+    if (id == null || id.isEmpty) return;
+    final oldId = payload['oldPlayerId']?.toString();
+    if (oldId != null && oldId.isNotEmpty && oldId != id) {
+      players.removeWhere((p) => p.id == oldId);
+    }
+    final idx = players.indexWhere((p) => p.id == id);
+    final previous = idx == -1 ? null : players[idx];
+    final next = LobbyPlayer(
+      id: id,
+      name: payload['playerName']?.toString() ?? previous?.name ?? 'Joueur',
+      isHost: payload.containsKey('isHost')
+          ? payload['isHost'] == true
+          : (previous?.isHost ?? false),
+      role: payload.containsKey('role')
+          ? payload['role']?.toString()
+          : previous?.role,
+      status: payload['status']?.toString() ?? previous?.status ?? 'active',
+    );
+    if (previous != null &&
+        previous.name == next.name &&
+        previous.isHost == next.isHost &&
+        previous.role == next.role &&
+        previous.status == next.status) {
+      return;
+    }
+    if (idx == -1) {
+      players.add(next);
+    } else {
+      players[idx] = next;
+    }
+    _sortPlayersByName();
+    _syncVoiceState();
+    notifyListeners();
   }
 
   Future<void> toggleVoiceChat() async {
