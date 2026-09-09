@@ -299,7 +299,16 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
             ],
           ),
           body: _controller.isLoading
-              ? const Center(child: CircularProgressIndicator())
+              ? const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text('Connexion au serveur de jeu...'),
+                    ],
+                  ),
+                )
               : ListView(
                   padding: const EdgeInsets.all(16),
                   children: [

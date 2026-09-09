@@ -1,15 +1,25 @@
 aws_region  = "eu-west-3"
+# Live SG is named abstergo-turn-sg; renaming name_prefix would replace it.
 name_prefix = "abstergo-turn"
 
-# Values below come from AWS CLI discovery commands in README.
 vpc_id    = "vpc-0491c73c129269107"
 subnet_id = "subnet-0547ed2467da2d42a"
 
-instance_type            = "t3.micro"
-turn_ingress_cidr_ipv4   = "0.0.0.0/0"
-turn_realm               = "voice.abstergochase"
-relay_min_port           = 49152
-relay_max_port           = 49200
+instance_type          = "t3.micro"
+turn_ingress_cidr_ipv4 = "0.0.0.0/0"
+turn_realm             = "voice.abstergochase"
+relay_min_port         = 49152
+relay_max_port         = 49200
 
-# Replace with your own random value.
+# Must match ecs-signaling turn_secret.
 turn_secret = "CHANGE_ME_WITH_A_RANDOM_SECRET"
+
+common_tags = {
+  Project     = "Broken Veil Protocol"
+  Environment = "dev"
+  ManagedBy   = "opentofu"
+  Owner       = "alexandre"
+  Stack       = "voice-turn"
+}
+
+vpc_name_tag = "broken-veil-protocol-shared-vpc"

@@ -278,7 +278,7 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
                               : null,
                           child: Text(
                             _controller.isSubmitting
-                                ? 'Création en cours...'
+                                ? 'Connexion au serveur de jeu...'
                                 : 'Créer la partie',
                           ),
                         ),

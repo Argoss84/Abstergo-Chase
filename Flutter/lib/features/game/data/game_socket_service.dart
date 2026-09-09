@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:broken_veil_protocol/shared/services/signaling_wake_service.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 class GameSocketService {
@@ -25,6 +26,9 @@ class GameSocketService {
     final origin = serverUrl.toString();
     final same = _origin == origin && _path == socketPath;
     if (_socket != null && _socket!.connected && same) return;
+
+    await SignalingWakeService.instance.ensureAwake(serverUrl);
+
     if (_socket != null && !same) {
       _socket!.dispose();
       _socket = null;

@@ -10,6 +10,7 @@ import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
 import 'package:broken_veil_protocol/features/lobby/data/player_session_store.dart';
 import 'package:broken_veil_protocol/shared/services/voice_chat_service.dart';
 import 'package:broken_veil_protocol/shared/services/voice_settings_service.dart';
+import 'package:broken_veil_protocol/shared/utils/signaling_error_message.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -112,6 +113,9 @@ class GameController extends ChangeNotifier {
   final Map<String, String> _objectiveCaptureRogueByObjectiveId =
       <String, String>{};
   final Map<String, int> _voiceActiveSeenAtMs = <String, int>{};
+  final Map<String, GeoPoint> _lastKnownPositionByPlayerId =
+      <String, GeoPoint>{};
+  final Map<String, GeoPoint> _lastKnownPositionByIdentity = <String, GeoPoint>{};
   int _turnExpiresAtMs = 0;
   static const double _kRogueTargetingHalfConeDeg = 20.0;
   static const int _maxGameChatMessages = 150;
@@ -212,6 +216,8 @@ class GameController extends ChangeNotifier {
     isHost = players.any((p) => p.id == playerId && p.isHost);
     _bootstrapObjectives(data);
     isOutOfGameZone = !_isMyPositionInsideGameZone();
+    _syncSelfMarkerFromMyPosition();
+    _rememberKnownPlayers();
 
     isLoading = true;
     error = null;
@@ -273,6 +279,7 @@ class GameController extends ChangeNotifier {
         permission == LocationPermission.deniedForever) {
       return;
     }
+    await _refreshPositionFromDevice(forcePublish: false);
     _positionSub?.cancel();
     _positionSub =
         Geolocator.getPositionStream(
@@ -280,36 +287,179 @@ class GameController extends ChangeNotifier {
             accuracy: LocationAccuracy.high,
             distanceFilter: 5,
           ),
-        ).listen((position) {
-          final previousPosition = myPosition;
-          final previousOutOfZone = isOutOfGameZone;
-          final hadRealtimePosition = hasRealtimePosition;
-          final nextPosition = GeoPoint(
-            latitude: position.latitude,
-            longitude: position.longitude,
+        ).listen(_onDevicePosition);
+  }
+
+  Future<void> onAppResumed() async {
+    await _refreshPositionFromDevice(forcePublish: true);
+  }
+
+  Future<void> _refreshPositionFromDevice({required bool forcePublish}) async {
+    try {
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null) {
+        _applyDevicePosition(lastKnown, forcePublish: forcePublish);
+      }
+      final current = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 4),
+        ),
+      );
+      _applyDevicePosition(current, forcePublish: forcePublish);
+    } catch (_) {
+      _syncSelfMarkerFromMyPosition();
+      notifyListeners();
+    }
+  }
+
+  void _onDevicePosition(Position position) {
+    _applyDevicePosition(position, forcePublish: false);
+  }
+
+  void _applyDevicePosition(Position position, {required bool forcePublish}) {
+    final previousPosition = myPosition;
+    final previousOutOfZone = isOutOfGameZone;
+    final hadRealtimePosition = hasRealtimePosition;
+    final nextPosition = GeoPoint(
+      latitude: position.latitude,
+      longitude: position.longitude,
+    );
+    myPosition = nextPosition;
+    hasRealtimePosition = true;
+    isOutOfGameZone = !_isMyPositionInsideGameZone();
+    final playerPositionChanged = _syncSelfMarkerFromMyPosition();
+    _publishPositionIfDue(
+      position.latitude,
+      position.longitude,
+      force: forcePublish,
+    );
+    if (!hadRealtimePosition ||
+        !_samePoint(previousPosition, nextPosition) ||
+        previousOutOfZone != isOutOfGameZone ||
+        playerPositionChanged ||
+        forcePublish) {
+      notifyListeners();
+    }
+  }
+
+  bool _syncSelfMarkerFromMyPosition() {
+    final pos = myPosition;
+    final id = playerId;
+    if (pos == null || id == null || id.isEmpty) return false;
+    final idx = players.indexWhere((p) => p.id == id);
+    if (idx == -1) return false;
+    final changed =
+        players[idx].latitude != pos.latitude ||
+        players[idx].longitude != pos.longitude;
+    if (!changed) return false;
+    players[idx] = players[idx].copyWith(
+      latitude: pos.latitude,
+      longitude: pos.longitude,
+    );
+    _rememberKnownPosition(players[idx]);
+    return true;
+  }
+
+  String _playerIdentityKey(String name, String? role) {
+    final trimmed = name.trim().toLowerCase();
+    if (trimmed.isEmpty) return '';
+    return '$trimmed|${(role ?? '').toUpperCase()}';
+  }
+
+  void _rememberKnownPosition(GamePlayer player) {
+    if (player.latitude == null || player.longitude == null) return;
+    final point = GeoPoint(
+      latitude: player.latitude!,
+      longitude: player.longitude!,
+    );
+    if (player.id.isNotEmpty) {
+      _lastKnownPositionByPlayerId[player.id] = point;
+    }
+    final identity = _playerIdentityKey(player.name, player.role);
+    if (identity.isNotEmpty) {
+      _lastKnownPositionByIdentity[identity] = point;
+    }
+  }
+
+  void _rememberKnownPlayers([Iterable<GamePlayer>? source]) {
+    for (final player in source ?? players) {
+      _rememberKnownPosition(player);
+    }
+  }
+
+  void _aliasLastKnownPlayerId(String? fromId, String? toId) {
+    if (fromId == null || toId == null) return;
+    if (fromId.isEmpty || toId.isEmpty || fromId == toId) return;
+    final known = _lastKnownPositionByPlayerId[fromId];
+    if (known == null) return;
+    _lastKnownPositionByPlayerId.putIfAbsent(toId, () => known);
+  }
+
+  GeoPoint? _lookupLastKnownPosition({
+    required String id,
+    required String name,
+    String? role,
+  }) {
+    if (id.isNotEmpty) {
+      final byId = _lastKnownPositionByPlayerId[id];
+      if (byId != null) return byId;
+    }
+    final identity = _playerIdentityKey(name, role);
+    if (identity.isEmpty) return null;
+    return _lastKnownPositionByIdentity[identity];
+  }
+
+  GamePlayer _withLastKnownPosition(GamePlayer player) {
+    var next = player;
+    if (next.latitude == null || next.longitude == null) {
+      if (player.id == playerId && myPosition != null) {
+        next = next.copyWith(
+          latitude: myPosition!.latitude,
+          longitude: myPosition!.longitude,
+        );
+      } else {
+        final known = _lookupLastKnownPosition(
+          id: player.id,
+          name: player.name,
+          role: player.role,
+        );
+        if (known != null) {
+          next = next.copyWith(
+            latitude: known.latitude,
+            longitude: known.longitude,
           );
-          myPosition = nextPosition;
-          hasRealtimePosition = true;
-          isOutOfGameZone = !_isMyPositionInsideGameZone();
-          var playerPositionChanged = false;
-          final idx = players.indexWhere((p) => p.id == playerId);
-          if (idx != -1) {
-            playerPositionChanged =
-                players[idx].latitude != position.latitude ||
-                players[idx].longitude != position.longitude;
-            players[idx] = players[idx].copyWith(
-              latitude: position.latitude,
-              longitude: position.longitude,
-            );
-          }
-          _publishPositionIfDue(position.latitude, position.longitude);
-          if (!hadRealtimePosition ||
-              !_samePoint(previousPosition, nextPosition) ||
-              previousOutOfZone != isOutOfGameZone ||
-              playerPositionChanged) {
-            notifyListeners();
-          }
-        });
+        }
+      }
+    }
+    _rememberKnownPosition(next);
+    return next;
+  }
+
+  GamePlayer? _findPlayerByNameRole(
+    String name,
+    String? role, {
+    Iterable<GamePlayer>? source,
+  }) {
+    final identity = _playerIdentityKey(name, role);
+    if (identity.isEmpty) return null;
+    for (final player in source ?? players) {
+      if (_playerIdentityKey(player.name, player.role) == identity) {
+        return player;
+      }
+    }
+    return null;
+  }
+
+  void _hydratePlayersFromLastKnown() {
+    for (var i = 0; i < players.length; i++) {
+      final next = _withLastKnownPosition(players[i]);
+      if (next.latitude != players[i].latitude ||
+          next.longitude != players[i].longitude) {
+        players[i] = next;
+      }
+    }
+    _rememberKnownPlayers();
   }
 
   bool _isMyPositionInsideGameZone() {
@@ -358,10 +508,16 @@ class GameController extends ChangeNotifier {
     return inside;
   }
 
-  void _publishPositionIfDue(double latitude, double longitude) {
+  void _publishPositionIfDue(
+    double latitude,
+    double longitude, {
+    bool force = false,
+  }) {
     if (!_hasJoinedGame || connectionStatus != 'connected') return;
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _lastPositionPublishMs < realtimeRefreshIntervalMs) return;
+    if (!force && now - _lastPositionPublishMs < realtimeRefreshIntervalMs) {
+      return;
+    }
     _lastPositionPublishMs = now;
     if (isHost) {
       _pushSnapshotThrottled();
@@ -493,7 +649,6 @@ class GameController extends ChangeNotifier {
       case 'socket:disconnected':
         _needsRejoin = true;
         _joinInFlight = false;
-        _hasJoinedGame = false;
         _lastJoinAttemptMs = 0;
         connectionStatus = 'connecting';
         notifyListeners();
@@ -538,13 +693,25 @@ class GameController extends ChangeNotifier {
           final id = payload['playerId']?.toString();
           if (id != null && id.isNotEmpty) {
             final oldId = payload['oldPlayerId']?.toString();
+            GamePlayer? previous;
             if (oldId != null && oldId.isNotEmpty && oldId != id) {
+              final oldIdx = players.indexWhere((p) => p.id == oldId);
+              if (oldIdx != -1) {
+                previous = players[oldIdx];
+                _rememberKnownPosition(previous);
+              }
+              _aliasLastKnownPlayerId(oldId, id);
               players.removeWhere((p) => p.id == oldId);
             }
-            final idx = players.indexWhere((p) => p.id == id);
+            var idx = players.indexWhere((p) => p.id == id);
             final role = payload['role']?.toString();
             final status = payload['status']?.toString() ?? 'active';
             final name = payload['playerName']?.toString() ?? 'Joueur';
+            previous ??= idx == -1 ? null : players[idx];
+            previous ??= _findPlayerByNameRole(name, role);
+            if (previous != null) {
+              _rememberKnownPosition(previous);
+            }
             // Defensive dedupe for transient reconnect states:
             // keep newest socket id and remove stale same-name entries.
             players.removeWhere(
@@ -555,24 +722,29 @@ class GameController extends ChangeNotifier {
                       p.role == null ||
                       p.role!.isEmpty),
             );
+            idx = players.indexWhere((p) => p.id == id);
+            final restored = GamePlayer(
+              id: id,
+              name: name,
+              isHost: previous?.isHost ?? false,
+              role: role ?? previous?.role,
+              status: status,
+              latitude: previous?.latitude,
+              longitude: previous?.longitude,
+            );
             if (idx == -1) {
-              players.add(
-                GamePlayer(
-                  id: id,
+              players.add(_withLastKnownPosition(restored));
+            } else {
+              players[idx] = _withLastKnownPosition(
+                players[idx].copyWith(
                   name: name,
-                  isHost: false,
-                  role: role,
+                  role: role ?? players[idx].role,
                   status: status,
                 ),
               );
-            } else {
-              players[idx] = players[idx].copyWith(
-                name: name,
-                role: role ?? players[idx].role,
-                status: status,
-              );
             }
             _dedupePlayers();
+            _hydratePlayersFromLastKnown();
             _syncVoiceState();
             notifyListeners();
           }
@@ -662,7 +834,10 @@ class GameController extends ChangeNotifier {
       case 'game:error':
       case 'game:action-rejected':
         _joinInFlight = false;
-        final msg = payload?.toString() ?? 'Erreur game';
+        final msg = signalingErrorMessage(payload, fallback: 'Erreur game');
+        if (isTransientVoiceSignalingError(msg)) {
+          return;
+        }
         error = msg;
         connectionStatus = _hasJoinedGame ? 'connected' : 'error';
         notifyListeners();
@@ -681,26 +856,29 @@ class GameController extends ChangeNotifier {
     final host = payload['hostId']?.toString();
     final joinedPlayerId = payload['playerId']?.toString();
     final game = payload['game'];
+    final previousSelfId = playerId;
+    _rememberKnownPlayers();
     if (joinedPlayerId != null && joinedPlayerId.isNotEmpty) {
+      _aliasLastKnownPlayerId(previousSelfId, joinedPlayerId);
       playerId = joinedPlayerId;
     }
     if (host != null) {
       isHost = host == playerId;
     }
     if (game is Map && game['players'] is List) {
+      final previousById = <String, GamePlayer>{
+        for (final player in players)
+          if (player.id.isNotEmpty) player.id: player,
+      };
       players
         ..clear()
         ..addAll(
           (game['players'] as List).whereType<Map>().map((raw) {
-            return GamePlayer(
-              id: raw['id']?.toString() ?? '',
-              name: raw['name']?.toString() ?? 'Joueur',
-              isHost: raw['isHost'] == true,
-              role: raw['role']?.toString(),
-              status: raw['status']?.toString() ?? 'active',
-            );
+            return _playerFromRosterMap(raw, previousById);
           }),
         );
+      _hydratePlayersFromLastKnown();
+      _syncSelfMarkerFromMyPosition();
     }
     if (game is Map) {
       String? ownRole;
@@ -757,6 +935,11 @@ class GameController extends ChangeNotifier {
     _joinInFlight = false;
     _lastJoinAttemptMs = 0;
     connectionStatus = 'connected';
+    _syncSelfMarkerFromMyPosition();
+    final pos = myPosition;
+    if (pos != null) {
+      _publishPositionIfDue(pos.latitude, pos.longitude, force: true);
+    }
     if (!_requestedInitialSync) {
       _requestedInitialSync = true;
       _socketService.requestGameSync();
@@ -844,30 +1027,68 @@ class GameController extends ChangeNotifier {
             raw['name']?.toString() ??
             'Joueur';
         if (idx != -1) {
-          players[idx] = players[idx].copyWith(
-            name: name,
-            role: role ?? players[idx].role,
-            latitude: lat ?? players[idx].latitude,
-            longitude: lng ?? players[idx].longitude,
-            status: status ?? players[idx].status,
+          players[idx] = _withLastKnownPosition(
+            players[idx].copyWith(
+              name: name,
+              role: role ?? players[idx].role,
+              latitude: lat ?? players[idx].latitude,
+              longitude: lng ?? players[idx].longitude,
+              status: status ?? players[idx].status,
+            ),
           );
           continue;
         }
         players.add(
-          GamePlayer(
-            id: id,
-            name: name,
-            isHost: false,
-            role: role,
-            status: status ?? 'active',
-            latitude: lat,
-            longitude: lng,
+          _withLastKnownPosition(
+            GamePlayer(
+              id: id,
+              name: name,
+              isHost: false,
+              role: role,
+              status: status ?? 'active',
+              latitude: lat,
+              longitude: lng,
+            ),
           ),
         );
       }
       final me = players.where((p) => p.id == playerId);
       playerRole = me.isEmpty ? playerRole : me.first.role;
+      _hydratePlayersFromLastKnown();
+      _syncSelfMarkerFromMyPosition();
     }
+  }
+
+  GamePlayer _playerFromRosterMap(
+    Map raw,
+    Map<String, GamePlayer> previousById,
+  ) {
+    final id = raw['id']?.toString() ?? raw['id_player']?.toString() ?? '';
+    final name =
+        raw['displayName']?.toString() ??
+        raw['name']?.toString() ??
+        previousById[id]?.name ??
+        'Joueur';
+    final role = raw['role']?.toString() ?? previousById[id]?.role;
+    var previous = id.isEmpty ? null : previousById[id];
+    previous ??= _findPlayerByNameRole(
+      name,
+      role,
+      source: previousById.values,
+    );
+    final lat = double.tryParse(raw['latitude']?.toString() ?? '');
+    final lng = double.tryParse(raw['longitude']?.toString() ?? '');
+    return _withLastKnownPosition(
+      GamePlayer(
+        id: id,
+        name: name,
+        isHost: raw['isHost'] == true || (previous?.isHost ?? false),
+        role: role ?? previous?.role,
+        status: raw['status']?.toString() ?? previous?.status ?? 'active',
+        latitude: lat ?? previous?.latitude,
+        longitude: lng ?? previous?.longitude,
+      ),
+    );
   }
 
   void _dedupePlayers() {
@@ -890,7 +1111,7 @@ class GameController extends ChangeNotifier {
     for (final entry in grouped.entries) {
       final list = entry.value;
       if (list.length == 1) {
-        deduped.add(list.first);
+        deduped.add(_withLastKnownPosition(list.first));
         continue;
       }
       list.sort((a, b) {
@@ -912,7 +1133,19 @@ class GameController extends ChangeNotifier {
         if (aPos != bPos) return aPos - bPos;
         return 0;
       });
-      deduped.add(list.first);
+      var chosen = list.first;
+      for (final player in list) {
+        _rememberKnownPosition(player);
+        if ((chosen.latitude == null || chosen.longitude == null) &&
+            player.latitude != null &&
+            player.longitude != null) {
+          chosen = chosen.copyWith(
+            latitude: player.latitude,
+            longitude: player.longitude,
+          );
+        }
+      }
+      deduped.add(_withLastKnownPosition(chosen));
     }
     players
       ..clear()
@@ -1023,6 +1256,7 @@ class GameController extends ChangeNotifier {
     final idx = players.indexWhere((p) => p.id == fromId);
     if (idx == -1) return;
     players[idx] = players[idx].copyWith(latitude: lat, longitude: lng);
+    _rememberKnownPosition(players[idx]);
     _pushSnapshotThrottled();
     _tickObjectiveCapturesIfHost();
     notifyListeners();
@@ -1406,6 +1640,23 @@ class GameController extends ChangeNotifier {
       return targetRole == 'AGENT';
     }
     return true;
+  }
+
+  GamePlayer playerWithDisplayPosition(GamePlayer player) {
+    return _withLastKnownPosition(player);
+  }
+
+  List<GamePlayer> get mapMarkerPlayers {
+    return players
+        .where(
+          (player) =>
+              player.id == playerId || isPlayerVisibleForCurrentRole(player),
+        )
+        .map(playerWithDisplayPosition)
+        .where(
+          (player) => player.latitude != null && player.longitude != null,
+        )
+        .toList(growable: false);
   }
 
   bool isPlayerAudibleForCurrentRole(GamePlayer player) {

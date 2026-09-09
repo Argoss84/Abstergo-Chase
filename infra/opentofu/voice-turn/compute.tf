@@ -10,6 +10,16 @@ resource "aws_instance" "turn" {
     http_tokens   = "required"
   }
 
+  lifecycle {
+    # Live instance was imported; AMI / public IP drift must not recreate coturn.
+    ignore_changes = [
+      ami,
+      associate_public_ip_address,
+      user_data,
+      user_data_base64,
+    ]
+  }
+
   tags = {
     Name = "${var.name_prefix}-ec2"
   }

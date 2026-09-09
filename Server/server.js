@@ -2489,10 +2489,7 @@ io.on('connection', (socket) => {
       const targetId = payload?.targetId;
       const targetSocket = socketsById.get(targetId);
       if (!targetSocket) {
-        send(socket, {
-          type: 'game:error',
-          payload: { message: 'Destinataire WebRTC introuvable.' }
-        });
+        log(`[WEBRTC] Signal de ${clientId} vers ${targetId} ignore: destinataire introuvable`);
         return;
       }
 
@@ -2511,11 +2508,7 @@ io.on('connection', (socket) => {
       const targetId = payload?.targetId;
       const targetSocket = socketsById.get(targetId);
       if (!targetSocket) {
-        log(`[ERREUR WEBRTC] Signal de ${clientId} vers ${targetId} échoué: destinataire introuvable`);
-        send(socket, {
-          type: 'lobby:error',
-          payload: { message: 'Destinataire WebRTC introuvable.' }
-        });
+        log(`[WEBRTC] Signal de ${clientId} vers ${targetId} ignore: destinataire introuvable`);
         return;
       }
 

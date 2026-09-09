@@ -40,6 +40,7 @@ resource "aws_ecs_service" "this" {
   name            = var.ecs_service_name
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.this.arn
+  # Awake value only. Runtime scale-to-zero is owned by hibernate-controller.
   desired_count   = var.desired_count
   launch_type     = "FARGATE"
 
@@ -59,4 +60,9 @@ resource "aws_ecs_service" "this" {
   deployment_maximum_percent         = 200
 
   depends_on = [aws_lb_listener.tcp]
+
+  lifecycle {
+    # Runtime scale-to-zero is owned by hibernate-controller (Lambda).
+    ignore_changes = [desired_count]
+  }
 }

@@ -8,5 +8,7 @@
   "SIGNALING_PRODUCTION_URL": "http://35.181.228.185",
   "SIGNALING_DEVELOPMENT_URL": "http://10.0.2.2:5174",
   "SIGNALING_SOCKET_PATH": "/socket.io",
+  "SIGNALING_WAKE_URL": "https://gclhwu5t6clq7gbapgyft4537e0txnua.lambda-url.eu-west-3.on.aws/",
+  "SIGNALING_WAKE_TOKEN": "zvWIuT51r6qCjH17nhuMwtKwh0xq3iUS",
   "VOICE_STUN_URL": "stun:35.181.228.185:3478"
 }

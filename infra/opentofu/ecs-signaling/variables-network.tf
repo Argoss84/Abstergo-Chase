@@ -23,7 +23,7 @@ variable "assign_public_ip" {
 variable "nlb_name" {
   description = "Network Load Balancer name."
   type        = string
-  default     = "abstergo-signaling-nlb"
+  default     = "abstergo-signaling-nlb-1eip"
 }
 
 variable "signaling_listener_port" {

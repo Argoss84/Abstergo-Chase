@@ -7,6 +7,7 @@ import 'package:broken_veil_protocol/features/lobby/data/player_session_store.da
 import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
 import 'package:broken_veil_protocol/shared/services/voice_chat_service.dart';
 import 'package:broken_veil_protocol/shared/services/voice_settings_service.dart';
+import 'package:broken_veil_protocol/shared/utils/signaling_error_message.dart';
 import 'package:flutter/foundation.dart';
 
 class LobbyController extends ChangeNotifier {
@@ -300,17 +301,25 @@ class LobbyController extends ChangeNotifier {
         notifyListeners();
         return;
       case 'game:error':
-        if (payload is Map) {
-          error =
-              payload['message']?.toString() ?? 'Erreur de creation de partie.';
-        } else {
-          error = 'Erreur de creation de partie.';
+        final message = signalingErrorMessage(
+          payload,
+          fallback: 'Erreur de creation de partie.',
+        );
+        if (isTransientVoiceSignalingError(message)) {
+          return;
         }
+        error = message;
         notifyListeners();
         return;
       case 'lobby:closed':
       case 'lobby:error':
-        final message = payload?.toString() ?? 'Lobby indisponible.';
+        final message = signalingErrorMessage(
+          payload,
+          fallback: 'Lobby indisponible.',
+        );
+        if (isTransientVoiceSignalingError(message)) {
+          return;
+        }
         if (_isRecoveringSession) {
           // During resume recovery, avoid forcing a false fallback route.
           error = message;

@@ -70,6 +70,7 @@ class _ActiveRolePing {
   final String shortMessage;
   final int createdAtMs;
 }
+
 const double _kDefaultGameMapZoom = 16.5;
 const double _kCompassCenterToleranceLatLng = 0.000001;
 
@@ -85,7 +86,7 @@ class GamePage extends StatefulWidget {
 }
 
 class _GamePageState extends State<GamePage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final GameController _controller;
   late final AnimationController _guidancePulseController;
   late final MapController _mapController;
@@ -106,6 +107,7 @@ class _GamePageState extends State<GamePage>
   bool _didAnnounceCountdownGo = false;
   int _lastOutOfZoneVibrationMs = 0;
   bool _hasSpokenJoinTts = false;
+  bool _gameMapRevealed = false;
   bool _compassModeEnabled = false;
   bool _isCompassRecenterScheduled = false;
   GeoPoint? _lastCompassCenteredPosition;
@@ -157,6 +159,7 @@ class _GamePageState extends State<GamePage>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _guidancePulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1300),
@@ -174,6 +177,7 @@ class _GamePageState extends State<GamePage>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _compassSub?.cancel();
     _pingPressTimer?.cancel();
     _headingDeg.dispose();
@@ -192,6 +196,13 @@ class _GamePageState extends State<GamePage>
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_controller.onAppResumed());
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: Listenable.merge(<Listenable>[
@@ -207,6 +218,11 @@ class _GamePageState extends State<GamePage>
         final fallbackCenter = _resolveCenter();
         final connectionReady = _controller.connectionStatus == 'connected';
         final realtimePositionReady = _controller.hasRealtimePosition;
+        final gameReady =
+            !_controller.isLoading && connectionReady && realtimePositionReady;
+        if (gameReady) {
+          _gameMapRevealed = true;
+        }
         final roleForTts = (_controller.playerRole ?? '').trim();
         if (connectionReady && roleForTts.isNotEmpty && !_hasSpokenJoinTts) {
           _hasSpokenJoinTts = true;
@@ -237,7 +253,9 @@ class _GamePageState extends State<GamePage>
             if (!mounted) return;
             context.go(route);
           });
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
         final loadingMessage = () {
           if (!connectionReady) {
@@ -251,9 +269,7 @@ class _GamePageState extends State<GamePage>
           }
           return 'Récupération de la position en temps réel...';
         }();
-        if (_controller.isLoading ||
-            !connectionReady ||
-            !realtimePositionReady) {
+        if (!_gameMapRevealed) {
           return Scaffold(
             body: Center(
               child: Column(
@@ -439,489 +455,431 @@ class _GamePageState extends State<GamePage>
           ),
           body: Stack(
             children: [
-              (_controller.isLoading || !connectionReady)
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const CircularProgressIndicator(),
-                          const SizedBox(height: 12),
-                          Text(
-                            _controller.connectionStatus == 'connecting'
-                                ? 'Connexion au serveur en cours...'
-                                : _controller.connectionStatus == 'error'
-                                ? 'Impossible de se connecter au serveur.'
-                                : 'Initialisation de la partie...',
-                          ),
-                        ],
-                      ),
-                    )
-                  : Stack(
-                      children: [
-                        Positioned.fill(
-                          child: fallbackCenter == null
-                              ? const Center(child: Text('Carte indisponible'))
-                              : LobbyMapPreview(
-                                  mapController: _mapController,
-                                  height: null,
-                                  center:
-                                      _controller.myPosition ?? fallbackCenter,
-                                  mapRadiusMeters:
-                                      effectiveGameConfig?.mapRadius ??
-                                      widget.bootstrap.lobby.form?.mapRadius ??
-                                      1000,
-                                  outerStreetContour:
-                                      effectiveGameConfig
-                                              ?.mapStreets
-                                              .isNotEmpty ==
-                                          true
-                                      ? effectiveGameConfig!.mapStreets
-                                      : widget
-                                            .bootstrap
-                                            .lobby
-                                            .outerStreetContour,
-                                  objectives: objectiveDisplayPoints,
-                                  inactiveObjectives:
-                                      capturedObjectiveDisplayPoints,
-                                  agentStartZone:
-                                      effectiveGameConfig?.startZone ??
-                                      widget.bootstrap.lobby.agentStartZone,
-                                  rogueStartZone:
-                                      effectiveGameConfig?.rogueStartZone ??
-                                      widget.bootstrap.lobby.rogueStartZone,
-                                  objectiveZoneRadiusMeters:
-                                      objectiveZoneRadius,
-                                  startZoneRadiusMeters:
-                                      effectiveGameConfig?.startZoneRadius ??
-                                      widget
-                                          .bootstrap
-                                          .lobby
-                                          .form
-                                          ?.startZoneRadius ??
-                                      25,
-                                  showObjectives: true,
-                                  showObjectiveMarkers: isRogue,
-                                  showObjectiveZones: !isRogue,
-                                  objectiveMarkerIcon: isRogue
-                                      ? Icons.location_on
-                                      : Icons.adjust,
-                                  objectiveMarkerColor: isRogue
-                                      ? Colors.purpleAccent
-                                      : Colors.red,
-                                  objectiveMarkerSize: isRogue ? 30 : 18,
-                                  guidancePath: _controller.gameStarted
-                                      ? const <GeoPoint>[]
-                                      : _controller.buildPathToMyStartZone(),
-                                  guidancePathColor: guidanceColor,
-                                  guidancePathDotted: true,
-                                  guidanceNeonPulse:
-                                      _guidancePulseController.value,
-                                  highlightObjectiveZones:
-                                      capturingDisplayPoints,
-                                  highlightObjectiveZoneRadiusMeters:
-                                      objectiveZoneRadius,
-                                  highlightObjectivePulse:
-                                      _guidancePulseController.value,
-                                  showCenterMarker: false,
-                                  pingMarkers: _activeRolePings
-                                      .map(
-                                        (ping) => MapPingMarker(
-                                          point: ping.position,
-                                          color: ping.color,
-                                          playerName: ping.playerName,
-                                          message: ping.shortMessage,
-                                          pulseValue: _pingPulseFor(
-                                            ping.createdAtMs,
-                                          ),
-                                        ),
-                                      )
-                                      .toList(growable: false),
-                                  onMapPointerDown: _onMapPointerDown,
-                                  onMapPointerMove: _onMapPointerMove,
-                                  onMapPointerUp: _onMapPointerUp,
-                                  onMapPointerCancel: _onMapPointerCancel,
-                                  playerMarkers: _controller.players
-                                      .where(
-                                        (p) =>
-                                            p.id == _controller.playerId ||
-                                            _controller
-                                                .isPlayerVisibleForCurrentRole(
-                                                  p,
-                                                ),
-                                      )
-                                      .where(
-                                        (p) =>
-                                            p.status.toLowerCase() !=
-                                            'disconnected',
-                                      )
-                                      .where(
-                                        (p) =>
-                                            p.latitude != null &&
-                                            p.longitude != null,
-                                      )
-                                      .map(
-                                        (p) => PlayerMapMarker(
-                                          point: GeoPoint(
-                                            latitude: p.latitude!,
-                                            longitude: p.longitude!,
-                                          ),
-                                          isAgent:
-                                              (p.role ?? '').toUpperCase() ==
-                                              'AGENT',
-                                          aura: p.id == _controller.playerId
-                                              ? PlayerMarkerAura.selfBlue
-                                              : ((p.role ?? '').toUpperCase() ==
-                                                        roleUpper
-                                                    ? PlayerMarkerAura.allyGreen
-                                                    : PlayerMarkerAura.none),
-                                        ),
-                                      )
-                                      .toList(growable: false),
-                                ),
-                        ),
-                        if (_pingWheelVisible && _pingPressOrigin != null)
-                          Positioned.fill(
-                            child: IgnorePointer(
-                              child: CustomPaint(
-                                painter: _PingWheelPainter(
-                                  center: _pingPressOrigin!,
-                                  options: _pingOptions,
-                                  highlightedIndex: _selectedPingOptionIndex,
-                                ),
-                              ),
-                            ),
-                          ),
-                        if (winnerType == null)
-                          Positioned(
-                            top:
-                                MediaQuery.of(context).padding.top +
-                                kToolbarHeight,
-                            left: 0,
-                            right: 0,
-                            child: ValueListenableBuilder<double?>(
-                              valueListenable: _headingDeg,
-                              builder: (context, heading, _) {
-                                return _CompassBanner(
-                                  roleUpper: roleUpper,
-                                  headingDeg: heading,
-                                  myPosition: myPos,
-                                  players: _controller.players,
-                                  objectives: _controller.objectives,
-                                  selfPlayerId: _controller.playerId,
-                                );
-                              },
-                            ),
-                          ),
-                        if (_controller.error != null)
-                          Positioned(
-                            top: topInset,
-                            left: 12,
-                            right: 12,
-                            child: Container(
-                              color: Colors.red.shade100,
-                              padding: const EdgeInsets.all(8),
-                              child: Text(_controller.error!),
-                            ),
-                          ),
-                        if (winnerType == null && outOfZone)
-                          Positioned.fill(
-                            child: IgnorePointer(
-                              child: Center(
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 12,
+              Stack(
+                children: [
+                  Positioned.fill(
+                    child: fallbackCenter == null
+                        ? const Center(child: Text('Carte indisponible'))
+                        : LobbyMapPreview(
+                            mapController: _mapController,
+                            height: null,
+                            center: _controller.myPosition ?? fallbackCenter,
+                            mapRadiusMeters:
+                                effectiveGameConfig?.mapRadius ??
+                                widget.bootstrap.lobby.form?.mapRadius ??
+                                1000,
+                            outerStreetContour:
+                                effectiveGameConfig?.mapStreets.isNotEmpty ==
+                                    true
+                                ? effectiveGameConfig!.mapStreets
+                                : widget.bootstrap.lobby.outerStreetContour,
+                            objectives: objectiveDisplayPoints,
+                            inactiveObjectives: capturedObjectiveDisplayPoints,
+                            agentStartZone:
+                                effectiveGameConfig?.startZone ??
+                                widget.bootstrap.lobby.agentStartZone,
+                            rogueStartZone:
+                                effectiveGameConfig?.rogueStartZone ??
+                                widget.bootstrap.lobby.rogueStartZone,
+                            objectiveZoneRadiusMeters: objectiveZoneRadius,
+                            startZoneRadiusMeters:
+                                effectiveGameConfig?.startZoneRadius ??
+                                widget.bootstrap.lobby.form?.startZoneRadius ??
+                                25,
+                            showObjectives: true,
+                            showObjectiveMarkers: isRogue,
+                            showObjectiveZones: !isRogue,
+                            objectiveMarkerIcon: isRogue
+                                ? Icons.location_on
+                                : Icons.adjust,
+                            objectiveMarkerColor: isRogue
+                                ? Colors.purpleAccent
+                                : Colors.red,
+                            objectiveMarkerSize: isRogue ? 30 : 18,
+                            guidancePath: _controller.gameStarted
+                                ? const <GeoPoint>[]
+                                : _controller.buildPathToMyStartZone(),
+                            guidancePathColor: guidanceColor,
+                            guidancePathDotted: true,
+                            guidanceNeonPulse: _guidancePulseController.value,
+                            highlightObjectiveZones: capturingDisplayPoints,
+                            highlightObjectiveZoneRadiusMeters:
+                                objectiveZoneRadius,
+                            highlightObjectivePulse:
+                                _guidancePulseController.value,
+                            showCenterMarker: false,
+                            pingMarkers: _activeRolePings
+                                .map(
+                                  (ping) => MapPingMarker(
+                                    point: ping.position,
+                                    color: ping.color,
+                                    playerName: ping.playerName,
+                                    message: ping.shortMessage,
+                                    pulseValue: _pingPulseFor(ping.createdAtMs),
                                   ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withValues(alpha: 0.65),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: const Text(
-                                    'Retournez dans la zone de jeux',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w800,
+                                )
+                                .toList(growable: false),
+                            onMapPointerDown: _onMapPointerDown,
+                            onMapPointerMove: _onMapPointerMove,
+                            onMapPointerUp: _onMapPointerUp,
+                            onMapPointerCancel: _onMapPointerCancel,
+                            playerMarkers: _controller.mapMarkerPlayers
+                                .map(
+                                  (p) => PlayerMapMarker(
+                                    point: GeoPoint(
+                                      latitude: p.latitude!,
+                                      longitude: p.longitude!,
                                     ),
+                                    isAgent:
+                                        (p.role ?? '').toUpperCase() == 'AGENT',
+                                    aura: p.id == _controller.playerId
+                                        ? PlayerMarkerAura.selfBlue
+                                        : ((p.role ?? '').toUpperCase() ==
+                                                  roleUpper
+                                              ? PlayerMarkerAura.allyGreen
+                                              : PlayerMarkerAura.none),
                                   ),
-                                ),
+                                )
+                                .toList(growable: false),
+                          ),
+                  ),
+                  if (_pingWheelVisible && _pingPressOrigin != null)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: CustomPaint(
+                          painter: _PingWheelPainter(
+                            center: _pingPressOrigin!,
+                            options: _pingOptions,
+                            highlightedIndex: _selectedPingOptionIndex,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (winnerType == null)
+                    Positioned(
+                      top: MediaQuery.of(context).padding.top + kToolbarHeight,
+                      left: 0,
+                      right: 0,
+                      child: ValueListenableBuilder<double?>(
+                        valueListenable: _headingDeg,
+                        builder: (context, heading, _) {
+                          return _CompassBanner(
+                            roleUpper: roleUpper,
+                            headingDeg: heading,
+                            myPosition: myPos,
+                            players: _controller.players
+                                .map(_controller.playerWithDisplayPosition)
+                                .toList(growable: false),
+                            objectives: _controller.objectives,
+                            selfPlayerId: _controller.playerId,
+                          );
+                        },
+                      ),
+                    ),
+                  if (_controller.error != null)
+                    Positioned(
+                      top: topInset,
+                      left: 12,
+                      right: 12,
+                      child: Container(
+                        color: Colors.red.shade100,
+                        padding: const EdgeInsets.all(8),
+                        child: Text(_controller.error!),
+                      ),
+                    ),
+                  if (winnerType == null && outOfZone)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.65),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Text(
+                              'Retournez dans la zone de jeux',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
                               ),
                             ),
                           ),
-                        if (winnerType == null && startCountdownSeconds != null)
-                          Positioned.fill(
-                            child: IgnorePointer(
+                        ),
+                      ),
+                    ),
+                  if (winnerType == null && startCountdownSeconds != null)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: Container(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          child: Center(
+                            child: Transform.scale(
+                              scale:
+                                  0.96 + (_guidancePulseController.value * 0.1),
                               child: Container(
-                                color: Colors.black.withValues(alpha: 0.55),
-                                child: Center(
-                                  child: Transform.scale(
-                                    scale: 0.96 + (_guidancePulseController.value * 0.1),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 18,
-                                        vertical: 16,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
+                                  vertical: 16,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.95),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: Colors.black.withValues(alpha: 0.22),
+                                    width: 1.3,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(
+                                        alpha: 0.28,
                                       ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white.withValues(alpha: 0.95),
-                                        borderRadius: BorderRadius.circular(14),
-                                        border: Border.all(
-                                          color: Colors.black.withValues(alpha: 0.22),
-                                          width: 1.3,
+                                      blurRadius: 16,
+                                      spreadRadius: 0.8,
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Text(
+                                      'La partie commence dans…',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w900,
+                                        color: Color(0xFF111827),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Stack(
+                                      alignment: Alignment.center,
+                                      children: [
+                                        Text(
+                                          '$startCountdownSeconds',
+                                          style: TextStyle(
+                                            fontSize: 60,
+                                            fontWeight: FontWeight.w900,
+                                            foreground: Paint()
+                                              ..style = PaintingStyle.stroke
+                                              ..strokeWidth = 6
+                                              ..color = Colors.black87,
+                                          ),
                                         ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withValues(alpha: 0.28),
-                                            blurRadius: 16,
-                                            spreadRadius: 0.8,
-                                          ),
-                                        ],
-                                      ),
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Text(
-                                            'La partie commence dans…',
-                                            textAlign: TextAlign.center,
-                                            style: TextStyle(
-                                              fontSize: 22,
-                                              fontWeight: FontWeight.w900,
-                                              color: Color(0xFF111827),
-                                            ),
-                                          ),
-                                          const SizedBox(height: 10),
-                                          Stack(
-                                            alignment: Alignment.center,
-                                            children: [
-                                              Text(
-                                                '$startCountdownSeconds',
-                                                style: TextStyle(
-                                                  fontSize: 60,
-                                                  fontWeight: FontWeight.w900,
-                                                  foreground: Paint()
-                                                    ..style = PaintingStyle.stroke
-                                                    ..strokeWidth = 6
-                                                    ..color = Colors.black87,
-                                                ),
-                                              ),
-                                              Text(
-                                                '$startCountdownSeconds',
-                                                style: const TextStyle(
-                                                  fontSize: 60,
-                                                  fontWeight: FontWeight.w900,
-                                                  color: Color(0xFFB91C1C),
-                                                  shadows: [
-                                                    Shadow(
-                                                      color: Colors.black45,
-                                                      offset: Offset(0, 2),
-                                                      blurRadius: 5,
-                                                    ),
-                                                  ],
-                                                ),
+                                        Text(
+                                          '$startCountdownSeconds',
+                                          style: const TextStyle(
+                                            fontSize: 60,
+                                            fontWeight: FontWeight.w900,
+                                            color: Color(0xFFB91C1C),
+                                            shadows: [
+                                              Shadow(
+                                                color: Colors.black45,
+                                                offset: Offset(0, 2),
+                                                blurRadius: 5,
                                               ),
                                             ],
                                           ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        if (isRogue && rogueCaptureRemaining != null)
-                          Positioned(
-                            top: topInset,
-                            left: 12,
-                            right: 12,
-                            child: _buildRogueCaptureFeedback(
-                              remainingSeconds: rogueCaptureRemaining,
-                              progress: rogueCaptureProgress,
-                            ),
-                          ),
-                        if (isRogue &&
-                            rogueCaptureRemaining == null &&
-                            _controller.showRogueCaptureInterruptedBanner)
-                          Positioned(
-                            top: topInset,
-                            left: 12,
-                            right: 12,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 10,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.orange.shade800.withValues(alpha: 0.9),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: const Row(
-                                children: [
-                                  Icon(
-                                    Icons.warning_amber,
-                                    color: Colors.white,
-                                  ),
-                                  SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      'Capture interrompue: vous êtes sorti de la zone.',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        if (_controller.isHost && !_controller.gameStarted)
-                          Positioned(
-                            top: topInset,
-                            left: 12,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: BackdropFilter(
-                                filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
-                                child: Container(
-                                  padding: const EdgeInsets.all(8),
-                                  color: Colors.black.withValues(alpha: 0.08),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      ..._controller.players
-                                          .where(
-                                            (player) =>
-                                                player.status.toLowerCase() !=
-                                                'disconnected',
-                                          )
-                                          .map((player) {
-                                            final inZone = _controller
-                                                .isPlayerInStartZone(player);
-                                            final role = (player.role ?? '')
-                                                .toUpperCase();
-                                            final roleShort = role == 'ROGUE'
-                                                ? 'r'
-                                                : role == 'AGENT'
-                                                ? 'a'
-                                                : '-';
-                                            return Padding(
-                                              padding: const EdgeInsets.only(
-                                                bottom: 4,
-                                              ),
-                                              child: Text(
-                                                '${player.name} [$roleShort]',
-                                                style: TextStyle(
-                                                  color: inZone
-                                                      ? Colors.greenAccent
-                                                      : Colors.redAccent,
-                                                  fontWeight: FontWeight.w700,
-                                                ),
-                                              ),
-                                            );
-                                          }),
-                                      const SizedBox(height: 6),
-                                      FilledButton(
-                                        onPressed: _controller.canHostStartGame
-                                            ? _controller.startGameFromHost
-                                            : null,
-                                        child: Text(
-                                          _controller.canHostStartGame
-                                              ? 'Démarrer'
-                                              : 'En attente',
                                         ),
-                                      ),
-                                    ],
-                                  ),
+                                      ],
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
                           ),
-                        if ((!_controller.isHost || _controller.gameStarted) &&
-                            winnerType == null &&
-                            activeSameRolePlayers.isNotEmpty)
-                          Positioned(
-                            top: topInset,
-                            left: 12,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: BackdropFilter(
-                                filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
-                                child: Container(
-                                  width: 260,
-                                  padding: const EdgeInsets.all(8),
-                                  color: Colors.black.withValues(alpha: 0.08),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      ...activeSameRolePlayers.map((player) {
-                                        const activeVoice = true;
-                                        return Container(
-                                          margin: const EdgeInsets.only(
-                                            bottom: 4,
+                        ),
+                      ),
+                    ),
+                  if (isRogue && rogueCaptureRemaining != null)
+                    Positioned(
+                      top: topInset,
+                      left: 12,
+                      right: 12,
+                      child: _buildRogueCaptureFeedback(
+                        remainingSeconds: rogueCaptureRemaining,
+                        progress: rogueCaptureProgress,
+                      ),
+                    ),
+                  if (isRogue &&
+                      rogueCaptureRemaining == null &&
+                      _controller.showRogueCaptureInterruptedBanner)
+                    Positioned(
+                      top: topInset,
+                      left: 12,
+                      right: 12,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade800.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.warning_amber, color: Colors.white),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Capture interrompue: vous êtes sorti de la zone.',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (_controller.isHost && !_controller.gameStarted)
+                    Positioned(
+                      top: topInset,
+                      left: 12,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            color: Colors.black.withValues(alpha: 0.08),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ..._controller.players
+                                    .where(
+                                      (player) =>
+                                          player.status.toLowerCase() !=
+                                          'disconnected',
+                                    )
+                                    .map((player) {
+                                      final inZone = _controller
+                                          .isPlayerInStartZone(player);
+                                      final role = (player.role ?? '')
+                                          .toUpperCase();
+                                      final roleShort = role == 'ROGUE'
+                                          ? 'r'
+                                          : role == 'AGENT'
+                                          ? 'a'
+                                          : '-';
+                                      return Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 4,
+                                        ),
+                                        child: Text(
+                                          '${player.name} [$roleShort]',
+                                          style: TextStyle(
+                                            color: inZone
+                                                ? Colors.greenAccent
+                                                : Colors.redAccent,
+                                            fontWeight: FontWeight.w700,
                                           ),
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 6,
-                                            vertical: 4,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: activeVoice
-                                                ? Colors.cyanAccent.withValues(
-                                                    alpha: 0.18,
-                                                  )
-                                                : Colors.transparent,
-                                            borderRadius: BorderRadius.circular(
-                                              6,
-                                            ),
-                                            border: Border.all(
+                                        ),
+                                      );
+                                    }),
+                                const SizedBox(height: 6),
+                                FilledButton(
+                                  onPressed: _controller.canHostStartGame
+                                      ? _controller.startGameFromHost
+                                      : null,
+                                  child: Text(
+                                    _controller.canHostStartGame
+                                        ? 'Démarrer'
+                                        : 'En attente',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  if ((!_controller.isHost || _controller.gameStarted) &&
+                      winnerType == null &&
+                      activeSameRolePlayers.isNotEmpty)
+                    Positioned(
+                      top: topInset,
+                      left: 12,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+                          child: Container(
+                            width: 260,
+                            padding: const EdgeInsets.all(8),
+                            color: Colors.black.withValues(alpha: 0.08),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ...activeSameRolePlayers.map((player) {
+                                  const activeVoice = true;
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 4),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: activeVoice
+                                          ? Colors.cyanAccent.withValues(
+                                              alpha: 0.18,
+                                            )
+                                          : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(
+                                        color: activeVoice
+                                            ? Colors.cyanAccent
+                                            : Colors.white.withValues(
+                                                alpha: 0.1,
+                                              ),
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          activeVoice
+                                              ? Icons.graphic_eq
+                                              : Icons.volume_mute,
+                                          size: 16,
+                                          color: activeVoice
+                                              ? Colors.cyanAccent
+                                              : Colors.white70,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text(
+                                            player.name,
+                                            style: TextStyle(
                                               color: activeVoice
                                                   ? Colors.cyanAccent
-                                                  : Colors.white.withValues(
-                                                      alpha: 0.1,
-                                                    ),
-                                              width: 1,
+                                                  : Colors.white,
+                                              fontWeight: FontWeight.w700,
                                             ),
                                           ),
-                                          child: Row(
-                                            children: [
-                                              Icon(
-                                                activeVoice
-                                                    ? Icons.graphic_eq
-                                                    : Icons.volume_mute,
-                                                size: 16,
-                                                color: activeVoice
-                                                    ? Colors.cyanAccent
-                                                    : Colors.white70,
-                                              ),
-                                              const SizedBox(width: 6),
-                                              Expanded(
-                                                child: Text(
-                                                  player.name,
-                                                  style: TextStyle(
-                                                    color: activeVoice
-                                                        ? Colors.cyanAccent
-                                                        : Colors.white,
-                                                    fontWeight: FontWeight.w700,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      }),
-                                    ],
-                                  ),
-                                ),
-                              ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }),
+                              ],
                             ),
                           ),
-                      ],
+                        ),
+                      ),
                     ),
-              if (connectionReady && !_controller.isLoading)
+                ],
+              ),
+              if (!_controller.isLoading)
                 Positioned(
                   left: 0,
                   right: 0,
@@ -1028,7 +986,10 @@ class _GamePageState extends State<GamePage>
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 1),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.35),
+          width: 1,
+        ),
         boxShadow: compactForAppBar
             ? null
             : [
@@ -1474,10 +1435,7 @@ class _GamePageState extends State<GamePage>
       _pendingCompassCenteredPosition = null;
       if (target == null) return;
       final zoom = _currentMapZoom();
-      _mapController.move(
-        LatLng(target.latitude, target.longitude),
-        zoom,
-      );
+      _mapController.move(LatLng(target.latitude, target.longitude), zoom);
     });
   }
 
@@ -1770,7 +1728,10 @@ class _GamePageState extends State<GamePage>
     _pingPressTimer?.cancel();
     _pingActivePointer = event.pointer;
     _pingPressOrigin = event.localPosition;
-    _pingLocation = GeoPoint(latitude: point.latitude, longitude: point.longitude);
+    _pingLocation = GeoPoint(
+      latitude: point.latitude,
+      longitude: point.longitude,
+    );
     _selectedPingOptionIndex = null;
     _pingWheelVisible = false;
     _pingPressTimer = Timer(_kPingPressDelay, () {
@@ -1830,7 +1791,10 @@ class _GamePageState extends State<GamePage>
     });
   }
 
-  void _broadcastRolePing({required _PingOption option, required GeoPoint point}) {
+  void _broadcastRolePing({
+    required _PingOption option,
+    required GeoPoint point,
+  }) {
     final payload = jsonEncode(<String, dynamic>{
       'kind': 'role-ping',
       'id': option.id,
@@ -1859,7 +1823,8 @@ class _GamePageState extends State<GamePage>
       _lastPingChatIndex++;
       final parsed = _tryParsePingMessage(message.text);
       if (parsed == null) continue;
-      final key = '${message.playerId}:${message.timestampMs}:${parsed.optionId}';
+      final key =
+          '${message.playerId}:${message.timestampMs}:${parsed.optionId}';
       final index = _activeRolePings.indexWhere((p) => p.messageKey == key);
       if (index != -1) continue;
       _activeRolePings.add(
@@ -1915,18 +1880,19 @@ class _GamePageState extends State<GamePage>
         colorSource.startsWith('0x') || colorSource.startsWith('0X')
             ? colorSource.substring(2)
             : colorSource,
-        radix:
-            colorSource.startsWith('0x') || colorSource.startsWith('0X')
+        radix: colorSource.startsWith('0x') || colorSource.startsWith('0X')
             ? 16
             : null,
       ),
       _ => null,
     };
-    final timestamp = int.tryParse(data['ts']?.toString() ?? '') ??
+    final timestamp =
+        int.tryParse(data['ts']?.toString() ?? '') ??
         DateTime.now().millisecondsSinceEpoch;
     final shortMessageRaw = data['msg']?.toString().trim();
-    final shortMessage =
-        (shortMessageRaw?.isNotEmpty ?? false) ? shortMessageRaw! : 'Ping';
+    final shortMessage = (shortMessageRaw?.isNotEmpty ?? false)
+        ? shortMessageRaw!
+        : 'Ping';
     final ttsMessage = data['tts']?.toString().trim();
     return _DecodedPingMessage(
       optionId: data['id']?.toString() ?? 'custom',
