@@ -12,6 +12,7 @@ import 'package:broken_veil_protocol/features/lobby/presentation/widgets/lobby_m
 import 'package:broken_veil_protocol/shared/services/tts_service.dart';
 import 'package:broken_veil_protocol/shared/services/vibration_service.dart';
 import 'package:broken_veil_protocol/shared/services/voice_settings_service.dart';
+import 'package:flutter/gestures.dart' show kTouchSlop;
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1750,11 +1751,18 @@ class _GamePageState extends State<GamePage>
   }
 
   void _onMapPointerMove(PointerMoveEvent event, LatLng point) {
-    if (_pingActivePointer != event.pointer || !_pingWheelVisible) return;
+    if (_pingActivePointer != event.pointer) return;
     final origin = _pingPressOrigin;
     if (origin == null) return;
     final vector = event.localPosition - origin;
     final distance = vector.distance;
+    if (!_pingWheelVisible) {
+      if (distance > kTouchSlop) {
+        _pingPressTimer?.cancel();
+        _resetPingWheel();
+      }
+      return;
+    }
     int? nextIndex;
     if (distance >= 26 && _pingOptions.isNotEmpty) {
       final angle = (atan2(vector.dy, vector.dx) + (2 * pi)) % (2 * pi);

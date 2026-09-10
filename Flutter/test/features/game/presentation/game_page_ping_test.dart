@@ -6,6 +6,7 @@ import 'package:broken_veil_protocol/features/game/application/game_controller.d
 import 'package:broken_veil_protocol/features/game/domain/game_models.dart';
 import 'package:broken_veil_protocol/features/game/presentation/game_page.dart';
 import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
+import 'package:flutter/gestures.dart' show kTouchSlop;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -139,6 +140,73 @@ void main() {
       controller.sentMessages.single.substring('[PING]'.length),
     ) as Map<String, dynamic>;
     expect(payload['id'], 'go_here');
+  });
+
+  testWidgets('Dragging the map cancels the wheel even after the finger stops', (
+    tester,
+  ) async {
+    final controller = await pumpGame(tester);
+    final mapController = tester
+        .widget<FlutterMap>(find.byType(FlutterMap))
+        .mapController!;
+    final initialCenter = mapController.camera.center;
+    final finger = await tester.startGesture(firstPosition, pointer: 1);
+    await tester.pump(const Duration(milliseconds: 100));
+    await finger.moveBy(const Offset(60, 0));
+    await tester.pump(const Duration(milliseconds: 100));
+    await finger.moveBy(const Offset(60, 0));
+    await tester.pump(holdDelay);
+
+    expect(mapController.camera.center, isNot(initialCenter));
+    expect(wheel, findsNothing);
+    await finger.up();
+    await tester.pump();
+    expect(controller.sentMessages, isEmpty);
+
+    final fresh = await tester.startGesture(firstPosition, pointer: 2);
+    await tester.pump(holdDelay);
+    expect(wheel, findsOneWidget);
+    await fresh.cancel();
+    await tester.pump();
+    expect(wheel, findsNothing);
+    expect(controller.sentMessages, isEmpty);
+  });
+
+  testWidgets('Slow drift cancels the wheel even after returning to the origin', (
+    tester,
+  ) async {
+    final controller = await pumpGame(tester);
+    final finger = await tester.startGesture(firstPosition, pointer: 1);
+    for (var step = 0; step < 3; step++) {
+      await tester.pump(const Duration(milliseconds: 100));
+      await finger.moveBy(const Offset(0, kTouchSlop / 2));
+    }
+    await finger.moveTo(firstPosition);
+    await tester.pump(holdDelay);
+
+    expect(wheel, findsNothing);
+    await finger.up();
+    await tester.pump();
+    expect(controller.sentMessages, isEmpty);
+  });
+
+  testWidgets('Minor finger jitter still allows a long press and selection', (
+    tester,
+  ) async {
+    final controller = await pumpGame(tester);
+    final finger = await tester.startGesture(firstPosition, pointer: 1);
+    await tester.pump(const Duration(milliseconds: 200));
+    await finger.moveBy(const Offset(kTouchSlop / 4, kTouchSlop / 4));
+    await tester.pump(const Duration(milliseconds: 299));
+    expect(wheel, findsNothing);
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(wheel, findsOneWidget);
+
+    await finger.moveBy(const Offset(60, 0));
+    await finger.up();
+    await tester.pump();
+    expect(wheel, findsNothing);
+    expect(controller.sentMessages, hasLength(1));
   });
 
   testWidgets('Holding two fingers on the map never opens the wheel', (
