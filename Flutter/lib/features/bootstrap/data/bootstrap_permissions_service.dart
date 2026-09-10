@@ -1,7 +1,13 @@
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:geolocator/geolocator.dart';
 
-enum BootstrapPermissionsStatus { granted, denied, deniedForever, error }
+enum BootstrapPermissionsStatus {
+  granted,
+  denied,
+  deniedForever,
+  locationServiceDisabled,
+  error,
+}
 
 class BootstrapPermissionsResult {
   const BootstrapPermissionsResult(this.status);
@@ -17,6 +23,8 @@ abstract class BootstrapPermissionsService {
   });
 
   Future<void> openAppSettings();
+
+  Future<void> openLocationSettings();
 }
 
 class DeviceBootstrapPermissionsService implements BootstrapPermissionsService {
@@ -33,6 +41,11 @@ class DeviceBootstrapPermissionsService implements BootstrapPermissionsService {
     if (locationReady == _PermissionCheck.error ||
         microphoneReady == _PermissionCheck.error) {
       return const BootstrapPermissionsResult(BootstrapPermissionsStatus.error);
+    }
+    if (locationReady == _PermissionCheck.locationServiceDisabled) {
+      return const BootstrapPermissionsResult(
+        BootstrapPermissionsStatus.locationServiceDisabled,
+      );
     }
     if (locationReady == _PermissionCheck.deniedForever) {
       return const BootstrapPermissionsResult(
@@ -56,20 +69,27 @@ class DeviceBootstrapPermissionsService implements BootstrapPermissionsService {
     await Geolocator.openAppSettings();
   }
 
+  @override
+  Future<void> openLocationSettings() async {
+    await Geolocator.openLocationSettings();
+  }
+
   Future<_PermissionCheck> _ensureLocationPermission({
     required bool forceRequest,
   }) async {
     try {
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        return _PermissionCheck.denied;
-      }
       var permission = await Geolocator.checkPermission();
       final isGranted =
           permission == LocationPermission.always ||
           permission == LocationPermission.whileInUse;
-      if (!isGranted && forceRequest) {
+      if (!isGranted &&
+          permission != LocationPermission.deniedForever &&
+          forceRequest) {
         permission = await Geolocator.requestPermission();
+      }
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        return _PermissionCheck.locationServiceDisabled;
       }
       if (permission == LocationPermission.deniedForever) {
         return _PermissionCheck.deniedForever;
@@ -78,6 +98,8 @@ class DeviceBootstrapPermissionsService implements BootstrapPermissionsService {
               permission == LocationPermission.whileInUse
           ? _PermissionCheck.granted
           : _PermissionCheck.denied;
+    } on LocationServiceDisabledException {
+      return _PermissionCheck.locationServiceDisabled;
     } catch (_) {
       return _PermissionCheck.error;
     }
@@ -116,4 +138,10 @@ class DeviceBootstrapPermissionsService implements BootstrapPermissionsService {
   }
 }
 
-enum _PermissionCheck { granted, denied, deniedForever, error }
+enum _PermissionCheck {
+  granted,
+  denied,
+  deniedForever,
+  locationServiceDisabled,
+  error,
+}
