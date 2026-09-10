@@ -1236,12 +1236,12 @@ class _GamePageState extends State<GamePage>
               left: 78,
               bottom: 126,
               child: _miniActionFab(
-                icon: _controller.isVoiceChatEnabled
-                    ? Icons.volume_up
-                    : Icons.volume_off,
-                tooltip: _controller.isVoiceChatEnabled
-                    ? 'Couper discussion vocale'
-                    : 'Activer discussion vocale',
+                icon: _controller.isMicrophoneEnabled
+                    ? Icons.mic
+                    : Icons.mic_off,
+                tooltip: _controller.isMicrophoneEnabled
+                    ? 'Couper le micro'
+                    : 'Activer le micro',
                 onTap: () {
                   _controller.toggleVoiceChatEnabled();
                   setState(() => _isActionFabOpen = false);
@@ -1315,7 +1315,7 @@ class _GamePageState extends State<GamePage>
   }
 
   Widget _buildPushToTalkFab() {
-    final enabled = _controller.isVoiceChatEnabled;
+    final enabled = _controller.isMicrophoneEnabled;
     return Listener(
       onPointerDown: (_) {
         if (!enabled) return;
@@ -1331,7 +1331,7 @@ class _GamePageState extends State<GamePage>
         heroTag: 'game-ptt-fab',
         tooltip: enabled
             ? 'Maintenir pour parler'
-            : 'Activez le vocal pour parler',
+            : 'Activez le micro pour parler',
         onPressed: () {},
         backgroundColor: enabled ? Colors.orangeAccent : Colors.grey,
         foregroundColor: Colors.black87,
@@ -2176,21 +2176,23 @@ class _GamePageState extends State<GamePage>
                   child: Column(
                     children: [
                       SwitchListTile(
-                        value: _controller.isVoiceChatEnabled,
+                        value: _controller.isMicrophoneEnabled,
                         secondary: Icon(
-                          _controller.isVoiceChatEnabled
+                          _controller.isMicrophoneEnabled
                               ? Icons.mic
                               : Icons.mic_off,
                         ),
                         title: const Text('Microphone'),
                         subtitle: Text(
-                          _controller.isVoiceChatEnabled
+                          _controller.isMicrophoneEnabled
                               ? 'Micro actif — appuyer pour couper'
                               : 'Micro coupé — appuyer pour activer',
                         ),
-                        onChanged: (_) {
-                          _controller.toggleVoiceChatEnabled();
-                          setModalState(() {});
+                        onChanged: (_) async {
+                          await _controller.toggleVoiceChatEnabled();
+                          if (context.mounted) {
+                            setModalState(() {});
+                          }
                         },
                       ),
                       SwitchListTile(

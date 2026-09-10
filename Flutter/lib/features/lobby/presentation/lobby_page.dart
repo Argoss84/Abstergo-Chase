@@ -232,14 +232,14 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
             ),
             actions: [
               IconButton(
-                tooltip: _controller.isVoiceChatEnabled
-                    ? 'Désactiver vocal'
-                    : 'Activer vocal',
+                tooltip: _controller.isMicrophoneEnabled
+                    ? 'Couper le micro'
+                    : 'Activer le micro',
                 onPressed: () {
                   _controller.toggleVoiceChat();
                 },
                 icon: Icon(
-                  _controller.isVoiceChatEnabled ? Icons.mic : Icons.mic_off,
+                  _controller.isMicrophoneEnabled ? Icons.mic : Icons.mic_off,
                 ),
               ),
               TextButton(

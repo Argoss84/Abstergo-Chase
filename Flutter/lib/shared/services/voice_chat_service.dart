@@ -25,6 +25,7 @@ class VoiceChatService {
   MediaStream? _localStream;
   Future<MediaStream>? _localStreamInitFuture;
   bool _enabled = false;
+  bool get isEnabled => _enabled;
   bool _transmissionActive = true;
   DateTime? _lastLocalStreamFailureAt;
   List<Map<String, dynamic>> _iceServers = <Map<String, dynamic>>[
@@ -47,8 +48,8 @@ class VoiceChatService {
         ..addAll(peerIds.where((id) => id.isNotEmpty && id != selfId));
       _localStream = await _ensureLocalStream();
       _enabled = true;
+      await _setLocalAudioEnabled(_transmissionActive);
       await _syncPeers();
-      await _setLocalAudioEnabled(true);
     } catch (_) {
       // Never crash gameplay/lobby because of voice stack failures.
       _enabled = false;
@@ -102,7 +103,7 @@ class VoiceChatService {
 
   Future<void> setTransmissionActive(bool active) async {
     _transmissionActive = active;
-    await _setLocalAudioEnabled(active);
+    await _setLocalAudioEnabled(_enabled && active);
   }
 
   Future<void> dispose() async {

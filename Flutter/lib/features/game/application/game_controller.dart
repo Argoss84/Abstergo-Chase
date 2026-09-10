@@ -81,6 +81,8 @@ class GameController extends ChangeNotifier {
   bool isHost = false;
   bool gameStarted = false;
   bool isVoiceChatEnabled = true;
+  bool _isMicrophoneMuted = false;
+  bool get isMicrophoneEnabled => isVoiceChatEnabled && !_isMicrophoneMuted;
   bool canListenOtherRoles = false;
   VoiceTransmissionMode voiceMode = VoiceTransmissionMode.voiceActivation;
   double voiceActivationThreshold = 0.55;
@@ -1704,11 +1706,21 @@ class GameController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    isVoiceChatEnabled = !isVoiceChatEnabled;
     if (!isVoiceChatEnabled) {
+      isVoiceChatEnabled = true;
+      _isMicrophoneMuted = false;
       _pushToTalkPressed = false;
+    } else {
+      _isMicrophoneMuted = !_isMicrophoneMuted;
+      if (_isMicrophoneMuted) {
+        _pushToTalkPressed = false;
+      }
     }
-    await _syncVoiceState();
+    if (isMicrophoneEnabled && !_voiceChatService.isEnabled) {
+      await _syncVoiceState();
+    } else {
+      await _applyTransmissionGate();
+    }
     notifyListeners();
   }
 
@@ -1751,8 +1763,8 @@ class GameController extends ChangeNotifier {
           .where((p) => isPlayerAudibleForCurrentRole(p))
           .map((p) => p.id)
           .toList();
-      await _voiceChatService.enable(selfId: me, peerIds: peers);
       await _applyTransmissionGate();
+      await _voiceChatService.enable(selfId: me, peerIds: peers);
     } catch (_) {
       isVoiceChatEnabled = false;
       await _voiceChatService.disable();
@@ -1770,11 +1782,12 @@ class GameController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    await _applyTransmissionGate();
+    await _syncVoiceState();
     notifyListeners();
   }
 
   Future<void> setPushToTalkPressed(bool pressed) async {
+    if (pressed && !isMicrophoneEnabled) return;
     if (_pushToTalkPressed == pressed) return;
     _pushToTalkPressed = pressed;
     await _applyTransmissionGate();
@@ -1782,7 +1795,7 @@ class GameController extends ChangeNotifier {
   }
 
   Future<void> _applyTransmissionGate() async {
-    if (!isVoiceChatEnabled) {
+    if (!isMicrophoneEnabled) {
       await _voiceChatService.setTransmissionActive(false);
       return;
     }
