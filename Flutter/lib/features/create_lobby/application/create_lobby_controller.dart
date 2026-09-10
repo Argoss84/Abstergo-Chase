@@ -3,6 +3,7 @@ import 'package:broken_veil_protocol/features/create_lobby/data/street_contour_s
 import 'package:broken_veil_protocol/features/create_lobby/data/location_service.dart';
 import 'package:broken_veil_protocol/features/create_lobby/data/objective_generation_service.dart';
 import 'package:broken_veil_protocol/features/create_lobby/data/street_fetch_service.dart';
+import 'package:broken_veil_protocol/features/create_lobby/data/street_snap_service.dart';
 import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_form_data.dart';
 import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
@@ -15,19 +16,22 @@ class CreateLobbyController extends ChangeNotifier {
     ObjectiveGenerationService? objectiveGenerationService,
     StreetFetchService? streetFetchService,
     StreetContourService? streetContourService,
+    StreetSnapService? streetSnapService,
   }) : _service = service ?? CreateLobbyService.instance,
        _locationService = locationService ?? const LocationService(),
        _objectiveGenerationService =
            objectiveGenerationService ?? ObjectiveGenerationService(),
        _streetFetchService = streetFetchService ?? const StreetFetchService(),
        _streetContourService =
-           streetContourService ?? const StreetContourService();
+           streetContourService ?? const StreetContourService(),
+       _streetSnapService = streetSnapService ?? const StreetSnapService();
 
   final CreateLobbyService _service;
   final LocationService _locationService;
   final ObjectiveGenerationService _objectiveGenerationService;
   final StreetFetchService _streetFetchService;
   final StreetContourService _streetContourService;
+  final StreetSnapService _streetSnapService;
 
   CreateLobbyFormData form = CreateLobbyFormData.initial();
   String displayName = '';
@@ -147,6 +151,13 @@ class CreateLobbyController extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    if (!streets.any((street) => street.length >= 2)) {
+      _resetMapConfiguration();
+      lastError =
+          'Les rues doivent être chargées avant de placer les points.';
+      notifyListeners();
+      return;
+    }
     _resetMapConfiguration();
     isManualPlacement = true;
     lastError = null;
@@ -154,12 +165,21 @@ class CreateLobbyController extends ChangeNotifier {
   }
 
   void _placeManualPoint(GeoPoint point) {
+    final snappedPoint = _streetSnapService.snapToNearestStreet(
+      point: point,
+      streets: streets,
+    );
+    if (snappedPoint == null) {
+      lastError = 'Aucune rue accessible disponible.';
+      notifyListeners();
+      return;
+    }
     if (agentStartZone == null) {
-      agentStartZone = point;
+      agentStartZone = snappedPoint;
     } else if (rogueStartZone == null) {
-      rogueStartZone = point;
+      rogueStartZone = snappedPoint;
     } else if (objectives.length < form.objectiveNumber) {
-      objectives = <GeoPoint>[...objectives, point];
+      objectives = <GeoPoint>[...objectives, snappedPoint];
     }
     objectivesGenerated = hasCompleteMapConfiguration;
     lastError = null;

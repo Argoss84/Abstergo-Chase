@@ -37,6 +37,12 @@ void main() {
         latitude: 45.75,
         longitude: 4.85,
       );
+      controller.streets = const <List<GeoPoint>>[
+        <GeoPoint>[
+          GeoPoint(latitude: 45.75, longitude: 4.84),
+          GeoPoint(latitude: 45.75, longitude: 4.86),
+        ],
+      ];
       controller.updateForm(
         controller.form.copyWith(objectiveNumber: 2),
       );
@@ -57,15 +63,26 @@ void main() {
       controller.handleMapTap(rogueStart);
       controller.handleMapTap(objectiveOne);
 
-      expect(controller.agentStartZone, same(agentStart));
-      expect(controller.rogueStartZone, same(rogueStart));
-      expect(controller.objectives, <GeoPoint>[objectiveOne]);
+      expect(controller.agentStartZone?.latitude, 45.75);
+      expect(controller.agentStartZone?.longitude, closeTo(4.851, 0.0000001));
+      expect(controller.rogueStartZone?.latitude, 45.75);
+      expect(controller.rogueStartZone?.longitude, closeTo(4.852, 0.0000001));
+      expect(controller.objectives.single.latitude, 45.75);
+      expect(
+        controller.objectives.single.longitude,
+        closeTo(4.853, 0.0000001),
+      );
       expect(controller.objectivesGenerated, isFalse);
       expect(controller.canCreateLobby, isFalse);
 
       controller.handleMapTap(objectiveTwo);
 
-      expect(controller.objectives, <GeoPoint>[objectiveOne, objectiveTwo]);
+      expect(controller.objectives, hasLength(2));
+      expect(controller.objectives.last.latitude, 45.75);
+      expect(
+        controller.objectives.last.longitude,
+        closeTo(4.854, 0.0000001),
+      );
       expect(controller.objectivesGenerated, isTrue);
       expect(controller.canCreateLobby, isTrue);
       expect(
@@ -92,6 +109,18 @@ void main() {
       );
 
       expect(controller.objectives, hasLength(2));
+    });
+
+    test('requires accessible streets before starting manual placement', () {
+      controller.streets = <List<GeoPoint>>[];
+
+      controller.beginManualPlacement();
+
+      expect(controller.isManualPlacement, isFalse);
+      expect(
+        controller.lastError,
+        'Les rues doivent être chargées avant de placer les points.',
+      );
     });
 
     test('invalidates placed points when the configured count changes', () {
@@ -127,14 +156,25 @@ void main() {
 
       await controller.createLobby();
 
-      expect(service.gameConfig?['start_zone_latitude'], '45.751');
-      expect(service.gameConfig?['start_zone_longitude'], '4.851');
-      expect(service.gameConfig?['start_zone_rogue_latitude'], '45.752');
-      expect(service.gameConfig?['start_zone_rogue_longitude'], '4.852');
-      expect(service.gameConfig?['objective_points'], <List<double>>[
-        <double>[45.753, 4.853],
-        <double>[45.754, 4.854],
-      ]);
+      expect(service.gameConfig?['start_zone_latitude'], '45.75');
+      expect(
+        double.parse(service.gameConfig?['start_zone_longitude'] as String),
+        closeTo(4.851, 0.0000001),
+      );
+      expect(service.gameConfig?['start_zone_rogue_latitude'], '45.75');
+      expect(
+        double.parse(
+          service.gameConfig?['start_zone_rogue_longitude'] as String,
+        ),
+        closeTo(4.852, 0.0000001),
+      );
+      final objectives =
+          service.gameConfig?['objective_points'] as List<List<double>>;
+      expect(objectives, hasLength(2));
+      expect(objectives[0][0], 45.75);
+      expect(objectives[0][1], closeTo(4.853, 0.0000001));
+      expect(objectives[1][0], 45.75);
+      expect(objectives[1][1], closeTo(4.854, 0.0000001));
     });
   });
 }
