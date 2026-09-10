@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:broken_veil_protocol/features/bootstrap/data/bootstrap_permissions_service.dart';
 import 'package:broken_veil_protocol/features/bootstrap/presentation/bootstrap_page.dart';
 import 'package:flutter/material.dart';
@@ -10,6 +12,8 @@ class _FakeBootstrapPermissionsService implements BootstrapPermissionsService {
   final List<BootstrapPermissionsResult> _results;
   int calls = 0;
   int openSettingsCalls = 0;
+  int openLocationSettingsCalls = 0;
+  Completer<BootstrapPermissionsResult>? pendingResult;
   final List<bool> forceRequestValues = <bool>[];
 
   @override
@@ -19,6 +23,9 @@ class _FakeBootstrapPermissionsService implements BootstrapPermissionsService {
     forceRequestValues.add(forceRequest);
     final index = calls;
     calls += 1;
+    if (pendingResult != null) {
+      return pendingResult!.future;
+    }
     if (index < _results.length) {
       return _results[index];
     }
@@ -28,6 +35,11 @@ class _FakeBootstrapPermissionsService implements BootstrapPermissionsService {
   @override
   Future<void> openAppSettings() async {
     openSettingsCalls += 1;
+  }
+
+  @override
+  Future<void> openLocationSettings() async {
+    openLocationSettingsCalls += 1;
   }
 }
 
@@ -214,5 +226,171 @@ void main() {
           .onTap,
       isNull,
     );
+  });
+
+  testWidgets('Shows a distinct GPS warning and opens location settings', (
+    tester,
+  ) async {
+    final permissionsService = _FakeBootstrapPermissionsService(
+      <BootstrapPermissionsResult>[
+        const BootstrapPermissionsResult(
+          BootstrapPermissionsStatus.locationServiceDisabled,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpAndSettle();
+
+    expect(find.text('GPS désactivé'), findsOneWidget);
+    expect(find.text('Autorisations requises'), findsNothing);
+    expect(
+      find.text(
+        'Activez le GPS dans les réglages de localisation du téléphone pour créer ou rejoindre une partie.',
+      ),
+      findsOneWidget,
+    );
+    for (final title in ['Créer une partie', 'Rejoindre une partie']) {
+      expect(
+        tester.widget<ListTile>(find.widgetWithText(ListTile, title)).onTap,
+        isNull,
+      );
+    }
+
+    await tester.tap(find.text('Réglages'));
+    await tester.pumpAndSettle();
+
+    expect(permissionsService.openLocationSettingsCalls, 1);
+    expect(permissionsService.openSettingsCalls, 0);
+  });
+
+  for (final openSettings in [false, true]) {
+    testWidgets(
+      'Clears GPS warning on resume after enabling GPS '
+      '${openSettings ? 'via settings' : 'externally'}',
+      (tester) async {
+        final permissionsService = _FakeBootstrapPermissionsService(
+          <BootstrapPermissionsResult>[
+            const BootstrapPermissionsResult(
+              BootstrapPermissionsStatus.locationServiceDisabled,
+            ),
+            const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted),
+          ],
+        );
+
+        await tester.pumpWidget(_app(permissionsService));
+        await tester.pumpAndSettle();
+
+        expect(find.text('GPS désactivé'), findsOneWidget);
+        if (openSettings) {
+          await tester.tap(find.text('Réglages'));
+          await tester.pumpAndSettle();
+        }
+
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        await tester.pumpAndSettle();
+
+        expect(permissionsService.calls, 2);
+        expect(permissionsService.forceRequestValues, <bool>[true, true]);
+        expect(find.text('GPS désactivé'), findsNothing);
+        expect(find.text('Autorisations requises'), findsNothing);
+        for (final title in ['Créer une partie', 'Rejoindre une partie']) {
+          expect(
+            tester.widget<ListTile>(find.widgetWithText(ListTile, title)).onTap,
+            isNotNull,
+          );
+        }
+      },
+    );
+  }
+
+  testWidgets('Keeps GPS warning when GPS is still disabled on resume', (
+    tester,
+  ) async {
+    final permissionsService = _FakeBootstrapPermissionsService(
+      <BootstrapPermissionsResult>[
+        const BootstrapPermissionsResult(
+          BootstrapPermissionsStatus.locationServiceDisabled,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpAndSettle();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    expect(permissionsService.calls, 2);
+    expect(find.text('GPS désactivé'), findsOneWidget);
+    for (final title in ['Créer une partie', 'Rejoindre une partie']) {
+      expect(
+        tester.widget<ListTile>(find.widgetWithText(ListTile, title)).onTap,
+        isNull,
+      );
+    }
+  });
+
+  testWidgets('Shows missing permissions after GPS is enabled if still denied', (
+    tester,
+  ) async {
+    final permissionsService = _FakeBootstrapPermissionsService(
+      <BootstrapPermissionsResult>[
+        const BootstrapPermissionsResult(
+          BootstrapPermissionsStatus.locationServiceDisabled,
+        ),
+        const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
+      ],
+    );
+
+    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpAndSettle();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    expect(find.text('GPS désactivé'), findsNothing);
+    expect(find.text('Autorisations requises'), findsOneWidget);
+    for (final title in ['Créer une partie', 'Rejoindre une partie']) {
+      expect(
+        tester.widget<ListTile>(find.widgetWithText(ListTile, title)).onTap,
+        isNull,
+      );
+    }
+    await tester.tap(find.text('Réglages'));
+    await tester.pumpAndSettle();
+
+    expect(permissionsService.openSettingsCalls, 1);
+    expect(permissionsService.openLocationSettingsCalls, 0);
+  });
+
+  testWidgets('Does not overlap GPS checks when a permission prompt resumes', (
+    tester,
+  ) async {
+    final permissionsService = _FakeBootstrapPermissionsService(
+      <BootstrapPermissionsResult>[
+        const BootstrapPermissionsResult(
+          BootstrapPermissionsStatus.locationServiceDisabled,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpAndSettle();
+    permissionsService.pendingResult = Completer<BootstrapPermissionsResult>();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+
+    expect(permissionsService.calls, 2);
+    permissionsService.pendingResult!.complete(
+      const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('GPS désactivé'), findsNothing);
   });
 }

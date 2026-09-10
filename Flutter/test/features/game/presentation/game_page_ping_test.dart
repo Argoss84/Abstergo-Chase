@@ -85,7 +85,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: GamePage(
-          controller: controller,
+          controllerFactory: () => controller,
           bootstrap: const GameBootstrapData(
             lobby: LobbyBootstrapData(
               code: 'ABC123',

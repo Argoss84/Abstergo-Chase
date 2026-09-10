@@ -799,10 +799,12 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                         );
                       }
                       return ListView.builder(
+                        reverse: true,
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         itemCount: _controller.chatMessages.length,
                         itemBuilder: (context, index) {
-                          final m = _controller.chatMessages[index];
+                          final m = _controller.chatMessages[
+                              _controller.chatMessages.length - 1 - index];
                           final isMe = m.playerId == _controller.playerId;
                           return Align(
                             alignment: isMe

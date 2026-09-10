@@ -43,10 +43,13 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    final locationServiceDisabled =
+        _permissionsStatus == BootstrapPermissionsStatus.locationServiceDisabled;
     if (state == AppLifecycleState.resumed &&
-        _shouldRefreshPermissionsOnResume) {
+        !_isCheckingPermissions &&
+        (_shouldRefreshPermissionsOnResume || locationServiceDisabled)) {
       _shouldRefreshPermissionsOnResume = false;
-      _checkPermissions();
+      _checkPermissions(forceRequest: locationServiceDisabled);
     }
   }
 
@@ -73,7 +76,12 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage>
 
   Future<void> _openSettings() async {
     _shouldRefreshPermissionsOnResume = true;
-    await widget.permissionsService.openAppSettings();
+    if (_permissionsStatus ==
+        BootstrapPermissionsStatus.locationServiceDisabled) {
+      await widget.permissionsService.openLocationSettings();
+    } else {
+      await widget.permissionsService.openAppSettings();
+    }
   }
 
   @override
@@ -81,9 +89,11 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage>
     final canOpenLobbyFlows =
         !_isCheckingPermissions &&
         _permissionsStatus == BootstrapPermissionsStatus.granted;
-    final missingPermissions =
+    final hasBlockingIssue =
         !_isCheckingPermissions &&
         _permissionsStatus != BootstrapPermissionsStatus.granted;
+    final locationServiceDisabled =
+        _permissionsStatus == BootstrapPermissionsStatus.locationServiceDisabled;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Broken Veil Protocol'),
@@ -116,21 +126,26 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage>
                   padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: LinearProgressIndicator(minHeight: 2),
                 )
-              else if (missingPermissions)
+              else if (hasBlockingIssue)
                 Semantics(
-                  label:
-                      'Créer et rejoindre une partie sont désactivés tant que la localisation et le micro ne sont pas autorisés.',
+                  label: locationServiceDisabled
+                      ? 'Créer et rejoindre une partie sont désactivés tant que le GPS du téléphone est désactivé.'
+                      : 'Créer et rejoindre une partie sont désactivés tant que la localisation et le micro ne sont pas autorisés.',
                   child: ListTile(
                     leading: const Icon(Icons.warning_amber_rounded),
                     title: Text(
-                      _permissionsStatus == BootstrapPermissionsStatus.error
-                          ? 'Erreur de vérification'
-                          : 'Autorisations requises',
+                      locationServiceDisabled
+                          ? 'GPS désactivé'
+                          : _permissionsStatus == BootstrapPermissionsStatus.error
+                              ? 'Erreur de vérification'
+                              : 'Autorisations requises',
                     ),
                     subtitle: Text(
-                      _permissionsStatus == BootstrapPermissionsStatus.error
-                          ? 'Impossible de vérifier les autorisations. Ouvrez les réglages de l’application.'
-                          : 'Activez la localisation et le micro pour créer ou rejoindre une partie.',
+                      locationServiceDisabled
+                          ? 'Activez le GPS dans les réglages de localisation du téléphone pour créer ou rejoindre une partie.'
+                          : _permissionsStatus == BootstrapPermissionsStatus.error
+                              ? 'Impossible de vérifier les autorisations. Ouvrez les réglages de l’application.'
+                              : 'Autorisez l’accès à la localisation et au micro pour créer ou rejoindre une partie.',
                     ),
                     trailing: TextButton(
                       onPressed: _openSettings,

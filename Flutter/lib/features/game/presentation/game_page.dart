@@ -76,12 +76,16 @@ const double _kDefaultGameMapZoom = 16.5;
 const double _kCompassCenterToleranceLatLng = 0.000001;
 
 class GamePage extends StatefulWidget {
-  const GamePage({super.key, required this.bootstrap, this.controller});
+  const GamePage({
+    super.key,
+    required this.bootstrap,
+    this.controllerFactory,
+  });
 
   static const String routePath = '/game';
   static const String routeName = 'game';
   final GameBootstrapData bootstrap;
-  final GameController? controller;
+  final GameController Function()? controllerFactory;
 
   @override
   State<GamePage> createState() => _GamePageState();
@@ -170,7 +174,7 @@ class _GamePageState extends State<GamePage>
       upperBound: 1,
     )..repeat(reverse: true);
     _mapController = MapController();
-    _controller = (widget.controller ?? GameController())
+    _controller = (widget.controllerFactory?.call() ?? GameController())
       ..initialize(widget.bootstrap);
     _compassSub = FlutterCompass.events?.listen((event) {
       // heading is degrees, clockwise from north
@@ -2006,8 +2010,9 @@ class _GamePageState extends State<GamePage>
                     animation: _controller,
                     builder: (context, _) {
                       return ListView(
+                        reverse: true,
                         padding: const EdgeInsets.all(12),
-                        children: _controller.roleChat.map((m) {
+                        children: _controller.roleChat.reversed.map((m) {
                           final isMe = m.playerId == _controller.playerId;
                           return Align(
                             alignment: isMe
