@@ -171,7 +171,7 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
                           objectives: _controller.objectives,
                           agentStartZone: _controller.agentStartZone,
                           rogueStartZone: _controller.rogueStartZone,
-                          onTap: _controller.setSelectedPosition,
+                          onTap: _controller.handleMapTap,
                         )
                       else
                         SizedBox(
@@ -214,12 +214,38 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
                       ],
                       const SizedBox(height: 8),
                       if (_controller.selectedPosition != null)
-                        FilledButton.tonal(
-                          onPressed: _controller.generateObjectives,
-                          child: const Text('Générer les objectifs'),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: FilledButton.tonal(
+                                onPressed: _controller.generateObjectives,
+                                child: const Text('Générer les objectifs'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: _controller.beginManualPlacement,
+                                child: Text(
+                                  _controller.isManualPlacement
+                                      ? 'Recommencer'
+                                      : 'Placer à la main',
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       const SizedBox(height: 8),
-                      if (_controller.objectives.isNotEmpty)
+                      if (_controller.manualPlacementInstruction != null) ...[
+                        Text(
+                          _controller.manualPlacementInstruction!,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      if (_controller.agentStartZone != null ||
+                          _controller.rogueStartZone != null ||
+                          _controller.objectives.isNotEmpty)
                         Text(
                           'Objectifs: ${_controller.objectives.length} | '
                           'Contour: ${_controller.outerStreetContour.length >= 3 ? 'Rues' : 'Cercle'} | '
@@ -228,7 +254,7 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
                           style: const TextStyle(fontSize: 13),
                         ),
                       const SizedBox(height: 8),
-                      if (_controller.objectives.isNotEmpty)
+                      if (_controller.hasCompleteMapConfiguration)
                         FilledButton(
                           onPressed: _controller.canCreateLobby
                               ? () async {

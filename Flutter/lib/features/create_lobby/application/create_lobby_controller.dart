@@ -36,6 +36,7 @@ class CreateLobbyController extends ChangeNotifier {
   String socketPath = CreateLobbyDefaults.socketPath;
   bool isSubmitting = false;
   bool objectivesGenerated = false;
+  bool isManualPlacement = false;
   bool isLoadingGps = false;
   bool isLoadingStreets = false;
   GeoPoint? currentPosition;
@@ -51,7 +52,31 @@ class CreateLobbyController extends ChangeNotifier {
   CreatedLobbySession? createdLobbySession;
 
   bool get canCreateLobby =>
-      !isSubmitting && displayName.trim().isNotEmpty && objectivesGenerated;
+      !isSubmitting &&
+      displayName.trim().isNotEmpty &&
+      objectivesGenerated &&
+      hasCompleteMapConfiguration;
+
+  bool get hasCompleteMapConfiguration =>
+      agentStartZone != null &&
+      rogueStartZone != null &&
+      objectives.length == form.objectiveNumber;
+
+  String? get manualPlacementInstruction {
+    if (!isManualPlacement) {
+      return null;
+    }
+    if (agentStartZone == null) {
+      return 'Placez la zone de départ des agents.';
+    }
+    if (rogueStartZone == null) {
+      return 'Placez la zone de départ des rogues.';
+    }
+    if (objectives.length < form.objectiveNumber) {
+      return 'Placez l’objectif ${objectives.length + 1}/${form.objectiveNumber}.';
+    }
+    return 'Configuration manuelle complète.';
+  }
 
   void setDisplayName(String value) {
     displayName = value;
@@ -69,7 +94,11 @@ class CreateLobbyController extends ChangeNotifier {
   }
 
   void updateForm(CreateLobbyFormData value) {
+    final objectiveCountChanged = value.objectiveNumber != form.objectiveNumber;
     form = value;
+    if (objectiveCountChanged) {
+      _resetMapConfiguration();
+    }
     notifyListeners();
   }
 
@@ -99,12 +128,50 @@ class CreateLobbyController extends ChangeNotifier {
       mapCenterLatitude: point.latitude.toString(),
       mapCenterLongitude: point.longitude.toString(),
     );
+    _resetMapConfiguration();
+    notifyListeners();
+    fetchStreets();
+  }
+
+  void handleMapTap(GeoPoint point) {
+    if (isManualPlacement) {
+      _placeManualPoint(point);
+      return;
+    }
+    setSelectedPosition(point);
+  }
+
+  void beginManualPlacement() {
+    if (selectedPosition == null) {
+      lastError = 'Sélectionnez un centre de carte.';
+      notifyListeners();
+      return;
+    }
+    _resetMapConfiguration();
+    isManualPlacement = true;
+    lastError = null;
+    notifyListeners();
+  }
+
+  void _placeManualPoint(GeoPoint point) {
+    if (agentStartZone == null) {
+      agentStartZone = point;
+    } else if (rogueStartZone == null) {
+      rogueStartZone = point;
+    } else if (objectives.length < form.objectiveNumber) {
+      objectives = <GeoPoint>[...objectives, point];
+    }
+    objectivesGenerated = hasCompleteMapConfiguration;
+    lastError = null;
+    notifyListeners();
+  }
+
+  void _resetMapConfiguration() {
     objectivesGenerated = false;
+    isManualPlacement = false;
     objectives = <GeoPoint>[];
     agentStartZone = null;
     rogueStartZone = null;
-    notifyListeners();
-    fetchStreets();
   }
 
   void generateObjectives() {
@@ -131,7 +198,8 @@ class CreateLobbyController extends ChangeNotifier {
       objectives = result.objectives;
       agentStartZone = result.agentStartZone;
       rogueStartZone = result.rogueStartZone;
-      objectivesGenerated = true;
+      objectivesGenerated = hasCompleteMapConfiguration;
+      isManualPlacement = false;
       lastError = null;
     } catch (error) {
       objectivesGenerated = false;
@@ -187,8 +255,9 @@ class CreateLobbyController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    if (!objectivesGenerated) {
-      lastError = 'Générez les objectifs avant de créer la partie.';
+    if (!hasCompleteMapConfiguration) {
+      lastError =
+          'Générez ou placez tous les points avant de créer la partie.';
       notifyListeners();
       return;
     }
