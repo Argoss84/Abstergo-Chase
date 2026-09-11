@@ -32,7 +32,7 @@ void main() {
     expect(_distance(zone.center, objective), greaterThan(1));
   });
 
-  test('uses a capture-centered fallback when no street loop exists', () {
+  test('keeps the capture point hidden inside the fallback zone', () {
     final zone = calculator.calculate(
       objective: objective,
       streets: <List<GeoPoint>>[
@@ -41,8 +41,9 @@ void main() {
       fallbackRadiusMeters: 40,
     );
 
-    expect(zone.center, objective);
     expect(zone.radiusMeters, 40);
+    expect(_distance(zone.center, objective), greaterThan(1));
+    expect(_distance(zone.center, objective), lessThan(zone.radiusMeters));
   });
 
   test('prefers a local block in a street grid', () {

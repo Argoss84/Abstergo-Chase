@@ -54,9 +54,9 @@ class ObjectiveHintZoneCalculator {
     }
     if (bestZone != null) return cachedZones[cacheKey] = bestZone;
 
-    return cachedZones[cacheKey] = ObjectiveHintZone(
-      center: objective,
-      radiusMeters: fallbackRadiusMeters,
+    return cachedZones[cacheKey] = _fallbackZone(
+      objective,
+      fallbackRadiusMeters,
     );
   }
 
@@ -97,6 +97,31 @@ class ObjectiveHintZoneCalculator {
       center: _fromMeters(centerMeters, objective),
       radiusMeters: radius + 5,
     );
+  }
+
+  ObjectiveHintZone _fallbackZone(GeoPoint objective, double radiusMeters) {
+    if (radiusMeters <= 1) {
+      return ObjectiveHintZone(center: objective, radiusMeters: radiusMeters);
+    }
+    final seed = _stableHash('${objective.latitude},${objective.longitude}');
+    final angle = (seed % 360) * pi / 180;
+    final distance = radiusMeters * (0.35 + (seed % 25) / 100);
+    return ObjectiveHintZone(
+      center: _fromMeters(
+        _XY(distance * cos(angle), distance * sin(angle)),
+        objective,
+      ),
+      radiusMeters: radiusMeters,
+    );
+  }
+
+  int _stableHash(String value) {
+    var hash = 2166136261;
+    for (final code in value.codeUnits) {
+      hash ^= code;
+      hash = (hash * 16777619) & 0x7fffffff;
+    }
+    return hash;
   }
 
   _XY _toMeters(GeoPoint point, GeoPoint origin) {
