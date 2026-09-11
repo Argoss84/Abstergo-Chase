@@ -302,7 +302,6 @@ class CreateLobbyController extends ChangeNotifier {
           'duration': safeDuration,
           'victory_condition_nb_objectivs': form.victoryConditionObjectives,
           'hack_duration_ms': form.hackDurationMs,
-          'objectiv_zone_radius': form.objectiveZoneRadius,
           'start_zone_radius': form.startZoneRadius,
           'rogue_range': form.rogueRange,
           'agent_range': form.agentRange,

@@ -21,4 +21,16 @@ void main() {
 
     expect(config.agentRange, CreateLobbyDefaults.agentRange);
   });
+
+  test('uses the legacy objective radius only as a consistent fallback', () {
+    final config = LobbyGameConfig.fromMap(<String, dynamic>{
+      'map_center_latitude': 48.8566,
+      'map_center_longitude': 2.3522,
+    });
+
+    expect(
+      config.objectiveZoneRadius,
+      CreateLobbyDefaults.objectiveZoneRadius,
+    );
+  });
 }

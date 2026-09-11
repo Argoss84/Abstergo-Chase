@@ -1,4 +1,6 @@
+import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
+import 'package:broken_veil_protocol/features/game/domain/objective_hint_zone.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -12,7 +14,6 @@ class CreateLobbyMap extends StatelessWidget {
     required this.currentPosition,
     required this.selectedPosition,
     required this.mapRadiusMeters,
-    required this.objectiveZoneRadiusMeters,
     required this.startZoneRadiusMeters,
     required this.streets,
     required this.outerStreetContour,
@@ -25,7 +26,6 @@ class CreateLobbyMap extends StatelessWidget {
   final GeoPoint currentPosition;
   final GeoPoint? selectedPosition;
   final int mapRadiusMeters;
-  final int objectiveZoneRadiusMeters;
   final int startZoneRadiusMeters;
   final List<List<GeoPoint>> streets;
   final List<GeoPoint> outerStreetContour;
@@ -36,6 +36,17 @@ class CreateLobbyMap extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const zoneCalculator = ObjectiveHintZoneCalculator();
+    final objectiveZones = objectives
+        .map(
+          (point) => zoneCalculator.calculate(
+            objective: point,
+            streets: streets,
+            fallbackRadiusMeters:
+                CreateLobbyDefaults.objectiveZoneRadius.toDouble(),
+          ),
+        )
+        .toList(growable: false);
     return SizedBox(
       height: 300,
       child: ClipRRect(
@@ -147,10 +158,13 @@ class CreateLobbyMap extends StatelessWidget {
                       borderColor: Colors.blue,
                       useRadiusInMeter: true,
                     ),
-                ...objectives.map(
-                  (point) => CircleMarker(
-                    point: LatLng(point.latitude, point.longitude),
-                    radius: objectiveZoneRadiusMeters.toDouble(),
+                ...objectiveZones.map(
+                  (zone) => CircleMarker(
+                    point: LatLng(
+                      zone.center.latitude,
+                      zone.center.longitude,
+                    ),
+                    radius: zone.radiusMeters,
                     color: Colors.red.withValues(alpha: 0.08),
                     borderStrokeWidth: 1,
                     borderColor: Colors.red,

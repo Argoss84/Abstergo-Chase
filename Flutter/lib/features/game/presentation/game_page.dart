@@ -324,47 +324,19 @@ class _GamePageState extends State<GamePage>
           startCountdownSeconds: startCountdownSeconds,
           winnerType: winnerType,
         );
-        final objectiveDisplayPoints = isRogue
-            ? _controller.objectives
-                  .where((o) => !o.captured)
-                  .map((o) => o.point)
-                  .toList(growable: false)
-            : _controller.objectives
-                  .where((o) => !o.captured)
-                  .map(
-                    (o) => _shiftedZoneCenter(
-                      objective: o.point,
-                      objectiveId: o.id,
-                      zoneRadiusMeters: objectiveZoneRadius.toDouble(),
-                    ),
-                  )
-                  .toList(growable: false);
-        final capturedObjectiveDisplayPoints = isRogue
-            ? _controller.objectives
-                  .where((o) => o.captured)
-                  .map((o) => o.point)
-                  .toList(growable: false)
-            : _controller.objectives
-                  .where((o) => o.captured)
-                  .map(
-                    (o) => _shiftedZoneCenter(
-                      objective: o.point,
-                      objectiveId: o.id,
-                      zoneRadiusMeters: objectiveZoneRadius.toDouble(),
-                    ),
-                  )
-                  .toList(growable: false);
+        final objectiveDisplayPoints = _controller.objectives
+            .where((o) => !o.captured)
+            .map((o) => o.point)
+            .toList(growable: false);
+        final capturedObjectiveDisplayPoints = _controller.objectives
+            .where((o) => o.captured)
+            .map((o) => o.point)
+            .toList(growable: false);
         final capturingDisplayPoints = !isRogue
             ? _controller.objectives
                   .where((o) => !o.captured)
                   .where((o) => o.state.toUpperCase() == 'CAPTURING')
-                  .map(
-                    (o) => _shiftedZoneCenter(
-                      objective: o.point,
-                      objectiveId: o.id,
-                      zoneRadiusMeters: objectiveZoneRadius.toDouble(),
-                    ),
-                  )
+                  .map((o) => o.point)
                   .toList(growable: false)
             : const <GeoPoint>[];
 
@@ -490,6 +462,9 @@ class _GamePageState extends State<GamePage>
                                 effectiveGameConfig?.rogueStartZone ??
                                 widget.bootstrap.lobby.rogueStartZone,
                             objectiveZoneRadiusMeters: objectiveZoneRadius,
+                            streetNetwork:
+                                effectiveGameConfig?.mapStreetNetwork ??
+                                const <List<GeoPoint>>[],
                             startZoneRadiusMeters:
                                 effectiveGameConfig?.startZoneRadius ??
                                 widget.bootstrap.lobby.form?.startZoneRadius ??
@@ -1702,37 +1677,6 @@ class _GamePageState extends State<GamePage>
     return null;
   }
 
-  GeoPoint _shiftedZoneCenter({
-    required GeoPoint objective,
-    required String objectiveId,
-    required double zoneRadiusMeters,
-  }) {
-    if (zoneRadiusMeters <= 1) return objective;
-    final seed = _stableHash(objectiveId);
-    final ratio = 0.35 + ((seed % 40) / 100.0); // 0.35 -> 0.74
-    final distanceMeters = zoneRadiusMeters * ratio;
-    final angle = ((seed % 360) * pi) / 180.0;
-    final dx = distanceMeters * cos(angle);
-    final dy = distanceMeters * sin(angle);
-    const metersPerDegLat = 111320.0;
-    final metersPerDegLng =
-        metersPerDegLat * cos(objective.latitude * pi / 180);
-    final lat = objective.latitude + (dy / metersPerDegLat);
-    final lng =
-        objective.longitude +
-        (dx / (metersPerDegLng.abs() < 1e-6 ? 1e-6 : metersPerDegLng));
-    return GeoPoint(latitude: lat, longitude: lng);
-  }
-
-  int _stableHash(String value) {
-    var h = 2166136261;
-    for (final code in value.codeUnits) {
-      h ^= code;
-      h = (h * 16777619) & 0x7fffffff;
-    }
-    return h;
-  }
-
   void _onMapPointerDown(PointerDownEvent event, LatLng point) {
     _mapPointers.add(event.pointer);
     _pingPressTimer?.cancel();
@@ -2155,10 +2099,6 @@ class _GamePageState extends State<GamePage>
                         _kvInfo(
                           'Rayon map',
                           '${config?.mapRadius ?? form?.mapRadius ?? 0} m',
-                        ),
-                        _kvInfo(
-                          'Rayon zone objectif',
-                          '${config?.objectiveZoneRadius ?? form?.objectiveZoneRadius ?? 0} m',
                         ),
                         _kvInfo(
                           'Duree',

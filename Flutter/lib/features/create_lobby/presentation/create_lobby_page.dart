@@ -162,8 +162,6 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
                           currentPosition: _controller.currentPosition!,
                           selectedPosition: _controller.selectedPosition,
                           mapRadiusMeters: _controller.form.mapRadius,
-                          objectiveZoneRadiusMeters:
-                              _controller.form.objectiveZoneRadius,
                           startZoneRadiusMeters:
                               _controller.form.startZoneRadius,
                           streets: _controller.streets,
