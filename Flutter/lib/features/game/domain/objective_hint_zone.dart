@@ -35,17 +35,10 @@ class ObjectiveHintZoneCalculator {
     final graph =
         _graphCache[streets] ??= _StreetGraph.fromStreets(streets);
     ObjectiveHintZone? bestZone;
-    for (final edge in graph.cycleEdges) {
-      final loop = graph.pathBetween(
-        edge.startKey,
-        edge.endKey,
-        excluding: edge.key,
-      );
-      if (loop != null) {
-        final zone = _enclosingZone(objective, loop);
-        if (bestZone == null || zone.radiusMeters < bestZone.radiusMeters) {
-          bestZone = zone;
-        }
+    for (final loop in graph.cycles) {
+      final zone = _enclosingZone(objective, loop);
+      if (bestZone == null || zone.radiusMeters < bestZone.radiusMeters) {
+        bestZone = zone;
       }
     }
     if (bestZone != null) return cachedZones[cacheKey] = bestZone;
@@ -147,20 +140,23 @@ class _StreetGraph {
   final Map<String, GeoPoint> points;
   final Map<String, List<_Neighbor>> adjacency;
   final List<_Edge> edges;
-  late final List<_Edge> cycleEdges = _findCycleEdges();
+  late final List<List<GeoPoint>> cycles = _findCycles();
 
-  List<_Edge> _findCycleEdges() {
+  List<List<GeoPoint>> _findCycles() {
     final visited = <String>{};
     final treeEdges = <String>{};
     final cycleEdgeKeys = <String>{};
+    final parent = <String, String?>{};
     for (final start in points.keys) {
       if (!visited.add(start)) continue;
+      parent[start] = null;
       final queue = Queue<String>()..add(start);
       while (queue.isNotEmpty) {
         final current = queue.removeFirst();
         for (final neighbor in adjacency[current] ?? const <_Neighbor>[]) {
           if (visited.add(neighbor.nodeKey)) {
             treeEdges.add(neighbor.edgeKey);
+            parent[neighbor.nodeKey] = current;
             queue.add(neighbor.nodeKey);
           } else if (!treeEdges.contains(neighbor.edgeKey)) {
             cycleEdgeKeys.add(neighbor.edgeKey);
@@ -168,39 +164,39 @@ class _StreetGraph {
         }
       }
     }
-    return edges
-        .where((edge) => cycleEdgeKeys.contains(edge.key))
-        .toList(growable: false);
-  }
 
-  List<GeoPoint>? pathBetween(
-    String start,
-    String end, {
-    required String excluding,
-  }) {
-    final queue = Queue<String>()..add(start);
-    final previous = <String, String?>{start: null};
-    while (queue.isNotEmpty) {
-      final current = queue.removeFirst();
-      if (current == end) break;
-      for (final neighbor in adjacency[current] ?? const <_Neighbor>[]) {
-        if (neighbor.edgeKey == excluding ||
-            previous.containsKey(neighbor.nodeKey)) {
-          continue;
-        }
-        previous[neighbor.nodeKey] = current;
-        queue.add(neighbor.nodeKey);
+    final edgesByKey = <String, _Edge>{
+      for (final edge in edges) edge.key: edge,
+    };
+    final cycles = <List<GeoPoint>>[];
+    for (final edgeKey in cycleEdgeKeys) {
+      final edge = edgesByKey[edgeKey]!;
+      final startAncestors = <String, int>{};
+      final startPath = <String>[];
+      String? current = edge.startKey;
+      while (current != null) {
+        startAncestors[current] = startPath.length;
+        startPath.add(current);
+        current = parent[current];
       }
-    }
-    if (!previous.containsKey(end)) return null;
 
-    final path = <GeoPoint>[];
-    String? current = end;
-    while (current != null) {
-      path.add(points[current]!);
-      current = previous[current];
+      final endPath = <String>[];
+      current = edge.endKey;
+      while (current != null && !startAncestors.containsKey(current)) {
+        endPath.add(current);
+        current = parent[current];
+      }
+      if (current == null) continue;
+      final commonIndex = startAncestors[current]!;
+      final keys = <String>[
+        ...startPath.take(commonIndex + 1),
+        ...endPath.reversed,
+      ];
+      cycles.add(
+        keys.map((key) => points[key]!).toList(growable: false),
+      );
     }
-    return path.reversed.toList(growable: false);
+    return cycles;
   }
 
   static String _pointKey(GeoPoint point) =>
