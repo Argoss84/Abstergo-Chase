@@ -11,6 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 class _NoopGameSocketService extends GameSocketService {
   final StreamController<Map<String, dynamic>> _messagesController =
       StreamController<Map<String, dynamic>>.broadcast();
+  String? sentGlobalChat;
+  String? sentRoleChat;
 
   void emit(Map<String, dynamic> event) {
     _messagesController.add(event);
@@ -42,6 +44,16 @@ class _NoopGameSocketService extends GameSocketService {
 
   @override
   void sendGameAction(Map<String, dynamic> action) {}
+
+  @override
+  void sendGlobalChat(String text) {
+    sentGlobalChat = text;
+  }
+
+  @override
+  void sendRoleChat({required String role, required String text}) {
+    sentRoleChat = text;
+  }
 
   @override
   void pushState({
@@ -476,6 +488,94 @@ void main() {
       controller.mapMarkerPlayers.map((p) => p.id),
       contains('ally-2'),
     );
+
+    controller.dispose();
+  });
+
+  test('uses the server rally point and global chat after game end', () async {
+    final socket = _NoopGameSocketService();
+    final controller = GameController(socketService: socket);
+    await controller.initialize(_minimalGameBootstrap());
+
+    socket.emit(<String, dynamic>{
+      'type': 'state:sync',
+      'payload': <String, dynamic>{
+        'gameDetails': <String, dynamic>{
+          'winner_type': 'AGENT',
+          'winner_reason': 'TIMEOUT',
+          'rally_point': <String, dynamic>{
+            'latitude': 45.7642,
+            'longitude': 4.8358,
+          },
+        },
+      },
+    });
+    socket.emit(<String, dynamic>{
+      'type': 'game:chat-global-message',
+      'payload': <String, dynamic>{
+        'playerId': 'rogue-1',
+        'playerName': 'Rogue',
+        'text': 'On se retrouve au point.',
+        'timestamp': 42,
+      },
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.rallyPoint?.latitude, 45.7642);
+    expect(controller.rallyPoint?.longitude, 4.8358);
+    expect(controller.visibleChat.single.text, 'On se retrouve au point.');
+
+    controller.sendChat(' J’arrive ');
+    expect(socket.sentGlobalChat, 'J’arrive');
+    expect(socket.sentRoleChat, isNull);
+
+    controller.dispose();
+  });
+
+  test('restores final state and global chat when rejoining', () async {
+    final socket = _NoopGameSocketService();
+    final controller = GameController(socketService: socket);
+    await controller.initialize(_minimalGameBootstrap());
+
+    socket.emit(<String, dynamic>{
+      'type': 'game:joined',
+      'payload': <String, dynamic>{
+        'code': 'ABC123',
+        'playerId': 'host-1',
+        'hostId': 'host-1',
+        'game': <String, dynamic>{
+          'winnerType': 'ROGUE',
+          'winnerReason': 'OBJECTIVES_CAPTURED',
+          'rallyPoint': <String, dynamic>{
+            'latitude': 45.7642,
+            'longitude': 4.8358,
+          },
+          'players': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'host-1',
+              'name': 'Host',
+              'isHost': true,
+              'role': 'AGENT',
+              'status': 'active',
+            },
+          ],
+          'globalChatMessages': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'playerId': 'rogue-1',
+              'playerName': 'Rogue',
+              'text': 'Ralliement',
+              'timestamp': 42,
+            },
+          ],
+        },
+      },
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.isGameFinished, isTrue);
+    expect(controller.winnerReason, 'OBJECTIVES_CAPTURED');
+    expect(controller.visibleChat.single.text, 'Ralliement');
+    expect(controller.rallyPoint?.latitude, 45.7642);
 
     controller.dispose();
   });
