@@ -920,15 +920,15 @@ class _GamePageState extends State<GamePage>
                   left: 16,
                   right: 16,
                   child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 420),
-                        child: Card(
-                          margin: const EdgeInsets.all(16),
-                          child: Padding(
-                            padding: const EdgeInsets.all(18),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      child: Card(
+                        margin: const EdgeInsets.all(16),
+                        child: Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
                                 const Text(
                                   'Fin de partie',
                                   style: TextStyle(
@@ -968,7 +968,7 @@ class _GamePageState extends State<GamePage>
                                       _quitGame(clearSavedLobbyCode: true),
                                   child: const Text('Quitter'),
                                 ),
-                              ],
+                            ],
                           ),
                         ),
                       ),
