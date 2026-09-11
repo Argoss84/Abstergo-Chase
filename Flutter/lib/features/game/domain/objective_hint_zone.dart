@@ -34,22 +34,21 @@ class ObjectiveHintZoneCalculator {
 
     final graph =
         _graphCache[streets] ??= _StreetGraph.fromStreets(streets);
-    final edges = graph.cycleEdges.toList()
-      ..sort(
-        (a, b) => _distanceToSegment(objective, a.start, a.end)
-            .compareTo(_distanceToSegment(objective, b.start, b.end)),
-      );
-
-    for (final edge in edges) {
+    ObjectiveHintZone? bestZone;
+    for (final edge in graph.cycleEdges) {
       final loop = graph.pathBetween(
         edge.startKey,
         edge.endKey,
         excluding: edge.key,
       );
       if (loop != null) {
-        return cachedZones[cacheKey] = _enclosingZone(objective, loop);
+        final zone = _enclosingZone(objective, loop);
+        if (bestZone == null || zone.radiusMeters < bestZone.radiusMeters) {
+          bestZone = zone;
+        }
       }
     }
+    if (bestZone != null) return cachedZones[cacheKey] = bestZone;
 
     return cachedZones[cacheKey] = ObjectiveHintZone(
       center: objective,
@@ -80,25 +79,6 @@ class ObjectiveHintZoneCalculator {
     return ObjectiveHintZone(
       center: _fromMeters(centerMeters, objective),
       radiusMeters: radius + 5,
-    );
-  }
-
-  double _distanceToSegment(GeoPoint point, GeoPoint start, GeoPoint end) {
-    final p = _toMeters(point, point);
-    final a = _toMeters(start, point);
-    final b = _toMeters(end, point);
-    final dx = b.x - a.x;
-    final dy = b.y - a.y;
-    final lengthSquared = dx * dx + dy * dy;
-    if (lengthSquared == 0) {
-      return sqrt(a.x * a.x + a.y * a.y);
-    }
-    final t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSquared;
-    final clamped = t.clamp(0.0, 1.0);
-    final nearestX = a.x + clamped * dx;
-    final nearestY = a.y + clamped * dy;
-    return sqrt(
-      pow(p.x - nearestX, 2) + pow(p.y - nearestY, 2),
     );
   }
 
@@ -148,8 +128,6 @@ class _StreetGraph {
           key: edgeKey,
           startKey: startKey,
           endKey: endKey,
-          start: start,
-          end: end,
         );
         adjacency.putIfAbsent(startKey, () => <_Neighbor>[]).add(
           _Neighbor(endKey, edgeKey),
@@ -245,15 +223,11 @@ class _Edge {
     required this.key,
     required this.startKey,
     required this.endKey,
-    required this.start,
-    required this.end,
   });
 
   final String key;
   final String startKey;
   final String endKey;
-  final GeoPoint start;
-  final GeoPoint end;
 }
 
 class _XY {
