@@ -100,6 +100,7 @@ class _GamePageState extends State<GamePage>
   StreamSubscription<CompassEvent>? _compassSub;
   final TextEditingController _chatController = TextEditingController();
   bool _chatOpen = false;
+  bool _wasGameFinished = false;
   int _lastReadCount = 0;
   bool _isActionFabOpen = false;
   final VibrationService _vibrationService = VibrationService();
@@ -220,6 +221,10 @@ class _GamePageState extends State<GamePage>
       builder: (context, _) {
         final effectiveGameConfig =
             _controller.liveGameConfig ?? widget.bootstrap.gameConfig;
+        if (_wasGameFinished != _controller.isGameFinished) {
+          _wasGameFinished = _controller.isGameFinished;
+          _lastReadCount = 0;
+        }
         final unread = _chatOpen
             ? 0
             : (_controller.visibleChat.length - _lastReadCount).clamp(0, 999);

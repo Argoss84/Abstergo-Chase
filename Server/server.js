@@ -906,12 +906,27 @@ const snapToStreetNetwork = (point, streetNetwork) => {
 
 const calculateRallyPoint = (players, config) => {
   const points = (Array.isArray(players) ? players : [])
-    .map((player) => ({
-      latitude: Number(player?.latitude),
-      longitude: Number(player?.longitude)
-    }))
+    .map((player) => {
+      const latitude = player?.latitude;
+      const longitude = player?.longitude;
+      if (
+        latitude === null ||
+        latitude === undefined ||
+        String(latitude).trim() === '' ||
+        longitude === null ||
+        longitude === undefined ||
+        String(longitude).trim() === ''
+      ) {
+        return null;
+      }
+      return {
+        latitude: Number(latitude),
+        longitude: Number(longitude)
+      };
+    })
     .filter(
       (point) =>
+        point &&
         Number.isFinite(point.latitude) &&
         Number.isFinite(point.longitude) &&
         point.latitude >= -90 &&
