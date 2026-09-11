@@ -1343,6 +1343,8 @@ const getLobbySnapshot = (lobby) => ({
   globalChatMessages: normalizeGameChatMessages(lobby.globalChatMessages),
   finishedAt: lobby.finishedAt || null,
   rallyPoint: lobby.rallyPoint || null,
+  winnerType: lobby.lastHostState?.gameDetails?.winner_type || null,
+  winnerReason: lobby.lastHostState?.gameDetails?.winner_reason || null,
   players: Array.from(lobby.players.values()).map(({ id, name, isHost, role, status }) => ({
     id,
     name,
@@ -1570,7 +1572,11 @@ const applyGameStateSync = ({
       if (playerSocket) {
         send(playerSocket, {
           type: 'game:finished',
-          payload: { rallyPoint: game.rallyPoint }
+          payload: {
+            winnerType,
+            winnerReason: statePayload?.gameDetails?.winner_reason || null,
+            rallyPoint: game.rallyPoint
+          }
         });
       }
     });

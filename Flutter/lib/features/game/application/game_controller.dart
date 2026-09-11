@@ -847,6 +847,8 @@ class GameController extends ChangeNotifier {
         return;
       case 'game:finished':
         if (payload is Map) {
+          winnerType = payload['winnerType']?.toString() ?? winnerType;
+          winnerReason = payload['winnerReason']?.toString() ?? winnerReason;
           rallyPoint = _parseGeoPoint(payload['rallyPoint']) ?? rallyPoint;
           notifyListeners();
         }
@@ -927,6 +929,8 @@ class GameController extends ChangeNotifier {
               : const <GameChatMessage>[],
         );
       rallyPoint = _parseGeoPoint(game['rallyPoint']) ?? rallyPoint;
+      winnerType = game['winnerType']?.toString() ?? winnerType;
+      winnerReason = game['winnerReason']?.toString() ?? winnerReason;
     }
     if (game is Map) {
       final serverRemaining = int.tryParse(
