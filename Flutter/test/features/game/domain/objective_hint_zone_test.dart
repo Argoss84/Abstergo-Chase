@@ -44,6 +44,34 @@ void main() {
     expect(zone.center, objective);
     expect(zone.radiusMeters, 40);
   });
+
+  test('prefers a local block in a street grid', () {
+    final nodes = List.generate(
+      4,
+      (row) => List.generate(
+        4,
+        (column) => _offset(
+          objective,
+          x: column * 20,
+          y: row * 20,
+        ),
+      ),
+    );
+    final streets = <List<GeoPoint>>[
+      for (final row in nodes) row,
+      for (var column = 0; column < 4; column++)
+        <GeoPoint>[for (final row in nodes) row[column]],
+    ];
+    final localObjective = _offset(objective, x: 50, y: 50);
+
+    final zone = calculator.calculate(
+      objective: localObjective,
+      streets: streets,
+    );
+
+    expect(zone.radiusMeters, lessThan(30));
+    expect(_distance(zone.center, localObjective), lessThan(zone.radiusMeters));
+  });
 }
 
 GeoPoint _offset(GeoPoint origin, {required double x, required double y}) {

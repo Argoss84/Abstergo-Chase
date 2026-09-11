@@ -34,8 +34,19 @@ class ObjectiveHintZoneCalculator {
 
     final graph =
         _graphCache[streets] ??= _StreetGraph.fromStreets(streets);
+    final candidates = graph.cycleEdges.toList()
+      ..sort(
+        (a, b) => _distanceToSegment(objective, a.start, a.end)
+            .compareTo(_distanceToSegment(objective, b.start, b.end)),
+      );
     ObjectiveHintZone? bestZone;
-    for (final loop in graph.cycles) {
+    for (final edge in candidates.take(24)) {
+      final loop = graph.pathBetween(
+        edge.startKey,
+        edge.endKey,
+        excluding: edge.key,
+      );
+      if (loop == null) continue;
       final zone = _enclosingZone(objective, loop);
       if (bestZone == null || zone.radiusMeters < bestZone.radiusMeters) {
         bestZone = zone;
@@ -47,6 +58,19 @@ class ObjectiveHintZoneCalculator {
       center: objective,
       radiusMeters: fallbackRadiusMeters,
     );
+  }
+
+  double _distanceToSegment(GeoPoint point, GeoPoint start, GeoPoint end) {
+    final a = _toMeters(start, point);
+    final b = _toMeters(end, point);
+    final dx = b.x - a.x;
+    final dy = b.y - a.y;
+    final lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared == 0) return sqrt(a.x * a.x + a.y * a.y);
+    final t = (-(a.x * dx + a.y * dy) / lengthSquared).clamp(0.0, 1.0);
+    final nearestX = a.x + t * dx;
+    final nearestY = a.y + t * dy;
+    return sqrt(nearestX * nearestX + nearestY * nearestY);
   }
 
   ObjectiveHintZone _enclosingZone(
@@ -121,6 +145,8 @@ class _StreetGraph {
           key: edgeKey,
           startKey: startKey,
           endKey: endKey,
+          start: start,
+          end: end,
         );
         adjacency.putIfAbsent(startKey, () => <_Neighbor>[]).add(
           _Neighbor(endKey, edgeKey),
@@ -140,63 +166,92 @@ class _StreetGraph {
   final Map<String, GeoPoint> points;
   final Map<String, List<_Neighbor>> adjacency;
   final List<_Edge> edges;
-  late final List<List<GeoPoint>> cycles = _findCycles();
+  late final List<_Edge> cycleEdges = _findCycleEdges();
 
-  List<List<GeoPoint>> _findCycles() {
-    final visited = <String>{};
-    final treeEdges = <String>{};
-    final cycleEdgeKeys = <String>{};
-    final parent = <String, String?>{};
-    for (final start in points.keys) {
-      if (!visited.add(start)) continue;
-      parent[start] = null;
-      final queue = Queue<String>()..add(start);
-      while (queue.isNotEmpty) {
-        final current = queue.removeFirst();
-        for (final neighbor in adjacency[current] ?? const <_Neighbor>[]) {
-          if (visited.add(neighbor.nodeKey)) {
-            treeEdges.add(neighbor.edgeKey);
-            parent[neighbor.nodeKey] = current;
-            queue.add(neighbor.nodeKey);
-          } else if (!treeEdges.contains(neighbor.edgeKey)) {
-            cycleEdgeKeys.add(neighbor.edgeKey);
+  List<_Edge> _findCycleEdges() {
+    final discovered = <String, int>{};
+    final low = <String, int>{};
+    final bridges = <String>{};
+    var time = 0;
+
+    for (final root in points.keys) {
+      if (discovered.containsKey(root)) continue;
+      discovered[root] = time;
+      low[root] = time;
+      time++;
+      final stack = <_DfsFrame>[_DfsFrame(node: root)];
+      while (stack.isNotEmpty) {
+        final frame = stack.last;
+        final neighbors = adjacency[frame.node] ?? const <_Neighbor>[];
+        if (frame.nextNeighborIndex < neighbors.length) {
+          final neighbor = neighbors[frame.nextNeighborIndex++];
+          if (neighbor.edgeKey == frame.parentEdge) continue;
+          if (!discovered.containsKey(neighbor.nodeKey)) {
+            discovered[neighbor.nodeKey] = time;
+            low[neighbor.nodeKey] = time;
+            time++;
+            stack.add(
+              _DfsFrame(
+                node: neighbor.nodeKey,
+                parentNode: frame.node,
+                parentEdge: neighbor.edgeKey,
+              ),
+            );
+          } else {
+            low[frame.node] = min(
+              low[frame.node]!,
+              discovered[neighbor.nodeKey]!,
+            );
+          }
+          continue;
+        }
+
+        stack.removeLast();
+        if (frame.parentNode != null && frame.parentEdge != null) {
+          low[frame.parentNode!] = min(
+            low[frame.parentNode!]!,
+            low[frame.node]!,
+          );
+          if (low[frame.node]! > discovered[frame.parentNode!]!) {
+            bridges.add(frame.parentEdge!);
           }
         }
       }
     }
 
-    final edgesByKey = <String, _Edge>{
-      for (final edge in edges) edge.key: edge,
-    };
-    final cycles = <List<GeoPoint>>[];
-    for (final edgeKey in cycleEdgeKeys) {
-      final edge = edgesByKey[edgeKey]!;
-      final startAncestors = <String, int>{};
-      final startPath = <String>[];
-      String? current = edge.startKey;
-      while (current != null) {
-        startAncestors[current] = startPath.length;
-        startPath.add(current);
-        current = parent[current];
-      }
+    return edges
+        .where((edge) => !bridges.contains(edge.key))
+        .toList(growable: false);
+  }
 
-      final endPath = <String>[];
-      current = edge.endKey;
-      while (current != null && !startAncestors.containsKey(current)) {
-        endPath.add(current);
-        current = parent[current];
+  List<GeoPoint>? pathBetween(
+    String start,
+    String end, {
+    required String excluding,
+  }) {
+    final queue = Queue<String>()..add(start);
+    final previous = <String, String?>{start: null};
+    while (queue.isNotEmpty) {
+      final current = queue.removeFirst();
+      if (current == end) break;
+      for (final neighbor in adjacency[current] ?? const <_Neighbor>[]) {
+        if (neighbor.edgeKey == excluding ||
+            previous.containsKey(neighbor.nodeKey)) {
+          continue;
+        }
+        previous[neighbor.nodeKey] = current;
+        queue.add(neighbor.nodeKey);
       }
-      if (current == null) continue;
-      final commonIndex = startAncestors[current]!;
-      final keys = <String>[
-        ...startPath.take(commonIndex + 1),
-        ...endPath.reversed,
-      ];
-      cycles.add(
-        keys.map((key) => points[key]!).toList(growable: false),
-      );
     }
-    return cycles;
+    if (!previous.containsKey(end)) return null;
+
+    final path = <GeoPoint>[];
+    String? current = end;
+    while (current != null) {
+      path.add(points[current]!);
+      current = previous[current];
+    }
+    return path.reversed.toList(growable: false);
   }
 
   static String _pointKey(GeoPoint point) =>
@@ -214,16 +269,33 @@ class _Neighbor {
   final String edgeKey;
 }
 
+class _DfsFrame {
+  _DfsFrame({
+    required this.node,
+    this.parentNode,
+    this.parentEdge,
+  });
+
+  final String node;
+  final String? parentNode;
+  final String? parentEdge;
+  int nextNeighborIndex = 0;
+}
+
 class _Edge {
   const _Edge({
     required this.key,
     required this.startKey,
     required this.endKey,
+    required this.start,
+    required this.end,
   });
 
   final String key;
   final String startKey;
   final String endKey;
+  final GeoPoint start;
+  final GeoPoint end;
 }
 
 class _XY {
