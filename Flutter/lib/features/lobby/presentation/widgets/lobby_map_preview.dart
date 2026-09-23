@@ -1,5 +1,6 @@
 import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
+import 'package:broken_veil_protocol/features/game/domain/objective_hint_zone.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -47,6 +48,7 @@ class LobbyMapPreview extends StatelessWidget {
     required this.agentStartZone,
     required this.rogueStartZone,
     required this.objectiveZoneRadiusMeters,
+    this.streetNetwork = const <List<GeoPoint>>[],
     this.inactiveObjectives = const <GeoPoint>[],
     this.startZoneRadiusMeters = CreateLobbyDefaults.startZoneRadius,
     this.showObjectives = true,
@@ -82,6 +84,7 @@ class LobbyMapPreview extends StatelessWidget {
   final GeoPoint? agentStartZone;
   final GeoPoint? rogueStartZone;
   final int objectiveZoneRadiusMeters;
+  final List<List<GeoPoint>> streetNetwork;
   final List<GeoPoint> inactiveObjectives;
   final int startZoneRadiusMeters;
   final bool showObjectives;
@@ -135,9 +138,63 @@ class LobbyMapPreview extends StatelessWidget {
     final contourLatLng = outerStreetContour
         .map((p) => LatLng(p.latitude, p.longitude))
         .toList(growable: false);
-    final highlightLatLng = highlightObjectiveZones
-        .map((p) => LatLng(p.latitude, p.longitude))
+    const zoneCalculator = ObjectiveHintZoneCalculator();
+    final objectiveZones = objectives
+        .map(
+          (point) => zoneCalculator.calculate(
+            objective: point,
+            streets: streetNetwork,
+            fallbackRadiusMeters: objectiveZoneRadiusMeters.toDouble(),
+          ),
+        )
         .toList(growable: false);
+    final inactiveObjectiveZones = inactiveObjectives
+        .map(
+          (point) => zoneCalculator.calculate(
+            objective: point,
+            streets: streetNetwork,
+            fallbackRadiusMeters: objectiveZoneRadiusMeters.toDouble(),
+          ),
+        )
+        .toList(growable: false);
+    final highlightZones = highlightObjectiveZones
+        .map(
+          (point) => zoneCalculator.calculate(
+            objective: point,
+            streets: streetNetwork,
+            fallbackRadiusMeters: highlightObjectiveZoneRadiusMeters.toDouble(),
+          ),
+        )
+        .toList(growable: false);
+    final objectivePolygons = <Polygon>[
+      if (showObjectives && showObjectiveZones)
+        ..._hintPolygons(
+          objectiveZones.where((zone) => zone.hugsStreets),
+          fillColor: Colors.red.withValues(alpha: 0.12),
+          borderColor: Colors.red,
+          strokeWidth: 2,
+        ),
+      if (showObjectives && showObjectiveZones)
+        ..._hintPolygons(
+          inactiveObjectiveZones.where((zone) => zone.hugsStreets),
+          fillColor: Colors.grey.withValues(alpha: 0.10),
+          borderColor: Colors.grey,
+          strokeWidth: 1.4,
+        ),
+      if (showObjectives &&
+          showObjectiveZones &&
+          highlightObjectiveZoneRadiusMeters > 0)
+        ..._hintPolygons(
+          highlightZones.where((zone) => zone.hugsStreets),
+          fillColor: Colors.deepOrangeAccent.withValues(
+            alpha: 0.18 + (highlightObjectivePulse * 0.30),
+          ),
+          borderColor: Colors.deepOrangeAccent.withValues(
+            alpha: 0.65 + (highlightObjectivePulse * 0.35),
+          ),
+          strokeWidth: 2 + (highlightObjectivePulse * 1.4),
+        ),
+    ];
     final agentLatLng = agentStartZone == null
         ? null
         : LatLng(agentStartZone!.latitude, agentStartZone!.longitude);
@@ -180,61 +237,83 @@ class LobbyMapPreview extends StatelessWidget {
                     borderColor: Colors.blue,
                   ),
                 if (showObjectives && showObjectiveZones)
-                  ...objectiveLatLng.map(
-                    (point) => CircleMarker(
-                      point: point,
-                      radius: objectiveZoneRadiusMeters.toDouble(),
-                      useRadiusInMeter: true,
-                      color: Colors.red.withValues(alpha: 0.08),
-                      borderStrokeWidth: 1,
-                      borderColor: Colors.red,
-                    ),
-                  ),
+                  ...objectiveZones
+                      .where((zone) => !zone.hugsStreets)
+                      .map(
+                        (zone) => CircleMarker(
+                          point: LatLng(
+                            zone.center.latitude,
+                            zone.center.longitude,
+                          ),
+                          radius: zone.radiusMeters,
+                          useRadiusInMeter: true,
+                          color: Colors.red.withValues(alpha: 0.08),
+                          borderStrokeWidth: 1,
+                          borderColor: Colors.red,
+                        ),
+                      ),
                 if (showObjectives && showObjectiveZones)
-                  ...inactiveObjectiveLatLng.map(
-                    (point) => CircleMarker(
-                      point: point,
-                      radius: objectiveZoneRadiusMeters.toDouble(),
-                      useRadiusInMeter: true,
-                      color: Colors.grey.withValues(alpha: 0.08),
-                      borderStrokeWidth: 1,
-                      borderColor: Colors.grey,
-                    ),
-                  ),
+                  ...inactiveObjectiveZones
+                      .where((zone) => !zone.hugsStreets)
+                      .map(
+                        (zone) => CircleMarker(
+                          point: LatLng(
+                            zone.center.latitude,
+                            zone.center.longitude,
+                          ),
+                          radius: zone.radiusMeters,
+                          useRadiusInMeter: true,
+                          color: Colors.grey.withValues(alpha: 0.08),
+                          borderStrokeWidth: 1,
+                          borderColor: Colors.grey,
+                        ),
+                      ),
                 if (showObjectives &&
                     showObjectiveZones &&
                     highlightObjectiveZoneRadiusMeters > 0)
-                  ...highlightLatLng.map(
-                    (point) => CircleMarker(
-                      point: point,
-                      radius: highlightObjectiveZoneRadiusMeters.toDouble(),
-                      useRadiusInMeter: true,
-                      color: Colors.orange.withValues(
-                        alpha: 0.18 + (highlightObjectivePulse * 0.30),
+                  ...highlightZones
+                      .where((zone) => !zone.hugsStreets)
+                      .map(
+                        (zone) => CircleMarker(
+                          point: LatLng(
+                            zone.center.latitude,
+                            zone.center.longitude,
+                          ),
+                          radius: zone.radiusMeters,
+                          useRadiusInMeter: true,
+                          color: Colors.orange.withValues(
+                            alpha: 0.18 + (highlightObjectivePulse * 0.30),
+                          ),
+                          borderStrokeWidth:
+                              2 + (highlightObjectivePulse * 1.4),
+                          borderColor: Colors.deepOrangeAccent.withValues(
+                            alpha: 0.65 + (highlightObjectivePulse * 0.35),
+                          ),
+                        ),
                       ),
-                      borderStrokeWidth: 2 + (highlightObjectivePulse * 1.4),
-                      borderColor: Colors.deepOrangeAccent.withValues(
-                        alpha: 0.65 + (highlightObjectivePulse * 0.35),
-                      ),
-                    ),
-                  ),
                 if (showObjectives &&
                     showObjectiveZones &&
                     highlightObjectiveZoneRadiusMeters > 0)
-                  ...highlightLatLng.map(
-                    (point) => CircleMarker(
-                      point: point,
-                      radius:
-                          highlightObjectiveZoneRadiusMeters.toDouble() +
-                          (18 + (highlightObjectivePulse * 55)),
-                      useRadiusInMeter: true,
-                      color: Colors.transparent,
-                      borderStrokeWidth: 1.8 - (highlightObjectivePulse * 1.0),
-                      borderColor: Colors.deepOrangeAccent.withValues(
-                        alpha: 0.65 - (highlightObjectivePulse * 0.55),
+                  ...highlightZones
+                      .where((zone) => !zone.hugsStreets)
+                      .map(
+                        (zone) => CircleMarker(
+                          point: LatLng(
+                            zone.center.latitude,
+                            zone.center.longitude,
+                          ),
+                          radius:
+                              zone.radiusMeters +
+                              (18 + (highlightObjectivePulse * 55)),
+                          useRadiusInMeter: true,
+                          color: Colors.transparent,
+                          borderStrokeWidth:
+                              1.8 - (highlightObjectivePulse * 1.0),
+                          borderColor: Colors.deepOrangeAccent.withValues(
+                            alpha: 0.65 - (highlightObjectivePulse * 0.55),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
                 if (agentLatLng != null)
                   CircleMarker(
                     point: agentLatLng,
@@ -280,6 +359,8 @@ class LobbyMapPreview extends StatelessWidget {
                   ),
                 ],
               ),
+            if (objectivePolygons.isNotEmpty)
+              PolygonLayer(polygons: objectivePolygons),
             if (guidanceLatLng.length >= 2)
               PolylineLayer(
                 polylines: [
@@ -488,4 +569,25 @@ class _RolePingMarkerWidget extends StatelessWidget {
       ),
     );
   }
+}
+
+List<Polygon> _hintPolygons(
+  Iterable<ObjectiveHintZone> zones, {
+  required Color fillColor,
+  required Color borderColor,
+  required double strokeWidth,
+}) {
+  return [
+    for (final zone in zones)
+      if (zone.contour.length >= 3)
+        Polygon(
+          points: [
+            for (final point in zone.contour)
+              LatLng(point.latitude, point.longitude),
+          ],
+          color: fillColor,
+          borderColor: borderColor,
+          borderStrokeWidth: strokeWidth,
+        ),
+  ];
 }

@@ -418,6 +418,9 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                             objectiveZoneRadiusMeters:
                                 config?.objectiveZoneRadius ??
                                 bootstrap!.form!.objectiveZoneRadius,
+                            streetNetwork:
+                                config?.mapStreetNetwork ??
+                                const <List<GeoPoint>>[],
                             startZoneRadiusMeters:
                                 config?.startZoneRadius ??
                                 bootstrap?.form?.startZoneRadius ??
@@ -961,10 +964,6 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                       _kv(
                         'Rayon map',
                         '${config?.mapRadius ?? form?.mapRadius ?? 'n/a'} m',
-                      ),
-                      _kv(
-                        'Rayon zone objectif',
-                        '${config?.objectiveZoneRadius ?? form?.objectiveZoneRadius ?? 'n/a'} m',
                       ),
                       _kv(
                         'Rayon zone départ',

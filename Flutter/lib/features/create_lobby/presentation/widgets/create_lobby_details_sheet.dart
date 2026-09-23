@@ -54,11 +54,6 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
               onChanged: (v) => _form = _form.copyWith(hackDurationMs: v),
             ),
             _numberField(
-              label: 'Rayon zone objectifs',
-              value: _form.objectiveZoneRadius,
-              onChanged: (v) => _form = _form.copyWith(objectiveZoneRadius: v),
-            ),
-            _numberField(
               label: 'Rayon zone départ (m)',
               value: _form.startZoneRadius,
               onChanged: (v) => _form = _form.copyWith(startZoneRadius: v),

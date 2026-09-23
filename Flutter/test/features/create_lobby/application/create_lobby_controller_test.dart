@@ -156,6 +156,7 @@ void main() {
 
       await controller.createLobby();
 
+      expect(service.gameConfig, isNot(contains('objectiv_zone_radius')));
       expect(service.gameConfig?['start_zone_latitude'], '45.75');
       expect(
         double.parse(service.gameConfig?['start_zone_longitude'] as String),

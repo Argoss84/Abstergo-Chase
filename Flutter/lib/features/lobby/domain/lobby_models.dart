@@ -231,7 +231,8 @@ class LobbyGameConfig {
       mapCenter: center,
       mapRadius: int.tryParse(raw['map_radius']?.toString() ?? '') ?? 1000,
       objectiveZoneRadius:
-          int.tryParse(raw['objectiv_zone_radius']?.toString() ?? '') ?? 50,
+          int.tryParse(raw['objectiv_zone_radius']?.toString() ?? '') ??
+          CreateLobbyDefaults.objectiveZoneRadius,
       startZoneRadius:
           int.tryParse(raw['start_zone_radius']?.toString() ?? '') ??
           CreateLobbyDefaults.startZoneRadius,
