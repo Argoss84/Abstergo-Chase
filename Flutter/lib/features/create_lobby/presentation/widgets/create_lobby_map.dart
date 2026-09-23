@@ -42,11 +42,17 @@ class CreateLobbyMap extends StatelessWidget {
           (point) => zoneCalculator.calculate(
             objective: point,
             streets: streets,
-            fallbackRadiusMeters:
-                CreateLobbyDefaults.objectiveZoneRadius.toDouble(),
+            fallbackRadiusMeters: CreateLobbyDefaults.objectiveZoneRadius
+                .toDouble(),
           ),
         )
         .toList(growable: false);
+    final objectivePolygons = _hintPolygons(
+      objectiveZones.where((zone) => zone.hugsStreets),
+      fillColor: Colors.red.withValues(alpha: 0.12),
+      borderColor: Colors.red,
+      strokeWidth: 2,
+    );
     return SizedBox(
       height: 300,
       child: ClipRRect(
@@ -100,7 +106,11 @@ class CreateLobbyMap extends StatelessWidget {
                 ...objectives.map(
                   (point) => Marker(
                     point: LatLng(point.latitude, point.longitude),
-                    child: const Icon(Icons.adjust, color: Colors.red, size: 20),
+                    child: const Icon(
+                      Icons.adjust,
+                      color: Colors.red,
+                      size: 20,
+                    ),
                   ),
                 ),
                 if (agentStartZone != null)
@@ -158,19 +168,21 @@ class CreateLobbyMap extends StatelessWidget {
                       borderColor: Colors.blue,
                       useRadiusInMeter: true,
                     ),
-                ...objectiveZones.map(
-                  (zone) => CircleMarker(
-                    point: LatLng(
-                      zone.center.latitude,
-                      zone.center.longitude,
+                ...objectiveZones
+                    .where((zone) => !zone.hugsStreets)
+                    .map(
+                      (zone) => CircleMarker(
+                        point: LatLng(
+                          zone.center.latitude,
+                          zone.center.longitude,
+                        ),
+                        radius: zone.radiusMeters,
+                        color: Colors.red.withValues(alpha: 0.08),
+                        borderStrokeWidth: 1,
+                        borderColor: Colors.red,
+                        useRadiusInMeter: true,
+                      ),
                     ),
-                    radius: zone.radiusMeters,
-                    color: Colors.red.withValues(alpha: 0.08),
-                    borderStrokeWidth: 1,
-                    borderColor: Colors.red,
-                    useRadiusInMeter: true,
-                  ),
-                ),
                 if (agentStartZone != null)
                   CircleMarker(
                     point: LatLng(
@@ -210,9 +222,32 @@ class CreateLobbyMap extends StatelessWidget {
                   ),
                 ],
               ),
+            if (objectivePolygons.isNotEmpty)
+              PolygonLayer(polygons: objectivePolygons),
           ],
         ),
       ),
     );
   }
+}
+
+List<Polygon> _hintPolygons(
+  Iterable<ObjectiveHintZone> zones, {
+  required Color fillColor,
+  required Color borderColor,
+  required double strokeWidth,
+}) {
+  return [
+    for (final zone in zones)
+      if (zone.contour.length >= 3)
+        Polygon(
+          points: [
+            for (final point in zone.contour)
+              LatLng(point.latitude, point.longitude),
+          ],
+          color: fillColor,
+          borderColor: borderColor,
+          borderStrokeWidth: strokeWidth,
+        ),
+  ];
 }
