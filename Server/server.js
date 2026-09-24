@@ -904,88 +904,24 @@ const snapToStreetNetwork = (point, streetNetwork) => {
   return nearest || point;
 };
 
-const calculateRallyPoint = (players, config) => {
-  const points = (Array.isArray(players) ? players : [])
-    .map((player) => {
-      const latitude = player?.latitude;
-      const longitude = player?.longitude;
-      if (
-        latitude === null ||
-        latitude === undefined ||
-        String(latitude).trim() === '' ||
-        longitude === null ||
-        longitude === undefined ||
-        String(longitude).trim() === ''
-      ) {
-        return null;
-      }
-      return {
-        latitude: Number(latitude),
-        longitude: Number(longitude)
-      };
-    })
-    .filter(
-      (point) =>
-        point &&
-        Number.isFinite(point.latitude) &&
-        Number.isFinite(point.longitude) &&
-        point.latitude >= -90 &&
-        point.latitude <= 90 &&
-        point.longitude >= -180 &&
-        point.longitude <= 180
-    );
-  if (!points.length) return null;
-
-  const meanLatitude =
-    points.reduce((sum, point) => sum + point.latitude, 0) / points.length;
-  const longitudeScale = Math.max(
-    0.01,
-    Math.cos((meanLatitude * Math.PI) / 180)
-  );
-  const projected = points.map((point) => ({
-    x: point.longitude * longitudeScale,
-    y: point.latitude
-  }));
-  let x = projected.reduce((sum, point) => sum + point.x, 0) / projected.length;
-  let y = projected.reduce((sum, point) => sum + point.y, 0) / projected.length;
-
-  // Weiszfeld's algorithm minimizes the total straight-line distance.
-  for (let iteration = 0; iteration < 100; iteration += 1) {
-    let weightedX = 0;
-    let weightedY = 0;
-    let weightSum = 0;
-    let coincident = null;
-    for (const point of projected) {
-      const distance = Math.hypot(x - point.x, y - point.y);
-      if (distance < 1e-12) {
-        coincident = point;
-        break;
-      }
-      const weight = 1 / distance;
-      weightedX += point.x * weight;
-      weightedY += point.y * weight;
-      weightSum += weight;
-    }
-    if (coincident) {
-      x = coincident.x;
-      y = coincident.y;
-      break;
-    }
-    const nextX = weightedX / weightSum;
-    const nextY = weightedY / weightSum;
-    if (Math.hypot(nextX - x, nextY - y) < 1e-10) {
-      x = nextX;
-      y = nextY;
-      break;
-    }
-    x = nextX;
-    y = nextY;
+const calculateRallyPoint = (_players, config) => {
+  const latitude = Number(config?.map_center_latitude);
+  const longitude = Number(config?.map_center_longitude);
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return null;
   }
 
-  return snapToStreetNetwork({
-    latitude: y,
-    longitude: x / longitudeScale
-  }, config?.street_network);
+  return snapToStreetNetwork(
+    { latitude, longitude },
+    config?.street_network
+  );
 };
 
 const serializeLobby = (lobby) => ({
@@ -1536,14 +1472,14 @@ const applyGameStateSync = ({
   game.lastHostStateHostId = hostId;
   const winnerType = statePayload?.gameDetails?.winner_type || null;
   const justFinished = Boolean(winnerType && !game.finishedAt);
-  if (winnerType && !game.finishedAt) {
+  if (justFinished) {
     game.finishedAt = Date.now();
     game.expiresAt = game.finishedAt + GAME_TTL_MS;
     game.rallyPoint = calculateRallyPoint(statePayload?.players, game.config);
-    if (statePayload?.gameDetails && game.rallyPoint) {
-      statePayload.gameDetails.rally_point = game.rallyPoint;
-    }
     persistGameResults(game);
+  }
+  if (game.finishedAt && statePayload?.gameDetails && game.rallyPoint) {
+    statePayload.gameDetails.rally_point = game.rallyPoint;
   }
   const stateVersion = bumpGameStateVersion(game);
 

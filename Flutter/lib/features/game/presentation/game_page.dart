@@ -313,7 +313,7 @@ class _GamePageState extends State<GamePage>
         final myPos = _controller.myPosition;
         _syncCompassMapCenter(myPos);
         final startCountdownSeconds = _startCountdownSeconds();
-        final activeSameRolePlayers = _controller.activeSameRoleVoicePlayers;
+        final activeAudiblePlayers = _controller.activeAudibleVoicePlayers;
         _handleGameVibrationSignals(
           startCountdownSeconds: startCountdownSeconds,
           outOfZone: outOfZone,
@@ -509,10 +509,14 @@ class _GamePageState extends State<GamePage>
                                 ? Colors.purpleAccent
                                 : Colors.red,
                             objectiveMarkerSize: isRogue ? 30 : 18,
-                            guidancePath: _controller.gameStarted
+                            guidancePath: _controller.isGameFinished
+                                ? _controller.buildPathToRallyPoint()
+                                : _controller.gameStarted
                                 ? const <GeoPoint>[]
                                 : _controller.buildPathToMyStartZone(),
-                            guidancePathColor: guidanceColor,
+                            guidancePathColor: _controller.isGameFinished
+                                ? Colors.amber
+                                : guidanceColor,
                             guidancePathDotted: true,
                             guidanceNeonPulse: _guidancePulseController.value,
                             highlightObjectiveZones: capturingDisplayPoints,
@@ -831,8 +835,7 @@ class _GamePageState extends State<GamePage>
                       ),
                     ),
                   if ((!_controller.isHost || _controller.gameStarted) &&
-                      winnerType == null &&
-                      activeSameRolePlayers.isNotEmpty)
+                      activeAudiblePlayers.isNotEmpty)
                     Positioned(
                       top: topInset,
                       left: 12,
@@ -848,7 +851,7 @@ class _GamePageState extends State<GamePage>
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                ...activeSameRolePlayers.map((player) {
+                                ...activeAudiblePlayers.map((player) {
                                   const activeVoice = true;
                                   return Container(
                                     margin: const EdgeInsets.only(bottom: 4),

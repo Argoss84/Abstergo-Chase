@@ -532,6 +532,40 @@ void main() {
     controller.dispose();
   });
 
+  test('shows, hears, and routes everyone to the rally point', () async {
+    final socket = _NoopGameSocketService();
+    final controller = GameController(socketService: socket);
+    await controller.initialize(_minimalGameBootstrap());
+    controller.myPosition = const GeoPoint(latitude: 45.76, longitude: 4.83);
+    controller.isVoiceChatEnabled = true;
+    controller.players.add(
+      const GamePlayer(
+        id: 'rogue-1',
+        name: 'Rogue',
+        isHost: false,
+        role: 'ROGUE',
+        status: 'CAPTURED',
+        latitude: 45.77,
+        longitude: 4.84,
+      ),
+    );
+
+    final rogue = controller.players.last;
+    expect(controller.isPlayerVisibleForCurrentRole(rogue), isFalse);
+    expect(controller.isPlayerAudibleForCurrentRole(rogue), isFalse);
+
+    controller.winnerType = 'AGENT';
+    controller.rallyPoint = const GeoPoint(latitude: 45.7642, longitude: 4.8358);
+
+    expect(controller.mapMarkerPlayers.map((player) => player.id), contains('rogue-1'));
+    expect(controller.isPlayerAudibleForCurrentRole(rogue), isTrue);
+    final path = controller.buildPathToRallyPoint();
+    expect(path.first.latitude, 45.76);
+    expect(path.last.latitude, 45.7642);
+
+    controller.dispose();
+  });
+
   test('restores final state and global chat when rejoining', () async {
     final socket = _NoopGameSocketService();
     final controller = GameController(socketService: socket);
