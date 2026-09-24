@@ -1,3 +1,4 @@
+import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
 import 'package:broken_veil_protocol/features/game/application/game_controller.dart';
 import 'package:broken_veil_protocol/features/game/domain/game_models.dart';
 import 'package:broken_veil_protocol/features/game/presentation/game_page.dart';
@@ -33,9 +34,20 @@ GameChatMessage _message(int index) => GameChatMessage(
 Future<_ChatGameController> _pumpGame(
   WidgetTester tester, {
   int messageCount = 0,
+  bool finished = false,
 }) async {
   final controller = _ChatGameController()
     ..roleChat.addAll(List.generate(messageCount, _message));
+  if (finished) {
+    controller
+      ..winnerType = 'AGENT'
+      ..winnerReason = 'TIMEOUT'
+      ..rallyPoint = const GeoPoint(
+        latitude: 45.764043,
+        longitude: 4.835659,
+      )
+      ..globalChat.add(_message(99));
+  }
   await tester.pumpWidget(
     MaterialApp(
       home: TickerMode(
@@ -161,4 +173,19 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('Keeps map chat accessible after game end', (tester) async {
+    await _pumpGame(tester, finished: true);
+
+    expect(find.text('Fin de partie'), findsOneWidget);
+    expect(
+      find.text('Rejoignez le point de ralliement affiché sur la carte.'),
+      findsOneWidget,
+    );
+
+    await _openChat(tester);
+
+    expect(find.text('Chat de fin de partie'), findsOneWidget);
+    expect(find.text('Joueur: Message 99'), findsOneWidget);
+  });
 }

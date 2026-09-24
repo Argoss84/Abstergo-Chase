@@ -100,6 +100,7 @@ class _GamePageState extends State<GamePage>
   StreamSubscription<CompassEvent>? _compassSub;
   final TextEditingController _chatController = TextEditingController();
   bool _chatOpen = false;
+  bool _wasGameFinished = false;
   int _lastReadCount = 0;
   bool _isActionFabOpen = false;
   final VibrationService _vibrationService = VibrationService();
@@ -220,9 +221,13 @@ class _GamePageState extends State<GamePage>
       builder: (context, _) {
         final effectiveGameConfig =
             _controller.liveGameConfig ?? widget.bootstrap.gameConfig;
+        if (_wasGameFinished != _controller.isGameFinished) {
+          _wasGameFinished = _controller.isGameFinished;
+          _lastReadCount = 0;
+        }
         final unread = _chatOpen
             ? 0
-            : (_controller.roleChat.length - _lastReadCount).clamp(0, 999);
+            : (_controller.visibleChat.length - _lastReadCount).clamp(0, 999);
         final fallbackCenter = _resolveCenter();
         final connectionReady = _controller.connectionStatus == 'connected';
         final realtimePositionReady = _controller.hasRealtimePosition;
@@ -308,7 +313,7 @@ class _GamePageState extends State<GamePage>
         final myPos = _controller.myPosition;
         _syncCompassMapCenter(myPos);
         final startCountdownSeconds = _startCountdownSeconds();
-        final activeSameRolePlayers = _controller.activeSameRoleVoicePlayers;
+        final activeAudiblePlayers = _controller.activeAudibleVoicePlayers;
         _handleGameVibrationSignals(
           startCountdownSeconds: startCountdownSeconds,
           outOfZone: outOfZone,
@@ -479,10 +484,14 @@ class _GamePageState extends State<GamePage>
                                 ? Colors.purpleAccent
                                 : Colors.red,
                             objectiveMarkerSize: isRogue ? 30 : 18,
-                            guidancePath: _controller.gameStarted
+                            guidancePath: _controller.isGameFinished
+                                ? _controller.buildPathToRallyPoint()
+                                : _controller.gameStarted
                                 ? const <GeoPoint>[]
                                 : _controller.buildPathToMyStartZone(),
-                            guidancePathColor: guidanceColor,
+                            guidancePathColor: _controller.isGameFinished
+                                ? Colors.amber
+                                : guidanceColor,
                             guidancePathDotted: true,
                             guidanceNeonPulse: _guidancePulseController.value,
                             highlightObjectiveZones: capturingDisplayPoints,
@@ -500,6 +509,20 @@ class _GamePageState extends State<GamePage>
                                     message: ping.shortMessage,
                                     pulseValue: _pingPulseFor(ping.createdAtMs),
                                   ),
+                                )
+                                .followedBy(
+                                  _controller.rallyPoint == null
+                                      ? const <MapPingMarker>[]
+                                      : <MapPingMarker>[
+                                          MapPingMarker(
+                                            point: _controller.rallyPoint!,
+                                            color: Colors.amber,
+                                            playerName: 'Fin de partie',
+                                            message: 'Point de ralliement',
+                                            pulseValue:
+                                                _guidancePulseController.value,
+                                          ),
+                                        ],
                                 )
                                 .toList(growable: false),
                             onMapPointerDown: _onMapPointerDown,
@@ -787,8 +810,7 @@ class _GamePageState extends State<GamePage>
                       ),
                     ),
                   if ((!_controller.isHost || _controller.gameStarted) &&
-                      winnerType == null &&
-                      activeSameRolePlayers.isNotEmpty)
+                      activeAudiblePlayers.isNotEmpty)
                     Positioned(
                       top: topInset,
                       left: 12,
@@ -804,7 +826,7 @@ class _GamePageState extends State<GamePage>
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                ...activeSameRolePlayers.map((player) {
+                                ...activeAudiblePlayers.map((player) {
                                   const activeVoice = true;
                                   return Container(
                                     margin: const EdgeInsets.only(bottom: 4),
@@ -876,19 +898,20 @@ class _GamePageState extends State<GamePage>
                   ),
                 ),
               if (winnerType != null)
-                Positioned.fill(
-                  child: Container(
-                    color: Colors.black.withValues(alpha: 0.72),
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 420),
-                        child: Card(
-                          margin: const EdgeInsets.all(16),
-                          child: Padding(
-                            padding: const EdgeInsets.all(18),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
+                Positioned(
+                  top: 16,
+                  left: 16,
+                  right: 16,
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      child: Card(
+                        margin: const EdgeInsets.all(16),
+                        child: Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
                                 const Text(
                                   'Fin de partie',
                                   style: TextStyle(
@@ -917,14 +940,18 @@ class _GamePageState extends State<GamePage>
                                   ),
                                   textAlign: TextAlign.center,
                                 ),
+                                const SizedBox(height: 8),
+                                const Text(
+                                  'Rejoignez le point de ralliement affiché sur la carte.',
+                                  textAlign: TextAlign.center,
+                                ),
                                 const SizedBox(height: 16),
                                 FilledButton(
                                   onPressed: () =>
                                       _quitGame(clearSavedLobbyCode: true),
                                   child: const Text('Quitter'),
                                 ),
-                              ],
-                            ),
+                            ],
                           ),
                         ),
                       ),
@@ -1911,7 +1938,7 @@ class _GamePageState extends State<GamePage>
   Future<void> _openChat() async {
     setState(() {
       _chatOpen = true;
-      _lastReadCount = _controller.roleChat.length;
+      _lastReadCount = _controller.visibleChat.length;
     });
     await showModalBottomSheet(
       context: context,
@@ -1933,7 +1960,9 @@ class _GamePageState extends State<GamePage>
                     children: [
                       Expanded(
                         child: Text(
-                          'Chat équipe',
+                          _controller.isGameFinished
+                              ? 'Chat de fin de partie'
+                              : 'Chat équipe',
                           style: Theme.of(context).textTheme.titleLarge
                               ?.copyWith(
                                 fontWeight: FontWeight.w600,
@@ -1956,7 +1985,7 @@ class _GamePageState extends State<GamePage>
                       return ListView(
                         reverse: true,
                         padding: const EdgeInsets.all(12),
-                        children: _controller.roleChat.reversed.map((m) {
+                        children: _controller.visibleChat.reversed.map((m) {
                           final isMe = m.playerId == _controller.playerId;
                           return Align(
                             alignment: isMe
@@ -2005,7 +2034,7 @@ class _GamePageState extends State<GamePage>
                       const SizedBox(width: 8),
                       FilledButton(
                         onPressed: () {
-                          _controller.sendRoleChat(_chatController.text);
+                          _controller.sendChat(_chatController.text);
                           _chatController.clear();
                         },
                         child: const Text('Envoyer'),
@@ -2022,7 +2051,7 @@ class _GamePageState extends State<GamePage>
     if (!mounted) return;
     setState(() {
       _chatOpen = false;
-      _lastReadCount = _controller.roleChat.length;
+      _lastReadCount = _controller.visibleChat.length;
     });
   }
 

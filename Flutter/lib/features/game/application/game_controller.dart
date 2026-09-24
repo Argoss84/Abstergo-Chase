@@ -91,6 +91,7 @@ class GameController extends ChangeNotifier {
   int? remainingSeconds;
   String? winnerType;
   String? winnerReason;
+  GeoPoint? rallyPoint;
   int? victoryObjectivesRequired;
   int? startCountdownEndAtMs;
   Timer? _startCountdownTimer;
@@ -99,6 +100,7 @@ class GameController extends ChangeNotifier {
   final List<GamePlayer> players = <GamePlayer>[];
   final List<GameObjective> objectives = <GameObjective>[];
   final List<GameChatMessage> roleChat = <GameChatMessage>[];
+  final List<GameChatMessage> globalChat = <GameChatMessage>[];
   LobbyGameConfig? liveGameConfig;
   GeoPoint? myPosition;
   final int realtimeRefreshIntervalMs =
@@ -121,6 +123,10 @@ class GameController extends ChangeNotifier {
   int _turnExpiresAtMs = 0;
   static const double _kRogueTargetingHalfConeDeg = 20.0;
   static const int _maxGameChatMessages = 150;
+
+  bool get isGameFinished => winnerType != null;
+  List<GameChatMessage> get visibleChat =>
+      isGameFinished ? globalChat : roleChat;
   int? _rogueCaptureInterruptedAtMs;
 
   bool _samePoint(GeoPoint? a, GeoPoint? b, {double eps = 0.000001}) {
@@ -833,6 +839,21 @@ class GameController extends ChangeNotifier {
           notifyListeners();
         }
         return;
+      case 'game:chat-global-message':
+        if (payload is Map) {
+          _appendChatMessage(globalChat, payload);
+          notifyListeners();
+        }
+        return;
+      case 'game:finished':
+        if (payload is Map) {
+          winnerType = payload['winnerType']?.toString() ?? winnerType;
+          winnerReason = payload['winnerReason']?.toString() ?? winnerReason;
+          rallyPoint = _parseGeoPoint(payload['rallyPoint']) ?? rallyPoint;
+          _syncVoiceState();
+          notifyListeners();
+        }
+        return;
       case 'game:error':
       case 'game:action-rejected':
         _joinInFlight = false;
@@ -900,6 +921,17 @@ class GameController extends ChangeNotifier {
               ? _parseGameChatMessages(roleChatMessages)
               : const <GameChatMessage>[],
         );
+      final globalChatMessages = game['globalChatMessages'];
+      globalChat
+        ..clear()
+        ..addAll(
+          globalChatMessages is List
+              ? _parseGameChatMessages(globalChatMessages)
+              : const <GameChatMessage>[],
+        );
+      rallyPoint = _parseGeoPoint(game['rallyPoint']) ?? rallyPoint;
+      winnerType = game['winnerType']?.toString() ?? winnerType;
+      winnerReason = game['winnerReason']?.toString() ?? winnerReason;
     }
     if (game is Map) {
       final serverRemaining = int.tryParse(
@@ -968,6 +1000,7 @@ class GameController extends ChangeNotifier {
       winnerType = (winner == null || winner.isEmpty) ? winnerType : winner;
       final reason = details['winner_reason']?.toString();
       winnerReason = (reason == null || reason.isEmpty) ? winnerReason : reason;
+      rallyPoint = _parseGeoPoint(details['rally_point']) ?? rallyPoint;
       final required = int.tryParse(
         details['victory_objectives_required']?.toString() ?? '',
       );
@@ -1199,6 +1232,7 @@ class GameController extends ChangeNotifier {
     if (outcome == null) return;
     winnerType = outcome.type;
     winnerReason = outcome.reason;
+    _syncVoiceState();
   }
 
   _WinnerOutcome? _winnerOutcomeIfAny() {
@@ -1592,6 +1626,16 @@ class GameController extends ChangeNotifier {
     _socketService.sendRoleChat(role: role, text: trimmed);
   }
 
+  void sendChat(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    if (isGameFinished) {
+      _socketService.sendGlobalChat(trimmed);
+      return;
+    }
+    sendRoleChat(trimmed);
+  }
+
   void leaveGame() {
     final code = gameCode;
     final me = playerId;
@@ -1632,7 +1676,8 @@ class GameController extends ChangeNotifier {
 
   bool isPlayerVisibleForCurrentRole(GamePlayer player) {
     if (player.id == playerId) return false;
-    if (player.status == 'CAPTURED') return false;
+    if (isGameFinished) return true;
+    if (player.status.toUpperCase() == 'CAPTURED') return false;
     final me = (playerRole ?? '').toUpperCase();
     final targetRole = (player.role ?? '').toUpperCase();
     if (me == 'ROGUE') {
@@ -1665,9 +1710,9 @@ class GameController extends ChangeNotifier {
     if (!isVoiceChatEnabled) return false;
     if (player.id == playerId) return false;
     final statusUpper = player.status.toUpperCase();
-    if (statusUpper == 'CAPTURED' || statusUpper == 'DISCONNECTED') {
-      return false;
-    }
+    if (statusUpper == 'DISCONNECTED') return false;
+    if (isGameFinished) return true;
+    if (statusUpper == 'CAPTURED') return false;
     final me = (playerRole ?? '').toUpperCase();
     final targetRole = (player.role ?? '').toUpperCase();
     if (canListenOtherRoles) return true;
@@ -1693,6 +1738,13 @@ class GameController extends ChangeNotifier {
 
   List<GamePlayer> get activeSameRoleVoicePlayers {
     return sameRoleVoicePlayers
+        .where((player) => isPlayerVoiceActive(player.id))
+        .toList(growable: false);
+  }
+
+  List<GamePlayer> get activeAudibleVoicePlayers {
+    return players
+        .where(isPlayerAudibleForCurrentRole)
         .where((player) => isPlayerVoiceActive(player.id))
         .toList(growable: false);
   }
@@ -1978,10 +2030,21 @@ class GameController extends ChangeNotifier {
     return 'Capture envoyée.';
   }
 
+  List<GeoPoint> buildPathToRallyPoint() {
+    final target = rallyPoint;
+    if (!isGameFinished || target == null) return const <GeoPoint>[];
+    return _buildGuidancePath(target);
+  }
+
   List<GeoPoint> buildPathToMyStartZone() {
-    final start = myPosition;
     final target = myStartZone;
-    if (start == null || target == null) return const <GeoPoint>[];
+    if (target == null) return const <GeoPoint>[];
+    return _buildGuidancePath(target);
+  }
+
+  List<GeoPoint> _buildGuidancePath(GeoPoint target) {
+    final start = myPosition;
+    if (start == null) return const <GeoPoint>[];
 
     final streetNetwork =
         _effectiveGameConfig?.mapStreetNetwork ?? const <List<GeoPoint>>[];
@@ -2244,6 +2307,33 @@ class GameController extends ChangeNotifier {
           );
         })
         .toList(growable: false);
+  }
+
+  void _appendChatMessage(
+    List<GameChatMessage> messages,
+    Map payload,
+  ) {
+    messages.add(
+      GameChatMessage(
+        playerId: payload['playerId']?.toString() ?? '',
+        playerName: payload['playerName']?.toString() ?? 'Joueur',
+        text: payload['text']?.toString() ?? '',
+        timestampMs:
+            int.tryParse(payload['timestamp']?.toString() ?? '') ??
+            DateTime.now().millisecondsSinceEpoch,
+      ),
+    );
+    if (messages.length > _maxGameChatMessages) {
+      messages.removeRange(0, messages.length - _maxGameChatMessages);
+    }
+  }
+
+  GeoPoint? _parseGeoPoint(dynamic raw) {
+    if (raw is! Map) return null;
+    final latitude = double.tryParse(raw['latitude']?.toString() ?? '');
+    final longitude = double.tryParse(raw['longitude']?.toString() ?? '');
+    if (latitude == null || longitude == null) return null;
+    return GeoPoint(latitude: latitude, longitude: longitude);
   }
 
   @override

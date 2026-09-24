@@ -31,10 +31,6 @@ const EMPTY_GAME_TTL_MS = Math.max(
   60_000,
   Number.parseInt(process.env.EMPTY_GAME_TTL_MS || '300000', 10) || 300_000
 );
-const FINISHED_GAME_TTL_MS = Math.max(
-  5_000,
-  Number.parseInt(process.env.FINISHED_GAME_TTL_MS || '30000', 10) || 30_000
-);
 const ENABLE_COST_METRICS =
   process.env.ENABLE_COST_METRICS === undefined
     ? true
@@ -565,9 +561,9 @@ const closeLobby = (code, reason = 'Lobby expiré', notify = true) => {
   return true;
 };
 
-const closeGame = (code, reason = 'Partie expirée', notify = true) => {
-  const game = games.get(code);
-  if (!game) return false;
+const persistGameResults = (game, reason = 'Partie terminée') => {
+  if (!game || game.resultsPersisted) return;
+  game.resultsPersisted = true;
   const winnerType = game?.lastHostState?.gameDetails?.winner_type || null;
   const playerResults = Array.from(game.players.values()).map((player) => ({
     player_external_id: player.id,
@@ -586,15 +582,21 @@ const closeGame = (code, reason = 'Partie expirée', notify = true) => {
       : false
   }));
 
-  persistToBdd(`/api/games/${code}/end`, 'POST', {
+  persistToBdd(`/api/games/${game.code}/end`, 'POST', {
     winner_side: winnerType,
     end_reason: reason
   });
-  persistToBdd(`/api/games/${code}/results`, 'POST', {
+  persistToBdd(`/api/games/${game.code}/results`, 'POST', {
     winning_side: winnerType,
     end_reason: reason,
     player_results: playerResults
   });
+};
+
+const closeGame = (code, reason = 'Partie expirée', notify = true) => {
+  const game = games.get(code);
+  if (!game) return false;
+  persistGameResults(game, reason);
 
   if (notify) {
     game.players.forEach((player) => {
@@ -852,6 +854,76 @@ const normalizeGameChatMessages = (messages) => {
     }));
 };
 
+const snapToStreetNetwork = (point, streetNetwork) => {
+  if (!point || !Array.isArray(streetNetwork)) return point;
+  const longitudeScale = Math.max(
+    0.01,
+    Math.cos((point.latitude * Math.PI) / 180)
+  );
+  const targetX = point.longitude * longitudeScale;
+  const targetY = point.latitude;
+  let nearest = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  for (const street of streetNetwork) {
+    if (!Array.isArray(street)) continue;
+    for (let index = 1; index < street.length; index += 1) {
+      const start = street[index - 1];
+      const end = street[index];
+      if (!Array.isArray(start) || !Array.isArray(end)) continue;
+      const startY = Number(start[0]);
+      const startX = Number(start[1]) * longitudeScale;
+      const endY = Number(end[0]);
+      const endX = Number(end[1]) * longitudeScale;
+      if (![startX, startY, endX, endY].every(Number.isFinite)) continue;
+      const dx = endX - startX;
+      const dy = endY - startY;
+      const lengthSquared = dx * dx + dy * dy;
+      const ratio = lengthSquared === 0
+        ? 0
+        : Math.max(
+            0,
+            Math.min(
+              1,
+              ((targetX - startX) * dx + (targetY - startY) * dy) /
+                lengthSquared
+            )
+          );
+      const projectedX = startX + ratio * dx;
+      const projectedY = startY + ratio * dy;
+      const distance = Math.hypot(targetX - projectedX, targetY - projectedY);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearest = {
+          latitude: projectedY,
+          longitude: projectedX / longitudeScale
+        };
+      }
+    }
+  }
+  return nearest || point;
+};
+
+const calculateRallyPoint = (_players, config) => {
+  const latitude = Number(config?.map_center_latitude);
+  const longitude = Number(config?.map_center_longitude);
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return null;
+  }
+
+  return snapToStreetNetwork(
+    { latitude, longitude },
+    config?.street_network
+  );
+};
+
 const serializeLobby = (lobby) => ({
   code: lobby.code,
   hostId: lobby.hostId,
@@ -892,9 +964,13 @@ const serializeGame = (game) => ({
   lastHostStateAt:
     typeof game.lastHostStateAt === 'number' ? game.lastHostStateAt : null,
   lastHostStateHostId: game.lastHostStateHostId || null,
+  finishedAt: game.finishedAt || null,
+  rallyPoint: game.rallyPoint || null,
+  resultsPersisted: !!game.resultsPersisted,
   reconnectedPlayerIds: game.reconnectedPlayerIds || {},
   agentChatMessages: normalizeGameChatMessages(game.agentChatMessages),
-  rogueChatMessages: normalizeGameChatMessages(game.rogueChatMessages)
+  rogueChatMessages: normalizeGameChatMessages(game.rogueChatMessages),
+  globalChatMessages: normalizeGameChatMessages(game.globalChatMessages)
 });
 
 const persistRuntimeStateNow = async (reason = 'unspecified') => {
@@ -1072,9 +1148,14 @@ const hydrateRuntimeState = async () => {
         lastHostStateAt:
           typeof game.lastHostStateAt === 'number' ? game.lastHostStateAt : null,
         lastHostStateHostId: game.lastHostStateHostId || null,
+        finishedAt:
+          typeof game.finishedAt === 'number' ? game.finishedAt : null,
+        rallyPoint: game.rallyPoint || null,
+        resultsPersisted: !!game.resultsPersisted,
         reconnectedPlayerIds: game.reconnectedPlayerIds || {},
         agentChatMessages: normalizeGameChatMessages(game.agentChatMessages),
-        rogueChatMessages: normalizeGameChatMessages(game.rogueChatMessages)
+        rogueChatMessages: normalizeGameChatMessages(game.rogueChatMessages),
+        globalChatMessages: normalizeGameChatMessages(game.globalChatMessages)
       });
       gameSocketMessageCounts.set(game.code, 0);
     }
@@ -1210,6 +1291,11 @@ const getLobbySnapshot = (lobby) => ({
   chatMessages: normalizeLobbyChatMessages(lobby.chatMessages),
   agentChatMessages: normalizeGameChatMessages(lobby.agentChatMessages),
   rogueChatMessages: normalizeGameChatMessages(lobby.rogueChatMessages),
+  globalChatMessages: normalizeGameChatMessages(lobby.globalChatMessages),
+  finishedAt: lobby.finishedAt || null,
+  rallyPoint: lobby.rallyPoint || null,
+  winnerType: lobby.lastHostState?.gameDetails?.winner_type || null,
+  winnerReason: lobby.lastHostState?.gameDetails?.winner_reason || null,
   players: Array.from(lobby.players.values()).map(({ id, name, isHost, role, status }) => ({
     id,
     name,
@@ -1385,10 +1471,15 @@ const applyGameStateSync = ({
   game.lastHostStateAt = Date.now();
   game.lastHostStateHostId = hostId;
   const winnerType = statePayload?.gameDetails?.winner_type || null;
-  const shouldCloseImmediately = Boolean(winnerType && !game.finishedAt);
-  if (winnerType && !game.finishedAt) {
+  const justFinished = Boolean(winnerType && !game.finishedAt);
+  if (justFinished) {
     game.finishedAt = Date.now();
-    game.expiresAt = game.finishedAt + FINISHED_GAME_TTL_MS;
+    game.expiresAt = game.finishedAt + GAME_TTL_MS;
+    game.rallyPoint = calculateRallyPoint(statePayload?.players, game.config);
+    persistGameResults(game);
+  }
+  if (game.finishedAt && statePayload?.gameDetails && game.rallyPoint) {
+    statePayload.gameDetails.rally_point = game.rallyPoint;
   }
   const stateVersion = bumpGameStateVersion(game);
 
@@ -1426,10 +1517,21 @@ const applyGameStateSync = ({
     }
   });
 
-  if (shouldCloseImmediately) {
-    const closedCode = game.code;
-    closeGame(closedCode, 'Partie terminée', false);
-    markStateChanged('game:finished-immediate', { code: closedCode });
+  if (justFinished) {
+    game.players.forEach((player) => {
+      const playerSocket = socketsById.get(player.id);
+      if (playerSocket) {
+        send(playerSocket, {
+          type: 'game:finished',
+          payload: {
+            winnerType,
+            winnerReason: statePayload?.gameDetails?.winner_reason || null,
+            rallyPoint: game.rallyPoint
+          }
+        });
+      }
+    });
+    markStateChanged('game:finished', { code: game.code });
   }
 
   return stateVersion;
@@ -1515,6 +1617,7 @@ const tryStartGameFromLobby = ({
     players: new Map(),
     agentChatMessages: [],
     rogueChatMessages: [],
+    globalChatMessages: [],
     stateVersion: 1,
     createdAt: Date.now(),
     lastActivityAt: Date.now(),
@@ -3194,6 +3297,40 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'game:chat:global') {
+      const { gameCode } = clients.get(socket.id) || {};
+      const text = typeof payload?.text === 'string' ? payload.text.trim().substring(0, 500) : '';
+      if (!gameCode || !games.has(gameCode) || !text) return;
+
+      const game = games.get(gameCode);
+      const player = game.players.get(clientId);
+      if (!player || !game.finishedAt) return;
+
+      const msg = {
+        playerId: clientId,
+        playerName: player.name || 'Joueur',
+        text,
+        timestamp: Date.now()
+      };
+      if (!Array.isArray(game.globalChatMessages)) {
+        game.globalChatMessages = [];
+      }
+      game.globalChatMessages.push(msg);
+      if (game.globalChatMessages.length > MAX_GAME_CHAT_MESSAGES) {
+        game.globalChatMessages.splice(
+          0,
+          game.globalChatMessages.length - MAX_GAME_CHAT_MESSAGES
+        );
+      }
+
+      game.players.forEach((p) => {
+        const s = socketsById.get(p.id);
+        if (s) send(s, { type: 'game:chat-global-message', payload: msg });
+      });
+      markStateChanged('game:chat:global', { code: gameCode, playerId: clientId });
+      return;
+    }
+
     if (type === 'player:role-update') {
       const { lobbyCode, gameCode } = clients.get(socket.id) || {};
       const targetId = payload?.playerId || clientId;
@@ -3405,13 +3542,6 @@ setInterval(() => {
         code,
         removed: prunedPlayers
       });
-    }
-
-    if (game.finishedAt) {
-      log(`[TTL] Fermeture immédiate partie terminée: ${code}`);
-      closeGame(code, 'Partie terminée', false);
-      markStateChanged('game:finished-immediate-sweep', { code });
-      continue;
     }
 
     if (!hasPresentPlayersInGame(game)) {

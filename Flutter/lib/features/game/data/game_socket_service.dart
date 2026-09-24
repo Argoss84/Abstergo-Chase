@@ -176,6 +176,13 @@ class GameSocketService {
     });
   }
 
+  void sendGlobalChat(String text) {
+    _emit(<String, dynamic>{
+      'type': 'game:chat:global',
+      'payload': <String, dynamic>{'text': text},
+    });
+  }
+
   void sendGameAction(Map<String, dynamic> action) {
     _emit(<String, dynamic>{
       'type': 'game:action-relay',
