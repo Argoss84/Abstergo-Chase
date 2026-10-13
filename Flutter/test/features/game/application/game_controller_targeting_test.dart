@@ -10,13 +10,20 @@ void main() {
     final controller = GameController();
     controller.playerRole = 'AGENT';
     controller.gameStarted = true;
-    controller.myPosition = const GeoPoint(latitude: 48.8566, longitude: 2.3522);
-    controller.bootstrap = LobbyBootstrapData(
-      code: 'ABC123',
-      serverUrl: 'http://localhost:3000',
-      socketPath: '/socket.io',
-      playerName: 'Agent',
-      form: CreateLobbyFormData.initial().copyWith(agentRange: 5),
+    controller.myPosition = const GeoPoint(
+      latitude: 48.8566,
+      longitude: 2.3522,
+    );
+    controller.bootstrap = GameBootstrapData(
+      playerId: 'agent-1',
+      players: const <LobbyPlayer>[],
+      lobby: LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Agent',
+        form: CreateLobbyFormData.initial().copyWith(agentRange: 5),
+      ),
     );
     controller.players.add(
       const GamePlayer(
@@ -43,13 +50,20 @@ void main() {
     final controller = GameController();
     controller.playerRole = 'AGENT';
     controller.gameStarted = true;
-    controller.myPosition = const GeoPoint(latitude: 48.8566, longitude: 2.3522);
-    controller.bootstrap = LobbyBootstrapData(
-      code: 'ABC123',
-      serverUrl: 'http://localhost:3000',
-      socketPath: '/socket.io',
-      playerName: 'Agent',
-      form: CreateLobbyFormData.initial().copyWith(agentRange: 10),
+    controller.myPosition = const GeoPoint(
+      latitude: 48.8566,
+      longitude: 2.3522,
+    );
+    controller.bootstrap = GameBootstrapData(
+      playerId: 'agent-1',
+      players: const <LobbyPlayer>[],
+      lobby: LobbyBootstrapData(
+        code: 'ABC123',
+        serverUrl: 'http://localhost:3000',
+        socketPath: '/socket.io',
+        playerName: 'Agent',
+        form: CreateLobbyFormData.initial().copyWith(agentRange: 10),
+      ),
     );
     controller.players.add(
       const GamePlayer(

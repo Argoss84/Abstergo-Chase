@@ -1,3 +1,4 @@
+import 'package:broken_veil_protocol/shared/widgets/app_page_body.dart';
 import 'package:broken_veil_protocol/app/providers.dart';
 import 'package:broken_veil_protocol/features/account/data/account_api_service.dart';
 import 'package:flutter/material.dart';
@@ -59,6 +60,7 @@ class _AccountPageState extends ConsumerState<AccountPage> {
       await _accountApi.syncUser(token, username: auth.username);
       final profile = await _accountApi.getMyProfile(token);
 
+      if (!mounted) return;
       _usernameController.text = profile.username ?? '';
       _displayNameController.text = profile.displayName ?? '';
       _avatarUrlController.text = profile.avatarUrl ?? '';
@@ -71,11 +73,12 @@ class _AccountPageState extends ConsumerState<AccountPage> {
             .handleSessionInvalidated(e.message);
         return;
       }
+      if (!mounted) return;
       final fallbackUsername = auth.username?.trim() ?? '';
       _usernameController.text = fallbackUsername;
       _error = fallbackUsername.isEmpty
-          ? 'Chargement profil impossible: $e'
-          : 'BDD inaccessible: username Cognito utilise temporairement.';
+          ? 'Impossible de charger le profil. Réessayez dans un instant.'
+          : 'Profil indisponible. Votre nom de connexion est utilisé temporairement.';
     } finally {
       if (mounted) {
         setState(() {
@@ -106,12 +109,13 @@ class _AccountPageState extends ConsumerState<AccountPage> {
         region: _regionController.text,
       );
 
+      if (!mounted) return;
       _usernameController.text = profile.username ?? '';
       _displayNameController.text = profile.displayName ?? '';
       _avatarUrlController.text = profile.avatarUrl ?? '';
       _bioController.text = profile.bio ?? '';
       _regionController.text = profile.region ?? '';
-      _success = 'Profil mis a jour.';
+      _success = 'Profil mis à jour.';
     } catch (e) {
       if (e is SessionInvalidatedException) {
         await ref
@@ -119,7 +123,7 @@ class _AccountPageState extends ConsumerState<AccountPage> {
             .handleSessionInvalidated(e.message);
         return;
       }
-      _error = 'Mise a jour impossible: $e';
+      _error = 'Impossible d’enregistrer le profil. Réessayez dans un instant.';
     } finally {
       if (mounted) {
         setState(() {
@@ -133,71 +137,91 @@ class _AccountPageState extends ConsumerState<AccountPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Mon compte')),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      _error!,
-                      style: const TextStyle(color: Colors.redAccent),
-                    ),
+      body: AppPageBody(
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
+                padding: const EdgeInsets.all(20),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                children: [
+                  const AppSectionHeading(
+                    title: 'Votre profil',
+                    subtitle:
+                        'Votre nom de joueur permet à votre équipe de vous identifier.',
                   ),
-                if (_success != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      _success!,
-                      style: const TextStyle(color: Colors.greenAccent),
-                    ),
-                  ),
-                TextField(
-                  controller: _usernameController,
-                  decoration: const InputDecoration(labelText: 'Username'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _displayNameController,
-                  decoration: const InputDecoration(labelText: 'Nom affiche'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _avatarUrlController,
-                  decoration: const InputDecoration(labelText: 'URL avatar'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _regionController,
-                  decoration: const InputDecoration(labelText: 'Region'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _bioController,
-                  minLines: 2,
-                  maxLines: 4,
-                  decoration: const InputDecoration(labelText: 'Bio'),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    FilledButton.icon(
-                      onPressed: _isSaving ? null : _saveProfile,
-                      icon: const Icon(Icons.save),
-                      label: Text(_isSaving ? 'Sauvegarde...' : 'Sauvegarder'),
-                    ),
-                    const SizedBox(width: 12),
-                    OutlinedButton.icon(
-                      onPressed: _isSaving ? null : _loadProfile,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Rafraichir'),
-                    ),
+                  const SizedBox(height: 20),
+                  if (_error != null) ...[
+                    AppNotice(message: _error!, isError: true),
+                    const SizedBox(height: 16),
                   ],
-                ),
-              ],
-            ),
+                  if (_success != null) ...[
+                    AppNotice(message: _success!),
+                    const SizedBox(height: 16),
+                  ],
+                  TextField(
+                    enabled: !_isSaving,
+                    textInputAction: TextInputAction.next,
+                    controller: _usernameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nom de joueur',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    enabled: !_isSaving,
+                    textInputAction: TextInputAction.next,
+                    controller: _displayNameController,
+                    decoration: const InputDecoration(labelText: 'Nom affiché'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    enabled: !_isSaving,
+                    textInputAction: TextInputAction.next,
+                    controller: _avatarUrlController,
+                    keyboardType: TextInputType.url,
+                    autocorrect: false,
+                    decoration: const InputDecoration(labelText: 'URL avatar'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    enabled: !_isSaving,
+                    textInputAction: TextInputAction.next,
+                    controller: _regionController,
+                    decoration: const InputDecoration(labelText: 'Région'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    enabled: !_isSaving,
+                    textInputAction: TextInputAction.next,
+                    controller: _bioController,
+                    keyboardType: TextInputType.multiline,
+                    minLines: 2,
+                    maxLines: 4,
+                    decoration: const InputDecoration(labelText: 'Bio'),
+                  ),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: _isSaving ? null : _saveProfile,
+                        icon: const Icon(Icons.save),
+                        label: Text(
+                          _isSaving ? 'Sauvegarde...' : 'Sauvegarder',
+                        ),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _isSaving ? null : _loadProfile,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Actualiser'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+      ),
     );
   }
 }

@@ -15,6 +15,7 @@ class CreateLobbyMap extends StatelessWidget {
     required this.selectedPosition,
     required this.mapRadiusMeters,
     required this.startZoneRadiusMeters,
+    this.objectiveZoneRadiusMeters = CreateLobbyDefaults.objectiveZoneRadius,
     required this.streets,
     required this.outerStreetContour,
     required this.objectives,
@@ -27,6 +28,7 @@ class CreateLobbyMap extends StatelessWidget {
   final GeoPoint? selectedPosition;
   final int mapRadiusMeters;
   final int startZoneRadiusMeters;
+  final int objectiveZoneRadiusMeters;
   final List<List<GeoPoint>> streets;
   final List<GeoPoint> outerStreetContour;
   final List<GeoPoint> objectives;
@@ -42,8 +44,7 @@ class CreateLobbyMap extends StatelessWidget {
           (point) => zoneCalculator.calculate(
             objective: point,
             streets: streets,
-            fallbackRadiusMeters: CreateLobbyDefaults.objectiveZoneRadius
-                .toDouble(),
+            fallbackRadiusMeters: objectiveZoneRadiusMeters.toDouble(),
           ),
         )
         .toList(growable: false);

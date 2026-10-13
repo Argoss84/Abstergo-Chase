@@ -1,3 +1,5 @@
+import 'package:broken_veil_protocol/shared/widgets/app_page_body.dart';
+import 'package:broken_veil_protocol/shared/widgets/app_chat_sheet.dart';
 import 'package:broken_veil_protocol/app/providers.dart';
 import 'package:broken_veil_protocol/features/lobby/application/lobby_controller.dart';
 import 'package:broken_veil_protocol/features/create_lobby/presentation/widgets/create_lobby_details_sheet.dart';
@@ -8,6 +10,8 @@ import 'package:broken_veil_protocol/features/game/presentation/game_page.dart';
 import 'package:broken_veil_protocol/features/join_lobby/presentation/join_lobby_page.dart';
 import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
 import 'package:broken_veil_protocol/features/lobby/presentation/widgets/lobby_map_preview.dart';
+import 'package:broken_veil_protocol/features/lobby/presentation/widgets/lobby_player_row.dart';
+import 'package:broken_veil_protocol/features/lobby/presentation/widgets/lobby_start_requirements.dart';
 import 'package:broken_veil_protocol/shared/services/socket_environment_service.dart';
 import 'package:broken_veil_protocol/shared/services/vibration_service.dart';
 import 'package:flutter/material.dart';
@@ -29,20 +33,8 @@ class LobbyPage extends ConsumerStatefulWidget {
   ConsumerState<LobbyPage> createState() => _LobbyPageState();
 }
 
-/// Texte sur bulles claires : le thème sombre impose une couleur de corps claire,
-/// illisible sur fond bleu/gris pâle sans override explicite.
-const TextStyle _kChatBubbleNameStyle = TextStyle(
-  fontSize: 11,
-  fontWeight: FontWeight.w600,
-  color: Color(0xFF334155),
-);
-const TextStyle _kChatBubbleBodyStyle = TextStyle(
-  fontSize: 14,
-  height: 1.35,
-  color: Color(0xFF0F172A),
-);
-
-class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserver {
+class _LobbyPageState extends ConsumerState<LobbyPage>
+    with WidgetsBindingObserver {
   late final LobbyController _controller;
   late final TextEditingController _chatController;
   int _lastReadCount = 0;
@@ -63,15 +55,17 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _resolveInitialPlayerPosition();
     _controller = LobbyController();
     _chatController = TextEditingController();
     final bootstrap = widget.bootstrapData;
     if (bootstrap != null) {
+      _resolveInitialPlayerPosition();
       _controller.initialize(bootstrap: bootstrap);
     } else if ((widget.initialCode ?? '').trim().isNotEmpty) {
+      _resolveInitialPlayerPosition();
       _initializeFromCode(widget.initialCode!);
     } else {
+      _initialPlayerPositionResolved = true;
       _controller.error = 'Code lobby manquant.';
       _controller.isLoading = false;
     }
@@ -117,7 +111,9 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
   Future<void> _initializeFromCode(String code) async {
     final socketConfig = await _socketEnvironmentService.loadConfig();
     final savedName = await _playerNameStore.load();
-    final cognitoSub = await ref.read(authControllerProvider).getCurrentUserSub();
+    final cognitoSub = await ref
+        .read(authControllerProvider)
+        .getCurrentUserSub();
     if (!mounted) return;
     _controller.initialize(
       bootstrap: LobbyBootstrapData(
@@ -210,25 +206,28 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
           final message = _controller.error ?? 'Lobby indisponible.';
           final route = Uri(
             path: JoinLobbyPage.routePath,
-            queryParameters: <String, String>{
-              'code': code,
-              'error': message,
-            },
+            queryParameters: <String, String>{'code': code, 'error': message},
           ).toString();
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted) return;
             context.go(route);
           });
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
         return Scaffold(
           appBar: AppBar(
-            title: Row(
-              children: [
-                const Text('Lobby'),
-                const SizedBox(width: 8),
-                _statusChip(_controller.connectionStatus),
-              ],
+            title: const Text('Lobby'),
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(36),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: _statusChip(_controller.connectionStatus),
+                ),
+              ),
             ),
             actions: [
               IconButton(
@@ -253,50 +252,39 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
               ),
             ],
           ),
-          floatingActionButton: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              FloatingActionButton(
-                heroTag: 'lobby-info-fab',
-                onPressed: _openLobbyInfoSheet,
-                child: const Icon(Icons.info_outline),
-              ),
-              const SizedBox(height: 10),
-              FloatingActionButton(
-                heroTag: 'lobby-chat-fab',
-                onPressed: _openChatSheet,
-                child: Stack(
-                  clipBehavior: Clip.none,
+          bottomNavigationBar: SafeArea(
+            top: false,
+            child: AppPageBody(
+              shrinkWrap: true,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
                   children: [
-                    const Icon(Icons.chat_bubble_outline),
-                    if (unreadCount > 0)
-                      Positioned(
-                        right: -6,
-                        top: -8,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.red,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            unreadCount > 99 ? '99+' : '$unreadCount',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _openLobbyInfoSheet,
+                        icon: const Icon(Icons.info_outline),
+                        label: const Text('Infos'),
                       ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: _openChatSheet,
+                        icon: Badge(
+                          isLabelVisible: unreadCount > 0,
+                          label: Text(
+                            unreadCount > 99 ? '99+' : '$unreadCount',
+                          ),
+                          child: const Icon(Icons.chat_bubble_outline),
+                        ),
+                        label: const Text('Chat'),
+                      ),
+                    ),
                   ],
                 ),
               ),
-            ],
+            ),
           ),
           body: _controller.isLoading
               ? const Center(
@@ -309,305 +297,223 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
                     ],
                   ),
                 )
-              : ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    if (_controller.error != null)
-                      Card(
-                        color: Colors.red.shade100,
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Text(_controller.error!),
-                        ),
-                      ),
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: SizedBox(
-                          height: 120,
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    const Text(
-                                      'Code de la partie',
-                                      textAlign: TextAlign.center,
-                                    ),
-                                    const SizedBox(height: 8),
-                                    SelectableText(
-                                      (_controller.lobbyCode ?? '')
-                                          .toUpperCase(),
-                                      textAlign: TextAlign.center,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 28,
-                                        letterSpacing: 4,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+              : AppPageBody(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                    children: [
+                      if (_controller.error != null)
+                        AppNotice(message: _controller.error!, isError: true),
+                      _buildJoinCodeCard(),
+                      if (config != null ||
+                          (bootstrap?.form != null &&
+                              bootstrap!.form!.mapCenterLatitude.isNotEmpty &&
+                              bootstrap.form!.mapCenterLongitude.isNotEmpty))
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: LobbyMapPreview(
+                              center:
+                                  config?.mapCenter ??
+                                  (bootstrap!.form!.mapCenterLatitude.isEmpty
+                                      ? bootstrap.objectives.first
+                                      : _pointFromForm(bootstrap)),
+                              mapRadiusMeters:
+                                  config?.mapRadius ??
+                                  bootstrap!.form!.mapRadius,
+                              outerStreetContour:
+                                  config?.mapStreets ??
+                                  bootstrap!.outerStreetContour,
+                              objectives: _resolveHostObjectives(
+                                isHost: _controller.isHost,
+                                bootstrap: bootstrap,
+                                config: config,
                               ),
-                              const SizedBox(width: 10),
-                              if ((_controller.lobbyCode ?? '').isNotEmpty)
-                                AspectRatio(
-                                  aspectRatio: 1,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(6),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: SizedBox.expand(
-                                      child: QrImageView(
-                                        data:
-                                            '{"type":"lobby-join","code":"${(_controller.lobbyCode ?? '').toUpperCase()}"}',
-                                        version: QrVersions.auto,
-                                        eyeStyle: const QrEyeStyle(
-                                          eyeShape: QrEyeShape.square,
-                                          color: Colors.black,
-                                        ),
-                                        dataModuleStyle:
-                                            const QrDataModuleStyle(
-                                              dataModuleShape:
-                                                  QrDataModuleShape.square,
-                                              color: Colors.black,
-                                            ),
-                                        backgroundColor: Colors.white,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
+                              agentStartZone:
+                                  config?.startZone ??
+                                  bootstrap?.agentStartZone,
+                              rogueStartZone:
+                                  config?.rogueStartZone ??
+                                  bootstrap?.rogueStartZone,
+                              objectiveZoneRadiusMeters:
+                                  config?.objectiveZoneRadius ??
+                                  bootstrap!.form!.objectiveZoneRadius,
+                              streetNetwork:
+                                  config?.mapStreetNetwork ??
+                                  const <List<GeoPoint>>[],
+                              startZoneRadiusMeters:
+                                  config?.startZoneRadius ??
+                                  bootstrap?.form?.startZoneRadius ??
+                                  25,
+                              showObjectives: _controller.isHost,
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                    if (config != null ||
-                        (bootstrap?.form != null &&
-                            bootstrap!.form!.mapCenterLatitude.isNotEmpty &&
-                            bootstrap.form!.mapCenterLongitude.isNotEmpty))
                       Card(
                         child: Padding(
                           padding: const EdgeInsets.all(12),
-                          child: LobbyMapPreview(
-                            center:
-                                config?.mapCenter ??
-                                (bootstrap!.form!.mapCenterLatitude.isEmpty
-                                    ? bootstrap.objectives.first
-                                    : _pointFromForm(bootstrap)),
-                            mapRadiusMeters:
-                                config?.mapRadius ?? bootstrap!.form!.mapRadius,
-                            outerStreetContour:
-                                config?.mapStreets ??
-                                bootstrap!.outerStreetContour,
-                            objectives: _resolveHostObjectives(
-                              isHost: _controller.isHost,
-                              bootstrap: bootstrap,
-                              config: config,
-                            ),
-                            agentStartZone:
-                                config?.startZone ?? bootstrap?.agentStartZone,
-                            rogueStartZone:
-                                config?.rogueStartZone ??
-                                bootstrap?.rogueStartZone,
-                            objectiveZoneRadiusMeters:
-                                config?.objectiveZoneRadius ??
-                                bootstrap!.form!.objectiveZoneRadius,
-                            streetNetwork:
-                                config?.mapStreetNetwork ??
-                                const <List<GeoPoint>>[],
-                            startZoneRadiusMeters:
-                                config?.startZoneRadius ??
-                                bootstrap?.form?.startZoneRadius ??
-                                25,
-                            showObjectives: _controller.isHost,
-                          ),
-                        ),
-                      ),
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(
-                              'Joueurs (${_controller.players.length})',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 16,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            ..._controller.players.map((player) {
-                              final voiceActive = _controller
-                                  .isPlayerVoiceActive(player.id);
-                              return AnimatedContainer(
-                                duration: const Duration(milliseconds: 180),
-                                margin: const EdgeInsets.only(bottom: 4),
-                                decoration: BoxDecoration(
-                                  color: voiceActive
-                                      ? Colors.cyanAccent.withValues(alpha: 0.16)
-                                      : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: voiceActive
-                                        ? Colors.cyanAccent
-                                        : Colors.transparent,
-                                  ),
-                                ),
-                                child: ListTile(
-                                  dense: true,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                  ),
-                                  leading: Icon(
-                                    voiceActive
-                                        ? Icons.graphic_eq
-                                        : Icons.volume_mute,
-                                    size: 18,
-                                    color: voiceActive
-                                        ? Colors.cyanAccent
-                                        : Colors.white70,
-                                  ),
-                                  title: Text(
-                                    player.name +
-                                        (player.id == _controller.playerId
-                                            ? ' (Vous)'
-                                            : ''),
-                                  ),
-                                  subtitle: Text(
-                                    player.isHost ? 'Host' : 'Joueur',
-                                  ),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    children: [
-                                      if (_roleMarkerAssetFor(player.role) !=
-                                          null)
-                                        Padding(
-                                          padding: const EdgeInsets.only(
-                                            right: 8,
-                                          ),
-                                          child: SizedBox(
-                                            width: 24,
-                                            height: 24,
-                                            child: Image.asset(
-                                              _roleMarkerAssetFor(player.role)!,
-                                              fit: BoxFit.contain,
-                                              errorBuilder: (context, _, _) =>
-                                                  Icon(
-                                                    _roleFallbackIconFor(
-                                                      player.role,
-                                                    ),
-                                                    size: 20,
-                                                    color: _roleColorFor(
-                                                      player.role,
-                                                    ),
-                                                  ),
-                                            ),
-                                          ),
-                                        ),
-                                      _controller.isHost
-                                          ? DropdownButton<String>(
-                                              value: player.role ?? '',
-                                              items: const [
-                                                DropdownMenuItem(
-                                                  value: '',
-                                                  child: Text('Aucun'),
-                                                ),
-                                                DropdownMenuItem(
-                                                  value: 'AGENT',
-                                                  child: Text('Agent'),
-                                                ),
-                                                DropdownMenuItem(
-                                                  value: 'ROGUE',
-                                                  child: Text('Rogue'),
-                                                ),
-                                              ],
-                                              onChanged: (value) {
-                                                _controller.updateRole(
-                                                  targetPlayerId: player.id,
-                                                  role: (value?.isEmpty ?? true)
-                                                      ? null
-                                                      : value,
-                                                );
-                                              },
-                                            )
-                                          : Text(player.role ?? 'Aucun'),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            }),
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (_controller.isHost)
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              FilledButton.tonal(
-                                onPressed: _openHostConfigEditor,
-                                child: const Text('Modifier paramètres'),
-                              ),
-                              const SizedBox(height: 10),
-                              const Text(
-                                'Prerequis pour demarrer',
-                                style: TextStyle(fontWeight: FontWeight.w600),
-                              ),
-                              const SizedBox(height: 8),
-                              Semantics(
-                                label: _controller.canStartGame
-                                    ? 'Démarrage autorisé: tous les joueurs ont un rôle attribué.'
-                                    : 'Démarrage bloqué: attribuez un rôle à chaque joueur.',
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
                                 child: Text(
-                                  _controller.canStartGame
-                                      ? 'OK: tous les joueurs ont un rôle (>=1 Agent et 1 Rogue)'
-                                      : 'Attribuez un rôle à chaque joueur (>=1 Agent et 1 Rogue)',
+                                  'Joueurs (${_controller.players.length})',
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w600),
                                 ),
                               ),
-                              const SizedBox(height: 10),
-                              FilledButton(
-                                onPressed: _controller.canStartGame
-                                    ? _controller.startGame
-                                    : null,
-                                child: const Text('Demarrer la partie'),
-                              ),
+                              for (
+                                var i = 0;
+                                i < _controller.players.length;
+                                i++
+                              ) ...[
+                                if (i > 0)
+                                  Divider(
+                                    height: 1,
+                                    indent: 8,
+                                    endIndent: 8,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.outlineVariant,
+                                  ),
+                                _buildPlayerTile(_controller.players[i]),
+                              ],
                             ],
                           ),
                         ),
                       ),
-                    if (_controller.gameStarted)
-                      Card(
-                        color: Colors.orange.shade100,
-                        child: const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: Text('Partie en cours de demarrage...'),
+                      if (_controller.isHost)
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                LobbyStartRequirements(
+                                  players: _controller.players,
+                                ),
+                                const SizedBox(height: 16),
+                                FilledButton(
+                                  onPressed: _controller.canStartGame
+                                      ? _controller.startGame
+                                      : null,
+                                  child: const Text('Démarrer la partie'),
+                                ),
+                                const SizedBox(height: 8),
+                                OutlinedButton.icon(
+                                  onPressed: _openHostConfigEditor,
+                                  icon: const Icon(Icons.tune),
+                                  label: const Text('Modifier les paramètres'),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
-                    if (_controller.connectionStatus == 'connected' &&
-                        _controller.players.isEmpty)
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: OutlinedButton(
-                          onPressed: _controller.requestLatestState,
-                          child: const Text('Demander la synchronisation'),
+                      if (_controller.gameStarted)
+                        const AppNotice(message: 'Démarrage de la partie…'),
+                      if (_controller.connectionStatus == 'connected' &&
+                          _controller.players.isEmpty)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: OutlinedButton(
+                            onPressed: _controller.requestLatestState,
+                            child: const Text('Demander la synchronisation'),
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
         );
       },
+    );
+  }
+
+  Widget _buildPlayerTile(LobbyPlayer player) => LobbyPlayerRow(
+    key: ValueKey(player.id),
+    player: player,
+    isSelf: player.id == _controller.playerId,
+    voiceActive: _controller.isPlayerVoiceActive(player.id),
+    onRoleChanged: _controller.isHost
+        ? (role) =>
+              _controller.updateRole(targetPlayerId: player.id, role: role)
+        : null,
+  );
+
+  Widget _buildJoinCodeCard() {
+    final code = (_controller.lobbyCode ?? '').toUpperCase();
+    final codeLabel = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text('Code de la partie', textAlign: TextAlign.center),
+        const SizedBox(height: 8),
+        SelectableText(
+          code,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 28,
+            letterSpacing: 2,
+          ),
+        ),
+      ],
+    );
+    final qrCode = Semantics(
+      label: 'QR code pour rejoindre la partie $code',
+      image: true,
+      child: Container(
+        width: 120,
+        height: 120,
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: QrImageView(
+          data: '{"type":"lobby-join","code":"$code"}',
+          version: QrVersions.auto,
+          eyeStyle: const QrEyeStyle(
+            eyeShape: QrEyeShape.square,
+            color: Colors.black,
+          ),
+          dataModuleStyle: const QrDataModuleStyle(
+            dataModuleShape: QrDataModuleShape.square,
+            color: Colors.black,
+          ),
+          backgroundColor: Colors.white,
+        ),
+      ),
+    );
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact =
+                constraints.maxWidth < 340 ||
+                MediaQuery.textScalerOf(context).scale(1) > 1.3;
+            if (compact || code.isEmpty) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  codeLabel,
+                  if (code.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    Center(child: qrCode),
+                  ],
+                ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: codeLabel),
+                const SizedBox(width: 16),
+                qrCode,
+              ],
+            );
+          },
+        ),
+      ),
     );
   }
 
@@ -657,27 +563,27 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
   }
 
   Widget _statusChip(String status) {
-    Color color;
-    switch (status) {
-      case 'connected':
-        color = Colors.green;
-        break;
-      case 'connecting':
-        color = Colors.orange;
-        break;
-      case 'error':
-        color = Colors.red;
-        break;
-      default:
-        color = Colors.grey;
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(status, style: TextStyle(color: color, fontSize: 12)),
+    final (label, icon) = switch (status) {
+      'connected' => ('En ligne', Icons.check_circle_outline),
+      'connecting' => ('Connexion…', Icons.sync),
+      'error' => ('Hors ligne', Icons.error_outline),
+      _ => ('En attente', Icons.schedule),
+    };
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          icon,
+          size: 16,
+          color: status == 'error' ? scheme.error : scheme.primary,
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+        ),
+      ],
     );
   }
 
@@ -698,39 +604,6 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
     );
   }
 
-  String? _roleMarkerAssetFor(String? role) {
-    switch ((role ?? '').toUpperCase()) {
-      case 'AGENT':
-        return 'assets/images/agent_marker.png';
-      case 'ROGUE':
-        return 'assets/images/rogue_marker.png';
-      default:
-        return null;
-    }
-  }
-
-  IconData _roleFallbackIconFor(String? role) {
-    switch ((role ?? '').toUpperCase()) {
-      case 'AGENT':
-        return Icons.shield;
-      case 'ROGUE':
-        return Icons.visibility_off;
-      default:
-        return Icons.help_outline;
-    }
-  }
-
-  Color _roleColorFor(String? role) {
-    switch ((role ?? '').toUpperCase()) {
-      case 'AGENT':
-        return Colors.lightBlueAccent;
-      case 'ROGUE':
-        return Colors.purpleAccent;
-      default:
-        return Colors.white70;
-    }
-  }
-
   Future<void> _openHostConfigEditor() async {
     final initial = _controller.bootstrapData?.form;
     if (!_controller.isHost || initial == null) {
@@ -747,141 +620,33 @@ class _LobbyPageState extends ConsumerState<LobbyPage> with WidgetsBindingObserv
   }
 
   Future<void> _openChatSheet() async {
+    if (_isChatOpen) return;
     setState(() {
       _isChatOpen = true;
       _lastReadCount = _controller.chatMessages.length;
     });
-    await showModalBottomSheet(
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (context) => AnimatedPadding(
-        duration: const Duration(milliseconds: 160),
-        curve: Curves.easeOut,
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(context).bottom,
-        ),
-        child: SafeArea(
-          child: SizedBox(
-            height: MediaQuery.of(context).size.height * 0.65,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Chat du lobby',
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close),
-                        tooltip: 'Fermer',
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: AnimatedBuilder(
-                    animation: _controller,
-                    builder: (context, _) {
-                      if (_controller.chatMessages.isEmpty) {
-                        return Center(
-                          child: Text(
-                            'Aucun message.',
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurface,
-                            ),
-                          ),
-                        );
-                      }
-                      return ListView.builder(
-                        reverse: true,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        itemCount: _controller.chatMessages.length,
-                        itemBuilder: (context, index) {
-                          final m = _controller.chatMessages[
-                              _controller.chatMessages.length - 1 - index];
-                          final isMe = m.playerId == _controller.playerId;
-                          return Align(
-                            alignment: isMe
-                                ? Alignment.centerRight
-                                : Alignment.centerLeft,
-                            child: Container(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: isMe
-                                    ? Colors.blue.shade100
-                                    : Colors.grey.shade200,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    isMe
-                                        ? '${m.playerName} (Vous)'
-                                        : m.playerName,
-                                    style: _kChatBubbleNameStyle,
-                                  ),
-                                  Text(m.text, style: _kChatBubbleBodyStyle),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _chatController,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                          decoration: InputDecoration(
-                            border: const OutlineInputBorder(),
-                            hintText: 'Votre message...',
-                            hintStyle: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurface.withValues(alpha: 0.55),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: () {
-                          _controller.sendChat(_chatController.text);
-                          _chatController.clear();
-                        },
-                        child: const Text('Envoyer'),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+      useSafeArea: true,
+      builder: (context) => AppChatSheet(
+        title: 'Chat du lobby',
+        animation: _controller,
+        controller: _chatController,
+        compactAuthor: false,
+        messageCount: () => _controller.chatMessages.length,
+        messageAt: (index) {
+          final message = _controller.chatMessages[index];
+          return AppChatEntry(
+            author: message.playerName,
+            text: message.text,
+            isSelf: message.playerId == _controller.playerId,
+          );
+        },
+        onSend: _controller.sendChat,
       ),
     );
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
     setState(() {
       _isChatOpen = false;
       _lastReadCount = _controller.chatMessages.length;

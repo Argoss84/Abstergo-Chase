@@ -1,3 +1,4 @@
+import 'package:broken_veil_protocol/shared/widgets/app_page_body.dart';
 import 'package:broken_veil_protocol/shared/services/vibration_service.dart';
 import 'package:broken_veil_protocol/shared/services/socket_environment_service.dart';
 import 'package:broken_veil_protocol/shared/services/screen_awake_service.dart';
@@ -125,235 +126,254 @@ class _SettingsPageState extends State<SettingsPage> {
     final settings = _settings;
     return Scaffold(
       appBar: AppBar(title: const Text('Paramètres')),
-      body: settings == null
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _buildCollapsibleSection(
-                  title: 'Signaling',
-                  subtitle: 'Choisissez le serveur signaling à utiliser.',
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          'Dev',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: !_useProductionSignaling
-                                ? Colors.cyan
-                                : Colors.white70,
+      body: AppPageBody(
+        child: settings == null
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
+                padding: const EdgeInsets.all(20),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                children: [
+                  _buildCollapsibleSection(
+                    title: 'Serveur de jeu',
+                    subtitle: 'Choisissez l’environnement de connexion.',
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            'Dev',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: !_useProductionSignaling
+                                  ? Colors.cyan
+                                  : Colors.white70,
+                            ),
                           ),
-                        ),
-                        Expanded(
-                          child: Slider(
-                            min: 0,
-                            max: 1,
-                            divisions: 1,
-                            value: _useProductionSignaling ? 1 : 0,
-                            onChanged: (value) {
-                              _setSignalingEnvironment(value >= 0.5);
-                            },
+                          Expanded(
+                            child: Slider(
+                              min: 0,
+                              max: 1,
+                              divisions: 1,
+                              value: _useProductionSignaling ? 1 : 0,
+                              onChanged: (value) {
+                                _setSignalingEnvironment(value >= 0.5);
+                              },
+                            ),
                           ),
-                        ),
-                        Text(
-                          'Prod',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: _useProductionSignaling
-                                ? Colors.cyan
-                                : Colors.white70,
+                          Text(
+                            'Prod',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: _useProductionSignaling
+                                  ? Colors.cyan
+                                  : Colors.white70,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Le serveur prod s\'éteint après 1 h sans partie et peut mettre jusqu\'à 2 min à redémarrer.',
-                      style: TextStyle(fontSize: 13, color: Colors.white70),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _buildCollapsibleSection(
-                  title: 'Ecran',
-                  subtitle:
-                      'Empêche la mise en veille de l’écran pendant le jeu.',
-                  children: [
-                    SwitchListTile(
-                      value: _preventScreenLock,
-                      onChanged: _setPreventScreenLock,
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Empêcher le verrouillage écran'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _buildCollapsibleSection(
-                  title: 'TTS',
-                  subtitle: 'Active ou désactive la voix de synthèse.',
-                  children: [
-                    SwitchListTile(
-                      value: _ttsEnabled,
-                      onChanged: _setTtsEnabled,
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Activer le TTS'),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _ttsTestController,
-                      minLines: 1,
-                      maxLines: 3,
-                      decoration: const InputDecoration(
-                        labelText: 'Texte de test',
-                        hintText: 'Saisissez un texte à lire',
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: FilledButton.icon(
-                        onPressed: _testTts,
-                        icon: const Icon(Icons.volume_up),
-                        label: const Text('Tester le TTS'),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _buildCollapsibleSection(
-                  title: 'Vocal',
-                  subtitle: 'Mode d’émission et sensibilité de détection.',
-                  children: [
-                    SwitchListTile(
-                      value: _voiceEnabled,
-                      onChanged: _setVoiceEnabled,
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Activer le vocal'),
-                      subtitle: const Text(
-                        'Désactivé: aucune connexion au serveur vocal.',
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SegmentedButton<VoiceTransmissionMode>(
-                      segments: const <ButtonSegment<VoiceTransmissionMode>>[
-                        ButtonSegment<VoiceTransmissionMode>(
-                          value: VoiceTransmissionMode.voiceActivation,
-                          label: Text('Voice activation'),
-                          icon: Icon(Icons.mic),
-                        ),
-                        ButtonSegment<VoiceTransmissionMode>(
-                          value: VoiceTransmissionMode.pushToTalk,
-                          label: Text('Push to Talk'),
-                          icon: Icon(Icons.record_voice_over),
-                        ),
-                      ],
-                      selected: <VoiceTransmissionMode>{_voiceMode},
-                      onSelectionChanged: _voiceEnabled
-                          ? (values) {
-                              final selected = values.isEmpty
-                                  ? VoiceTransmissionMode.voiceActivation
-                                  : values.first;
-                              _setVoiceMode(selected);
-                            }
-                          : null,
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'Seuil de détection (voice activation)',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    Slider(
-                      value: _voiceThreshold,
-                      min: 0.05,
-                      max: 1.0,
-                      divisions: 19,
-                      label: '${(_voiceThreshold * 100).round()}%',
-                      onChanged:
-                          _voiceEnabled &&
-                              _voiceMode ==
-                                  VoiceTransmissionMode.voiceActivation
-                          ? (v) => _setVoiceThreshold(v)
-                          : null,
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Test rapide : maintenez le bouton ci-dessous pour valider le seuil choisi.',
-                    ),
-                    const SizedBox(height: 8),
-                    Listener(
-                      onPointerDown: _voiceEnabled
-                          ? (_) {
-                              setState(() {
-                                _testVoiceLevel = 1.0;
-                              });
-                            }
-                          : null,
-                      onPointerUp: _voiceEnabled
-                          ? (_) {
-                              setState(() {
-                                _testVoiceLevel = 0.0;
-                              });
-                            }
-                          : null,
-                      onPointerCancel: _voiceEnabled
-                          ? (_) {
-                              setState(() {
-                                _testVoiceLevel = 0.0;
-                              });
-                            }
-                          : null,
-                      child: FilledButton.icon(
-                        onPressed: _voiceEnabled ? () {} : null,
-                        icon: const Icon(Icons.mic),
-                        label: const Text('Maintenir pour tester'),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(999),
-                      child: LinearProgressIndicator(
-                        minHeight: 10,
-                        value: _testVoiceLevel,
-                        backgroundColor: Colors.grey.shade300,
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          _testVoiceLevel >= _voiceThreshold
-                              ? Colors.green
-                              : Colors.orange,
+                      const SizedBox(height: 8),
+                      Text(
+                        'Le serveur prod s\'éteint après 1 h sans partie et peut mettre jusqu\'à 2 min à redémarrer.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _testVoiceLevel >= _voiceThreshold
-                          ? 'Voix détectée (au-dessus du seuil)'
-                          : 'Voix non détectée (sous le seuil)',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: _testVoiceLevel >= _voiceThreshold
-                            ? Colors.green
-                            : Colors.orange.shade800,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _buildCollapsibleSection(
-                  title: 'Vibrations',
-                  subtitle: 'Active/désactive les vibrations par situation.',
-                  children: [
-                    ..._vibrationService.orderedEvents().map((event) {
-                      return SwitchListTile(
-                        value: settings[event] ?? true,
-                        onChanged: (value) => _set(event, value),
-                        title: Text(_vibrationService.labelFor(event)),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildCollapsibleSection(
+                    title: 'Écran',
+                    subtitle:
+                        'Empêche la mise en veille de l’écran pendant le jeu.',
+                    children: [
+                      SwitchListTile(
+                        value: _preventScreenLock,
+                        onChanged: _setPreventScreenLock,
                         contentPadding: EdgeInsets.zero,
-                      );
-                    }),
-                  ],
-                ),
-              ],
-            ),
+                        title: const Text('Empêcher le verrouillage écran'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildCollapsibleSection(
+                    title: 'Annonces vocales',
+                    subtitle: 'Active ou désactive la voix de synthèse.',
+                    children: [
+                      SwitchListTile(
+                        value: _ttsEnabled,
+                        onChanged: _setTtsEnabled,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Activer les annonces vocales'),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _ttsTestController,
+                        minLines: 1,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          labelText: 'Texte de test',
+                          hintText: 'Saisissez un texte à lire',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: FilledButton.icon(
+                          onPressed: _testTts,
+                          icon: const Icon(Icons.volume_up),
+                          label: const Text('Écouter le texte'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildCollapsibleSection(
+                    title: 'Vocal',
+                    subtitle: 'Mode d’émission et sensibilité de détection.',
+                    children: [
+                      SwitchListTile(
+                        value: _voiceEnabled,
+                        onChanged: _setVoiceEnabled,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Activer le vocal'),
+                        subtitle: const Text(
+                          'Désactivé: aucune connexion au serveur vocal.',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SegmentedButton<VoiceTransmissionMode>(
+                        direction:
+                            MediaQuery.sizeOf(context).width < 400 ||
+                                MediaQuery.textScalerOf(context).scale(1) > 1.3
+                            ? Axis.vertical
+                            : Axis.horizontal,
+                        showSelectedIcon: false,
+                        segments: const <ButtonSegment<VoiceTransmissionMode>>[
+                          ButtonSegment<VoiceTransmissionMode>(
+                            value: VoiceTransmissionMode.voiceActivation,
+                            label: Text('Automatique'),
+                            icon: Icon(Icons.mic),
+                          ),
+                          ButtonSegment<VoiceTransmissionMode>(
+                            value: VoiceTransmissionMode.pushToTalk,
+                            label: Text('Maintenir'),
+                            icon: Icon(Icons.record_voice_over),
+                          ),
+                        ],
+                        selected: <VoiceTransmissionMode>{_voiceMode},
+                        onSelectionChanged: _voiceEnabled
+                            ? (values) {
+                                final selected = values.isEmpty
+                                    ? VoiceTransmissionMode.voiceActivation
+                                    : values.first;
+                                _setVoiceMode(selected);
+                              }
+                            : null,
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Seuil de détection automatique',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      Slider(
+                        value: _voiceThreshold,
+                        min: 0.05,
+                        max: 1.0,
+                        divisions: 19,
+                        label: '${(_voiceThreshold * 100).round()}%',
+                        onChanged:
+                            _voiceEnabled &&
+                                _voiceMode ==
+                                    VoiceTransmissionMode.voiceActivation
+                            ? (v) => setState(() => _voiceThreshold = v)
+                            : null,
+                        onChangeEnd:
+                            _voiceEnabled &&
+                                _voiceMode ==
+                                    VoiceTransmissionMode.voiceActivation
+                            ? _setVoiceThreshold
+                            : null,
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Test rapide : maintenez le bouton ci-dessous pour valider le seuil choisi.',
+                      ),
+                      const SizedBox(height: 8),
+                      Listener(
+                        onPointerDown: _voiceEnabled
+                            ? (_) {
+                                setState(() {
+                                  _testVoiceLevel = 1.0;
+                                });
+                              }
+                            : null,
+                        onPointerUp: _voiceEnabled
+                            ? (_) {
+                                setState(() {
+                                  _testVoiceLevel = 0.0;
+                                });
+                              }
+                            : null,
+                        onPointerCancel: _voiceEnabled
+                            ? (_) {
+                                setState(() {
+                                  _testVoiceLevel = 0.0;
+                                });
+                              }
+                            : null,
+                        child: FilledButton.icon(
+                          onPressed: _voiceEnabled ? () {} : null,
+                          icon: const Icon(Icons.mic),
+                          label: const Text('Maintenir pour tester'),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          minHeight: 10,
+                          value: _testVoiceLevel,
+                          backgroundColor: Colors.grey.shade300,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            _testVoiceLevel >= _voiceThreshold
+                                ? Colors.green
+                                : Colors.orange,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _testVoiceLevel >= _voiceThreshold
+                            ? 'Voix détectée (au-dessus du seuil)'
+                            : 'Voix non détectée (sous le seuil)',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: _testVoiceLevel >= _voiceThreshold
+                              ? Colors.green
+                              : Colors.orange.shade800,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildCollapsibleSection(
+                    title: 'Vibrations',
+                    subtitle: 'Active/désactive les vibrations par situation.',
+                    children: [
+                      ..._vibrationService.orderedEvents().map((event) {
+                        return SwitchListTile(
+                          value: settings[event] ?? true,
+                          onChanged: (value) => _set(event, value),
+                          title: Text(_vibrationService.labelFor(event)),
+                          contentPadding: EdgeInsets.zero,
+                        );
+                      }),
+                    ],
+                  ),
+                ],
+              ),
+      ),
     );
   }
 
@@ -365,6 +385,9 @@ class _SettingsPageState extends State<SettingsPage> {
   }) {
     return Card(
       child: ExpansionTile(
+        key: PageStorageKey<String>(title),
+        shape: const Border(),
+        collapsedShape: const Border(),
         tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
         childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         initiallyExpanded: initiallyExpanded,

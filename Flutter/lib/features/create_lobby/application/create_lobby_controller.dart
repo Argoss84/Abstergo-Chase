@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:broken_veil_protocol/features/create_lobby/data/create_lobby_service.dart';
 import 'package:broken_veil_protocol/features/create_lobby/data/street_contour_service.dart';
 import 'package:broken_veil_protocol/features/create_lobby/data/location_service.dart';
@@ -32,6 +34,7 @@ class CreateLobbyController extends ChangeNotifier {
   final StreetFetchService _streetFetchService;
   final StreetContourService _streetContourService;
   final StreetSnapService _streetSnapService;
+  bool _disposed = false;
 
   CreateLobbyFormData form = CreateLobbyFormData.initial();
   String displayName = '';
@@ -107,22 +110,29 @@ class CreateLobbyController extends ChangeNotifier {
   }
 
   Future<void> loadCurrentPosition() async {
+    if (_disposed || isLoadingGps) return;
     isLoadingGps = true;
     lastError = null;
     notifyListeners();
 
     try {
       final point = await _locationService.getCurrentPosition();
+      if (_disposed) return;
       currentPosition = point;
       selectedPosition = null;
       streets = <List<GeoPoint>>[];
       outerStreetContour = <GeoPoint>[];
       streetsLoadError = null;
+    } on TimeoutException {
+      if (_disposed) return;
+      lastError =
+          'Aucune position GPS reçue. Vérifiez la localisation et réessayez.';
     } catch (error) {
+      if (_disposed) return;
       lastError = error.toString();
     } finally {
       isLoadingGps = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -153,8 +163,7 @@ class CreateLobbyController extends ChangeNotifier {
     }
     if (!streets.any((street) => street.length >= 2)) {
       _resetMapConfiguration();
-      lastError =
-          'Les rues doivent être chargées avant de placer les points.';
+      lastError = 'Les rues doivent être chargées avant de placer les points.';
       notifyListeners();
       return;
     }
@@ -276,8 +285,7 @@ class CreateLobbyController extends ChangeNotifier {
       return;
     }
     if (!hasCompleteMapConfiguration) {
-      lastError =
-          'Générez ou placez tous les points avant de créer la partie.';
+      lastError = 'Générez ou placez tous les points avant de créer la partie.';
       notifyListeners();
       return;
     }
@@ -344,5 +352,11 @@ class CreateLobbyController extends ChangeNotifier {
 
   void releaseSignalingSocket() {
     _service.disconnect();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 }

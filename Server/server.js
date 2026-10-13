@@ -1845,6 +1845,26 @@ io.on('connection', (socket) => {
       send(socket, { type: 'error', payload: { message: 'Type de message manquant.' } });
       return;
     }
+    if (type === 'session:lookup') {
+      const code = String(payload?.code ?? '').trim().toUpperCase();
+      const validCode = /^[A-Z0-9]{6}$/.test(code);
+      const destination = !validCode
+        ? 'notFound'
+        : games.has(code)
+          ? 'game'
+          : lobbies.has(code)
+            ? 'lobby'
+            : 'notFound';
+      send(socket, {
+        type: 'session:resolved',
+        payload: {
+          code,
+          requestId: payload?.requestId,
+          destination
+        }
+      });
+      return;
+    }
     if (Math.random() < MESSAGE_DEBUG_SAMPLE_RATE) {
       const payloadSize =
         payload && typeof payload === 'object' ? Object.keys(payload).length : 0;

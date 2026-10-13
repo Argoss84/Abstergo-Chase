@@ -1,7 +1,8 @@
+import 'package:broken_veil_protocol/shared/widgets/app_chat_sheet.dart';
+import 'package:broken_veil_protocol/shared/widgets/app_page_body.dart';
 import 'dart:async';
 import 'dart:math';
 import 'dart:convert';
-import 'dart:ui';
 
 import 'package:broken_veil_protocol/features/game/application/game_controller.dart';
 import 'package:broken_veil_protocol/features/game/domain/game_models.dart';
@@ -15,23 +16,16 @@ import 'package:broken_veil_protocol/shared/services/voice_settings_service.dart
 import 'package:flutter/gestures.dart' show kTouchSlop;
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:flutter/services.dart';
 
 part 'game_page_ping.dart';
 part 'game_page_compass.dart';
 
-const TextStyle _kTeamChatBubbleStyle = TextStyle(
-  fontSize: 14,
-  height: 1.35,
-  color: Color(0xFF0F172A),
-);
 const String _kGameUnavailableMessage = 'Partie indisponible.';
 const String _kPingPayloadPrefix = '[PING]';
 const Duration _kPingPressDelay = Duration(milliseconds: 500);
@@ -76,11 +70,7 @@ const double _kDefaultGameMapZoom = 16.5;
 const double _kCompassCenterToleranceLatLng = 0.000001;
 
 class GamePage extends StatefulWidget {
-  const GamePage({
-    super.key,
-    required this.bootstrap,
-    this.controllerFactory,
-  });
+  const GamePage({super.key, required this.bootstrap, this.controllerFactory});
 
   static const String routePath = '/game';
   static const String routeName = 'game';
@@ -127,6 +117,7 @@ class _GamePageState extends State<GamePage>
   bool _prevAllPlayersInStartZone = false;
   bool _prevGameStarted = false;
   Timer? _pingPressTimer;
+  Timer? _pingExpiryTimer;
   Offset? _pingPressOrigin;
   GeoPoint? _pingLocation;
   final Set<int> _mapPointers = <int>{};
@@ -174,6 +165,11 @@ class _GamePageState extends State<GamePage>
       lowerBound: 0,
       upperBound: 1,
     )..repeat(reverse: true);
+    _pingExpiryTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      final count = _activeRolePings.length;
+      _pruneExpiredPings();
+      if (mounted && count != _activeRolePings.length) setState(() {});
+    });
     _mapController = MapController();
     _controller = (widget.controllerFactory?.call() ?? GameController())
       ..initialize(widget.bootstrap);
@@ -185,10 +181,22 @@ class _GamePageState extends State<GamePage>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _guidancePulseController.stop();
+      _guidancePulseController.value = 0.5;
+    } else if (!_guidancePulseController.isAnimating) {
+      _guidancePulseController.repeat(reverse: true);
+    }
+  }
+
+  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _compassSub?.cancel();
     _pingPressTimer?.cancel();
+    _pingExpiryTimer?.cancel();
     _headingDeg.dispose();
     _guidancePulseController.dispose();
     _chatController.dispose();
@@ -207,17 +215,19 @@ class _GamePageState extends State<GamePage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      if (!MediaQuery.disableAnimationsOf(context)) {
+        _guidancePulseController.repeat(reverse: true);
+      }
       unawaited(_controller.onAppResumed());
+    } else {
+      _guidancePulseController.stop();
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: Listenable.merge(<Listenable>[
-        _controller,
-        _guidancePulseController,
-      ]),
+      animation: _controller,
       builder: (context, _) {
         final effectiveGameConfig =
             _controller.liveGameConfig ?? widget.bootstrap.gameConfig;
@@ -296,8 +306,13 @@ class _GamePageState extends State<GamePage>
             ),
           );
         }
+        final winnerTypeForLayout = _controller.winnerType;
         final topInset =
-            MediaQuery.of(context).padding.top + kToolbarHeight + 8;
+            MediaQuery.of(context).padding.top +
+            kToolbarHeight +
+            40 +
+            (winnerTypeForLayout == null ? 46 : 0) +
+            8;
         final objectiveZoneRadius =
             effectiveGameConfig?.objectiveZoneRadius ??
             widget.bootstrap.lobby.form?.objectiveZoneRadius ??
@@ -348,26 +363,38 @@ class _GamePageState extends State<GamePage>
         return Scaffold(
           extendBodyBehindAppBar: true,
           appBar: AppBar(
-            backgroundColor: Colors.transparent,
             surfaceTintColor: Colors.transparent,
             elevation: 0,
-            flexibleSpace: ClipRect(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.22),
-                    border: Border(
-                      bottom: BorderSide(
-                        color: Colors.white.withValues(alpha: 0.14),
-                        width: 1,
-                      ),
-                    ),
+            foregroundColor: Colors.white,
+            backgroundColor: const Color(0xFF10162A),
+            systemOverlayStyle: SystemUiOverlayStyle.light,
+            title: Row(
+              children: [
+                _buildRoleTitleIcon(),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _controller.remainingSeconds == null
+                        ? (_controller.playerRole ?? 'Partie')
+                        : _formatDuration(_controller.remainingSeconds!),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white),
                   ),
+                ),
+              ],
+            ),
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(40),
+              child: SizedBox(
+                height: 40,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: _buildAppBarStatusBadges(winnerType),
                 ),
               ),
             ),
-            title: _buildRoleTitleIcon(),
             actions: [
               IconButton(
                 tooltip: _compassModeEnabled
@@ -378,29 +405,23 @@ class _GamePageState extends State<GamePage>
                   _compassModeEnabled ? Icons.explore : Icons.explore_off,
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: Center(child: _buildAppBarStatusBadges(winnerType)),
-              ),
-              if (_controller.remainingSeconds != null)
-                Center(
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 12),
-                    child: Text(_formatDuration(_controller.remainingSeconds!)),
-                  ),
-                ),
-              TextButton(
+              IconButton(
+                tooltip: 'Quitter la partie',
                 onPressed: () => _quitGame(clearSavedLobbyCode: false),
-                child: const Text('Quitter'),
+                icon: const Icon(Icons.logout),
               ),
             ],
           ),
-          floatingActionButton: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
+          floatingActionButtonLocation: winnerType == null
+              ? FloatingActionButtonLocation.endFloat
+              : FloatingActionButtonLocation.centerFloat,
+          floatingActionButton: Wrap(
+            direction: winnerType == null ? Axis.vertical : Axis.horizontal,
+            spacing: 10,
             children: [
               FloatingActionButton(
                 heroTag: 'game-chat-fab',
+                tooltip: 'Chat équipe',
                 onPressed: _openChat,
                 child: Stack(
                   clipBehavior: Clip.none,
@@ -425,15 +446,14 @@ class _GamePageState extends State<GamePage>
                   ],
                 ),
               ),
-              const SizedBox(height: 10),
               FloatingActionButton(
                 heroTag: 'game-info-fab',
+                tooltip: 'Informations de la partie',
                 onPressed: _openGameInfo,
                 child: const Icon(Icons.info_outline),
               ),
               if (_controller.voiceMode ==
                   VoiceTransmissionMode.pushToTalk) ...[
-                const SizedBox(height: 10),
                 _buildPushToTalkFab(),
               ],
             ],
@@ -493,12 +513,10 @@ class _GamePageState extends State<GamePage>
                                 ? Colors.amber
                                 : guidanceColor,
                             guidancePathDotted: true,
-                            guidanceNeonPulse: _guidancePulseController.value,
+                            effectsAnimation: _guidancePulseController,
                             highlightObjectiveZones: capturingDisplayPoints,
                             highlightObjectiveZoneRadiusMeters:
                                 objectiveZoneRadius,
-                            highlightObjectivePulse:
-                                _guidancePulseController.value,
                             showCenterMarker: false,
                             pingMarkers: _activeRolePings
                                 .map(
@@ -564,7 +582,10 @@ class _GamePageState extends State<GamePage>
                     ),
                   if (winnerType == null)
                     Positioned(
-                      top: MediaQuery.of(context).padding.top + kToolbarHeight,
+                      top:
+                          MediaQuery.of(context).padding.top +
+                          kToolbarHeight +
+                          40,
                       left: 0,
                       right: 0,
                       child: ValueListenableBuilder<double?>(
@@ -588,10 +609,9 @@ class _GamePageState extends State<GamePage>
                       top: topInset,
                       left: 12,
                       right: 12,
-                      child: Container(
-                        color: Colors.red.shade100,
-                        padding: const EdgeInsets.all(8),
-                        child: Text(_controller.error!),
+                      child: AppNotice(
+                        message: _controller.error!,
+                        isError: true,
                       ),
                     ),
                   if (winnerType == null && outOfZone)
@@ -626,9 +646,14 @@ class _GamePageState extends State<GamePage>
                         child: Container(
                           color: Colors.black.withValues(alpha: 0.55),
                           child: Center(
-                            child: Transform.scale(
-                              scale:
-                                  0.96 + (_guidancePulseController.value * 0.1),
+                            child: AnimatedBuilder(
+                              animation: _guidancePulseController,
+                              builder: (context, child) => Transform.scale(
+                                scale:
+                                    0.96 +
+                                    (_guidancePulseController.value * 0.1),
+                                child: child,
+                              ),
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 18,
@@ -752,58 +777,68 @@ class _GamePageState extends State<GamePage>
                       left: 12,
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(10),
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
-                          child: Container(
-                            padding: const EdgeInsets.all(8),
-                            color: Colors.black.withValues(alpha: 0.08),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                ..._controller.players
-                                    .where(
-                                      (player) =>
-                                          player.status.toLowerCase() !=
-                                          'disconnected',
-                                    )
-                                    .map((player) {
-                                      final inZone = _controller
-                                          .isPlayerInStartZone(player);
-                                      final role = (player.role ?? '')
-                                          .toUpperCase();
-                                      final roleShort = role == 'ROGUE'
-                                          ? 'r'
-                                          : role == 'AGENT'
-                                          ? 'a'
-                                          : '-';
-                                      return Padding(
-                                        padding: const EdgeInsets.only(
-                                          bottom: 4,
-                                        ),
-                                        child: Text(
-                                          '${player.name} [$roleShort]',
-                                          style: TextStyle(
-                                            color: inZone
-                                                ? Colors.greenAccent
-                                                : Colors.redAccent,
-                                            fontWeight: FontWeight.w700,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: min(
+                              260,
+                              MediaQuery.sizeOf(context).width - 32,
+                            ),
+                            maxHeight: MediaQuery.sizeOf(context).height * 0.35,
+                          ),
+                          child: SingleChildScrollView(
+                            child: Container(
+                              padding: const EdgeInsets.all(8),
+                              color: const Color(
+                                0xFF10162A,
+                              ).withValues(alpha: 0.94),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  ..._controller.players
+                                      .where(
+                                        (player) =>
+                                            player.status.toLowerCase() !=
+                                            'disconnected',
+                                      )
+                                      .map((player) {
+                                        final inZone = _controller
+                                            .isPlayerInStartZone(player);
+                                        final role = (player.role ?? '')
+                                            .toUpperCase();
+                                        final roleShort = role == 'ROGUE'
+                                            ? 'r'
+                                            : role == 'AGENT'
+                                            ? 'a'
+                                            : '-';
+                                        return Padding(
+                                          padding: const EdgeInsets.only(
+                                            bottom: 4,
                                           ),
-                                        ),
-                                      );
-                                    }),
-                                const SizedBox(height: 6),
-                                FilledButton(
-                                  onPressed: _controller.canHostStartGame
-                                      ? _controller.startGameFromHost
-                                      : null,
-                                  child: Text(
-                                    _controller.canHostStartGame
-                                        ? 'Démarrer'
-                                        : 'En attente',
+                                          child: Text(
+                                            '${player.name} [$roleShort]',
+                                            style: TextStyle(
+                                              color: inZone
+                                                  ? Colors.greenAccent
+                                                  : Colors.redAccent,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        );
+                                      }),
+                                  const SizedBox(height: 6),
+                                  FilledButton(
+                                    onPressed: _controller.canHostStartGame
+                                        ? _controller.startGameFromHost
+                                        : null,
+                                    child: Text(
+                                      _controller.canHostStartGame
+                                          ? 'Démarrer'
+                                          : 'En attente',
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -816,68 +851,65 @@ class _GamePageState extends State<GamePage>
                       left: 12,
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(10),
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
-                          child: Container(
-                            width: 260,
-                            padding: const EdgeInsets.all(8),
-                            color: Colors.black.withValues(alpha: 0.08),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                ...activeAudiblePlayers.map((player) {
-                                  const activeVoice = true;
-                                  return Container(
-                                    margin: const EdgeInsets.only(bottom: 4),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: activeVoice
-                                          ? Colors.cyanAccent.withValues(
-                                              alpha: 0.18,
-                                            )
-                                          : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(
-                                        color: activeVoice
-                                            ? Colors.cyanAccent
-                                            : Colors.white.withValues(
-                                                alpha: 0.1,
-                                              ),
-                                        width: 1,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: min(
+                              260,
+                              MediaQuery.sizeOf(context).width - 32,
+                            ),
+                            maxHeight: MediaQuery.sizeOf(context).height * 0.35,
+                          ),
+                          child: SingleChildScrollView(
+                            child: Container(
+                              width: 260,
+                              padding: const EdgeInsets.all(8),
+                              color: const Color(
+                                0xFF10162A,
+                              ).withValues(alpha: 0.94),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  ...activeAudiblePlayers.map((player) {
+                                    return Container(
+                                      margin: const EdgeInsets.only(bottom: 4),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 4,
                                       ),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          activeVoice
-                                              ? Icons.graphic_eq
-                                              : Icons.volume_mute,
-                                          size: 16,
-                                          color: activeVoice
-                                              ? Colors.cyanAccent
-                                              : Colors.white70,
+                                      decoration: BoxDecoration(
+                                        color: Colors.cyanAccent.withValues(
+                                          alpha: 0.18,
                                         ),
-                                        const SizedBox(width: 6),
-                                        Expanded(
-                                          child: Text(
-                                            player.name,
-                                            style: TextStyle(
-                                              color: activeVoice
-                                                  ? Colors.cyanAccent
-                                                  : Colors.white,
-                                              fontWeight: FontWeight.w700,
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(
+                                          color: Colors.cyanAccent,
+                                          width: 1,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.graphic_eq,
+                                            size: 16,
+                                            color: Colors.cyanAccent,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Expanded(
+                                            child: Text(
+                                              player.name,
+                                              style: TextStyle(
+                                                color: Colors.cyanAccent,
+                                                fontWeight: FontWeight.w700,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }),
-                              ],
+                                        ],
+                                      ),
+                                    );
+                                  }),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -889,29 +921,35 @@ class _GamePageState extends State<GamePage>
                 Positioned(
                   left: 0,
                   right: 0,
-                  bottom: 16,
+                  bottom: MediaQuery.paddingOf(context).bottom + 16,
                   child: Align(
                     alignment: Alignment.bottomCenter,
                     child: winnerType == null
-                        ? _buildActionFabMenu()
+                        ? AnimatedBuilder(
+                            animation: _guidancePulseController,
+                            builder: (context, _) => _buildActionFabMenu(),
+                          )
                         : const SizedBox.shrink(),
                   ),
                 ),
               if (winnerType != null)
                 Positioned(
-                  top: 16,
+                  top: topInset,
+                  bottom: MediaQuery.paddingOf(context).bottom + 88,
                   left: 16,
                   right: 16,
-                  child: Center(
+                  child: Align(
+                    alignment: Alignment.topCenter,
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 420),
-                      child: Card(
-                        margin: const EdgeInsets.all(16),
-                        child: Padding(
-                          padding: const EdgeInsets.all(18),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
+                      child: SingleChildScrollView(
+                        child: Card(
+                          margin: const EdgeInsets.all(16),
+                          child: Padding(
+                            padding: const EdgeInsets.all(18),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
                                 const Text(
                                   'Fin de partie',
                                   style: TextStyle(
@@ -928,8 +966,10 @@ class _GamePageState extends State<GamePage>
                                     fontSize: 18,
                                     fontWeight: FontWeight.w700,
                                     color: (winnerType.toUpperCase() == 'AGENT')
-                                        ? Colors.blue.shade700
-                                        : Colors.purple.shade700,
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Theme.of(
+                                            context,
+                                          ).colorScheme.secondary,
                                   ),
                                 ),
                                 const SizedBox(height: 12),
@@ -951,7 +991,8 @@ class _GamePageState extends State<GamePage>
                                       _quitGame(clearSavedLobbyCode: true),
                                   child: const Text('Quitter'),
                                 ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -984,7 +1025,9 @@ class _GamePageState extends State<GamePage>
 
   Widget _buildGamePhaseBadge({bool compactForAppBar = false}) {
     final isConvergence = !_controller.gameStarted;
-    final color = isConvergence ? Colors.amber.shade700 : Colors.green.shade600;
+    final color = isConvergence
+        ? const Color(0xFF92400E)
+        : const Color(0xFF166534);
     final label = isConvergence
         ? (compactForAppBar ? 'Conv.' : 'Convergence')
         : (compactForAppBar ? 'En cours' : 'Partie en cours');
@@ -1088,12 +1131,12 @@ class _GamePageState extends State<GamePage>
     late final IconData icon;
     switch (status) {
       case 'connected':
-        backgroundColor = Colors.green.shade700;
+        backgroundColor = const Color(0xFF166534);
         label = 'En ligne';
         icon = Icons.check_circle;
         break;
       case 'connecting':
-        backgroundColor = Colors.orange.shade800;
+        backgroundColor = const Color(0xFF9A3412);
         label = 'Connexion';
         icon = Icons.sync;
         break;
@@ -1763,7 +1806,7 @@ class _GamePageState extends State<GamePage>
         pingPoint != null;
     _resetPingWheel();
     if (!shouldTrigger) return;
-    final option = _pingOptions[selectedIndex!];
+    final option = _pingOptions[selectedIndex];
     _broadcastRolePing(option: option, point: pingPoint);
   }
 
@@ -1796,7 +1839,7 @@ class _GamePageState extends State<GamePage>
       'lng': point.longitude,
       'msg': option.shortMessage,
       'tts': option.ttsMessage,
-      'color': option.color.value,
+      'color': option.color.toARGB32(),
       'ts': DateTime.now().millisecondsSinceEpoch,
     });
     _controller.sendRoleChat('$_kPingPayloadPrefix$payload');
@@ -1895,7 +1938,7 @@ class _GamePageState extends State<GamePage>
       ttsMessage: (ttsMessage?.isNotEmpty ?? false)
           ? ttsMessage!
           : shortMessage,
-      color: Color(colorRaw ?? Colors.blueAccent.value),
+      color: Color(colorRaw ?? Colors.blueAccent.toARGB32()),
       timestampMs: timestamp,
     );
   }
@@ -1936,116 +1979,32 @@ class _GamePageState extends State<GamePage>
   }
 
   Future<void> _openChat() async {
+    if (_chatOpen) return;
     setState(() {
       _chatOpen = true;
       _lastReadCount = _controller.visibleChat.length;
     });
-    await showModalBottomSheet(
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (context) => AnimatedPadding(
-        duration: const Duration(milliseconds: 160),
-        curve: Curves.easeOut,
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(context).bottom,
-        ),
-        child: SafeArea(
-          child: SizedBox(
-            height: MediaQuery.of(context).size.height * 0.65,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          _controller.isGameFinished
-                              ? 'Chat de fin de partie'
-                              : 'Chat équipe',
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close),
-                        tooltip: 'Fermer',
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: AnimatedBuilder(
-                    animation: _controller,
-                    builder: (context, _) {
-                      return ListView(
-                        reverse: true,
-                        padding: const EdgeInsets.all(12),
-                        children: _controller.visibleChat.reversed.map((m) {
-                          final isMe = m.playerId == _controller.playerId;
-                          return Align(
-                            alignment: isMe
-                                ? Alignment.centerRight
-                                : Alignment.centerLeft,
-                            child: Container(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: isMe
-                                    ? Colors.blue.shade100
-                                    : Colors.grey.shade200,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                '${m.playerName}: ${_displayChatText(m.text)}',
-                                style: _kTeamChatBubbleStyle,
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      );
-                    },
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _chatController,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                          decoration: InputDecoration(
-                            hintText: 'Votre message...',
-                            hintStyle: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurface.withValues(alpha: 0.55),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: () {
-                          _controller.sendChat(_chatController.text);
-                          _chatController.clear();
-                        },
-                        child: const Text('Envoyer'),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+      useSafeArea: true,
+      builder: (context) => AppChatSheet(
+        title: _controller.isGameFinished
+            ? 'Chat de fin de partie'
+            : 'Chat équipe',
+        animation: _controller,
+        controller: _chatController,
+        compactAuthor: true,
+        messageCount: () => _controller.visibleChat.length,
+        messageAt: (index) {
+          final message = _controller.visibleChat[index];
+          return AppChatEntry(
+            author: message.playerName,
+            text: _displayChatText(message.text),
+            isSelf: message.playerId == _controller.playerId,
+          );
+        },
+        onSend: _controller.sendChat,
       ),
     );
     if (!mounted) return;

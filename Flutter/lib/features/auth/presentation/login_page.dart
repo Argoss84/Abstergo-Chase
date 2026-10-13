@@ -1,4 +1,5 @@
 import 'package:broken_veil_protocol/app/providers.dart';
+import 'package:broken_veil_protocol/shared/widgets/app_page_body.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -16,6 +17,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _isSubmittingLocal = false;
+  bool _hidePassword = true;
   String? _lastShownAuthError;
 
   void _showInfo(String message) {
@@ -126,70 +128,99 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       });
       _lastShownAuthError = auth.error;
     }
-    final viewInsetsBottom = MediaQuery.of(context).viewInsets.bottom;
     return Scaffold(
       appBar: AppBar(title: const Text('Connexion')),
       body: SafeArea(
         child: SingleChildScrollView(
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + viewInsetsBottom),
+          padding: const EdgeInsets.all(20),
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
-              child: Card(
-                child: Stack(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          TextField(
-                            controller: _usernameController,
-                            enabled: !isSubmitting,
-                            textInputAction: TextInputAction.next,
-                            decoration: const InputDecoration(
-                              labelText: 'Utilisateur',
+              child: AutofillGroup(
+                child: Card(
+                  child: Stack(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const AppSectionHeading(
+                              title: 'Bienvenue',
+                              subtitle:
+                                  'Connectez-vous pour retrouver votre équipe.',
+                              icon: Icons.shield_outlined,
                             ),
-                          ),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: _passwordController,
-                            enabled: !isSubmitting,
-                            obscureText: true,
-                            onSubmitted: (_) async {
-                              if (isSubmitting) {
-                                return;
-                              }
-                              await _submitLogin();
-                            },
-                            decoration: const InputDecoration(
-                              labelText: 'Mot de passe',
+                            const SizedBox(height: 24),
+                            TextField(
+                              controller: _usernameController,
+                              enabled: !isSubmitting,
+                              textInputAction: TextInputAction.next,
+                              autofillHints: const [AutofillHints.username],
+                              autocorrect: false,
+                              decoration: const InputDecoration(
+                                labelText: 'Utilisateur',
+                                prefixIcon: Icon(Icons.person_outline),
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 12),
-                          FilledButton(
-                            onPressed: isSubmitting ? null : _submitLogin,
-                            child: const Text('Se connecter'),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (isSubmitting)
-                      Positioned.fill(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.surface.withValues(alpha: 0.6),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          alignment: Alignment.center,
-                          child: const CircularProgressIndicator(),
+                            const SizedBox(height: 16),
+                            TextField(
+                              controller: _passwordController,
+                              enabled: !isSubmitting,
+                              obscureText: _hidePassword,
+                              autofillHints: const [AutofillHints.password],
+                              autocorrect: false,
+                              enableSuggestions: false,
+                              textInputAction: TextInputAction.done,
+                              onSubmitted: (_) async {
+                                if (isSubmitting) {
+                                  return;
+                                }
+                                await _submitLogin();
+                              },
+                              decoration: InputDecoration(
+                                labelText: 'Mot de passe',
+                                prefixIcon: const Icon(Icons.lock_outline),
+                                suffixIcon: IconButton(
+                                  tooltip: _hidePassword
+                                      ? 'Afficher le mot de passe'
+                                      : 'Masquer le mot de passe',
+                                  onPressed: () => setState(
+                                    () => _hidePassword = !_hidePassword,
+                                  ),
+                                  icon: Icon(
+                                    _hidePassword
+                                        ? Icons.visibility_outlined
+                                        : Icons.visibility_off_outlined,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            FilledButton(
+                              onPressed: isSubmitting ? null : _submitLogin,
+                              child: const Text('Se connecter'),
+                            ),
+                          ],
                         ),
                       ),
-                  ],
+                      if (isSubmitting)
+                        Positioned.fill(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.surface.withValues(alpha: 0.6),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            alignment: Alignment.center,
+                            child: const CircularProgressIndicator(),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),

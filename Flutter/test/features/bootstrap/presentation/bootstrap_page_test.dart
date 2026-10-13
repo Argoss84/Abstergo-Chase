@@ -44,7 +44,7 @@ class _FakeBootstrapPermissionsService implements BootstrapPermissionsService {
 }
 
 void main() {
-  Widget _app(BootstrapPermissionsService permissionsService) {
+  Widget app(BootstrapPermissionsService permissionsService) {
     return ProviderScope(
       child: MaterialApp(
         home: BootstrapPage(permissionsService: permissionsService),
@@ -55,11 +55,13 @@ void main() {
   testWidgets(
     'Disables create/join when required permissions are not granted',
     (tester) async {
-      final permissionsService = _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
-        const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
-      ]);
+      final permissionsService = _FakeBootstrapPermissionsService(
+        <BootstrapPermissionsResult>[
+          const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
+        ],
+      );
 
-      await tester.pumpWidget(_app(permissionsService));
+      await tester.pumpWidget(app(permissionsService));
       await tester.pumpAndSettle();
 
       final createTile = tester.widget<ListTile>(
@@ -80,11 +82,13 @@ void main() {
   testWidgets('Enables create/join when required permissions are granted', (
     tester,
   ) async {
-    final permissionsService = _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
-      const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted),
-    ]);
+    final permissionsService = _FakeBootstrapPermissionsService(
+      <BootstrapPermissionsResult>[
+        const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted),
+      ],
+    );
 
-    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpWidget(app(permissionsService));
     await tester.pumpAndSettle();
 
     final createTile = tester.widget<ListTile>(
@@ -104,11 +108,14 @@ void main() {
   testWidgets('Uses settings action when permissions are denied forever', (
     tester,
   ) async {
-    final permissionsService = _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
-      const BootstrapPermissionsResult(BootstrapPermissionsStatus.deniedForever),
-    ]);
+    final permissionsService =
+        _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
+          const BootstrapPermissionsResult(
+            BootstrapPermissionsStatus.deniedForever,
+          ),
+        ]);
 
-    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpWidget(app(permissionsService));
     await tester.pumpAndSettle();
 
     expect(find.text('Réglages'), findsOneWidget);
@@ -122,11 +129,13 @@ void main() {
   testWidgets('Uses settings action when permissions are denied', (
     tester,
   ) async {
-    final permissionsService = _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
-      const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
-    ]);
+    final permissionsService = _FakeBootstrapPermissionsService(
+      <BootstrapPermissionsResult>[
+        const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
+      ],
+    );
 
-    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpWidget(app(permissionsService));
     await tester.pumpAndSettle();
 
     expect(find.text('Réglages'), findsOneWidget);
@@ -138,11 +147,13 @@ void main() {
   });
 
   testWidgets('Uses settings action when check fails', (tester) async {
-    final permissionsService = _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
-      const BootstrapPermissionsResult(BootstrapPermissionsStatus.error),
-    ]);
+    final permissionsService = _FakeBootstrapPermissionsService(
+      <BootstrapPermissionsResult>[
+        const BootstrapPermissionsResult(BootstrapPermissionsStatus.error),
+      ],
+    );
 
-    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpWidget(app(permissionsService));
     await tester.pumpAndSettle();
 
     expect(find.text('Erreur de vérification'), findsOneWidget);
@@ -163,12 +174,13 @@ void main() {
   testWidgets('Rechecks permissions on app resume after settings return', (
     tester,
   ) async {
-    final permissionsService = _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
-      const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
-      const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted),
-    ]);
+    final permissionsService =
+        _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
+          const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
+          const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted),
+        ]);
 
-    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpWidget(app(permissionsService));
     await tester.pumpAndSettle();
 
     expect(find.text('Autorisations requises'), findsOneWidget);
@@ -204,14 +216,16 @@ void main() {
     );
   });
 
-  testWidgets('Does not recheck on resume before opening settings', (tester) async {
+  testWidgets('Does not recheck on resume before opening settings', (
+    tester,
+  ) async {
     final permissionsService = _FakeBootstrapPermissionsService(
       <BootstrapPermissionsResult>[
         const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
       ],
     );
 
-    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpWidget(app(permissionsService));
     await tester.pumpAndSettle();
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
@@ -231,15 +245,14 @@ void main() {
   testWidgets('Shows a distinct GPS warning and opens location settings', (
     tester,
   ) async {
-    final permissionsService = _FakeBootstrapPermissionsService(
-      <BootstrapPermissionsResult>[
-        const BootstrapPermissionsResult(
-          BootstrapPermissionsStatus.locationServiceDisabled,
-        ),
-      ],
-    );
+    final permissionsService =
+        _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
+          const BootstrapPermissionsResult(
+            BootstrapPermissionsStatus.locationServiceDisabled,
+          ),
+        ]);
 
-    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpWidget(app(permissionsService));
     await tester.pumpAndSettle();
 
     expect(find.text('GPS désactivé'), findsOneWidget);
@@ -265,58 +278,54 @@ void main() {
   });
 
   for (final openSettings in [false, true]) {
-    testWidgets(
-      'Clears GPS warning on resume after enabling GPS '
-      '${openSettings ? 'via settings' : 'externally'}',
-      (tester) async {
-        final permissionsService = _FakeBootstrapPermissionsService(
-          <BootstrapPermissionsResult>[
-            const BootstrapPermissionsResult(
-              BootstrapPermissionsStatus.locationServiceDisabled,
-            ),
-            const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted),
-          ],
+    testWidgets('Clears GPS warning on resume after enabling GPS '
+        '${openSettings ? 'via settings' : 'externally'}', (tester) async {
+      final permissionsService = _FakeBootstrapPermissionsService(
+        <BootstrapPermissionsResult>[
+          const BootstrapPermissionsResult(
+            BootstrapPermissionsStatus.locationServiceDisabled,
+          ),
+          const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted),
+        ],
+      );
+
+      await tester.pumpWidget(app(permissionsService));
+      await tester.pumpAndSettle();
+
+      expect(find.text('GPS désactivé'), findsOneWidget);
+      if (openSettings) {
+        await tester.tap(find.text('Réglages'));
+        await tester.pumpAndSettle();
+      }
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+
+      expect(permissionsService.calls, 2);
+      expect(permissionsService.forceRequestValues, <bool>[true, true]);
+      expect(find.text('GPS désactivé'), findsNothing);
+      expect(find.text('Autorisations requises'), findsNothing);
+      for (final title in ['Créer une partie', 'Rejoindre une partie']) {
+        expect(
+          tester.widget<ListTile>(find.widgetWithText(ListTile, title)).onTap,
+          isNotNull,
         );
-
-        await tester.pumpWidget(_app(permissionsService));
-        await tester.pumpAndSettle();
-
-        expect(find.text('GPS désactivé'), findsOneWidget);
-        if (openSettings) {
-          await tester.tap(find.text('Réglages'));
-          await tester.pumpAndSettle();
-        }
-
-        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-        await tester.pumpAndSettle();
-
-        expect(permissionsService.calls, 2);
-        expect(permissionsService.forceRequestValues, <bool>[true, true]);
-        expect(find.text('GPS désactivé'), findsNothing);
-        expect(find.text('Autorisations requises'), findsNothing);
-        for (final title in ['Créer une partie', 'Rejoindre une partie']) {
-          expect(
-            tester.widget<ListTile>(find.widgetWithText(ListTile, title)).onTap,
-            isNotNull,
-          );
-        }
-      },
-    );
+      }
+    });
   }
 
   testWidgets('Keeps GPS warning when GPS is still disabled on resume', (
     tester,
   ) async {
-    final permissionsService = _FakeBootstrapPermissionsService(
-      <BootstrapPermissionsResult>[
-        const BootstrapPermissionsResult(
-          BootstrapPermissionsStatus.locationServiceDisabled,
-        ),
-      ],
-    );
+    final permissionsService =
+        _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
+          const BootstrapPermissionsResult(
+            BootstrapPermissionsStatus.locationServiceDisabled,
+          ),
+        ]);
 
-    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpWidget(app(permissionsService));
     await tester.pumpAndSettle();
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
@@ -332,51 +341,50 @@ void main() {
     }
   });
 
-  testWidgets('Shows missing permissions after GPS is enabled if still denied', (
-    tester,
-  ) async {
-    final permissionsService = _FakeBootstrapPermissionsService(
-      <BootstrapPermissionsResult>[
-        const BootstrapPermissionsResult(
-          BootstrapPermissionsStatus.locationServiceDisabled,
-        ),
-        const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
-      ],
-    );
+  testWidgets(
+    'Shows missing permissions after GPS is enabled if still denied',
+    (tester) async {
+      final permissionsService =
+          _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
+            const BootstrapPermissionsResult(
+              BootstrapPermissionsStatus.locationServiceDisabled,
+            ),
+            const BootstrapPermissionsResult(BootstrapPermissionsStatus.denied),
+          ]);
 
-    await tester.pumpWidget(_app(permissionsService));
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(app(permissionsService));
+      await tester.pumpAndSettle();
 
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    await tester.pumpAndSettle();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
 
-    expect(find.text('GPS désactivé'), findsNothing);
-    expect(find.text('Autorisations requises'), findsOneWidget);
-    for (final title in ['Créer une partie', 'Rejoindre une partie']) {
-      expect(
-        tester.widget<ListTile>(find.widgetWithText(ListTile, title)).onTap,
-        isNull,
-      );
-    }
-    await tester.tap(find.text('Réglages'));
-    await tester.pumpAndSettle();
+      expect(find.text('GPS désactivé'), findsNothing);
+      expect(find.text('Autorisations requises'), findsOneWidget);
+      for (final title in ['Créer une partie', 'Rejoindre une partie']) {
+        expect(
+          tester.widget<ListTile>(find.widgetWithText(ListTile, title)).onTap,
+          isNull,
+        );
+      }
+      await tester.tap(find.text('Réglages'));
+      await tester.pumpAndSettle();
 
-    expect(permissionsService.openSettingsCalls, 1);
-    expect(permissionsService.openLocationSettingsCalls, 0);
-  });
+      expect(permissionsService.openSettingsCalls, 1);
+      expect(permissionsService.openLocationSettingsCalls, 0);
+    },
+  );
 
   testWidgets('Does not overlap GPS checks when a permission prompt resumes', (
     tester,
   ) async {
-    final permissionsService = _FakeBootstrapPermissionsService(
-      <BootstrapPermissionsResult>[
-        const BootstrapPermissionsResult(
-          BootstrapPermissionsStatus.locationServiceDisabled,
-        ),
-      ],
-    );
+    final permissionsService =
+        _FakeBootstrapPermissionsService(<BootstrapPermissionsResult>[
+          const BootstrapPermissionsResult(
+            BootstrapPermissionsStatus.locationServiceDisabled,
+          ),
+        ]);
 
-    await tester.pumpWidget(_app(permissionsService));
+    await tester.pumpWidget(app(permissionsService));
     await tester.pumpAndSettle();
     permissionsService.pendingResult = Completer<BootstrapPermissionsResult>();
 
