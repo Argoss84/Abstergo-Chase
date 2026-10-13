@@ -9,7 +9,9 @@ import 'package:go_router/go_router.dart';
 
 class _AlwaysGrantedPermissionsService implements BootstrapPermissionsService {
   @override
-  Future<BootstrapPermissionsResult> ensureRequiredPermissions({bool forceRequest = false}) async {
+  Future<BootstrapPermissionsResult> ensureRequiredPermissions({
+    bool forceRequest = false,
+  }) async {
     return const BootstrapPermissionsResult(BootstrapPermissionsStatus.granted);
   }
 
@@ -38,9 +40,7 @@ void main() {
 
     await tester.pumpWidget(
       ProviderScope(
-        overrides: <Override>[
-          appRouterProvider.overrideWithValue(router),
-        ],
+        overrides: [appRouterProvider.overrideWithValue(router)],
         child: const BrokenVeilProtocolApp(),
       ),
     );

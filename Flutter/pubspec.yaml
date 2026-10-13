@@ -54,6 +54,11 @@ dependencies:
   flutter_appauth: ^12.0.1
   keep_screen_on: ^6.0.0
 
+dependency_overrides:
+  # Keep 5.0.2 with the targeted Android NMEA ANR fix (upstream issue #1795).
+  geolocator_android:
+    path: third_party/geolocator_android
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

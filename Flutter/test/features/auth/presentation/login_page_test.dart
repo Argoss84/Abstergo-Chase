@@ -30,71 +30,65 @@ class _FakeCognitoAuthService extends CognitoAuthService {
 }
 
 void main() {
-  Widget _app(CognitoAuthController controller) {
+  Widget app(CognitoAuthController controller) {
     return ProviderScope(
-      overrides: <Override>[
-        authControllerProvider.overrideWithValue(controller),
-      ],
+      overrides: [authControllerProvider.overrideWithValue(controller)],
       child: const MaterialApp(home: LoginPage()),
     );
   }
 
-  testWidgets(
-    'Shows a dismissible dialog for Cognito credential errors',
-    (tester) async {
-      final controller = CognitoAuthController(
-        authService: _FakeCognitoAuthService(
-          signInError: Exception(
-            'NotAuthorizedException(Incorrect username or password.)',
-          ),
+  testWidgets('Shows a dismissible dialog for Cognito credential errors', (
+    tester,
+  ) async {
+    final controller = CognitoAuthController(
+      authService: _FakeCognitoAuthService(
+        signInError: Exception(
+          'NotAuthorizedException(Incorrect username or password.)',
         ),
-      )..isInitializing = false;
+      ),
+    )..isInitializing = false;
 
-      await tester.pumpWidget(_app(controller));
+    await tester.pumpWidget(app(controller));
 
-      await tester.enterText(find.byType(TextField).first, 'agent47');
-      await tester.enterText(find.byType(TextField).last, 'bad-password');
-      await tester.tap(find.text('Se connecter'));
-      await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'agent47');
+    await tester.enterText(find.byType(TextField).last, 'bad-password');
+    await tester.tap(find.text('Se connecter'));
+    await tester.pumpAndSettle();
 
-      expect(find.byType(AlertDialog), findsOneWidget);
-      expect(find.text('Échec de connexion'), findsOneWidget);
-      expect(
-        find.text(
-          'Le nom d’utilisateur ou le mot de passe est incorrect. Vérifiez vos identifiants Cognito puis réessayez.',
-        ),
-        findsOneWidget,
-      );
-      expect(find.text('Fermer'), findsWidgets);
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.text('Échec de connexion'), findsOneWidget);
+    expect(
+      find.text(
+        'Le nom d’utilisateur ou le mot de passe est incorrect. Vérifiez vos identifiants Cognito puis réessayez.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Fermer'), findsWidgets);
 
-      await tester.tap(find.widgetWithText(TextButton, 'Fermer'));
-      await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Fermer'));
+    await tester.pumpAndSettle();
 
-      expect(find.byType(AlertDialog), findsNothing);
-    },
-  );
+    expect(find.byType(AlertDialog), findsNothing);
+  });
 
-  testWidgets(
-    'Keeps generic sign-in errors as snackbars',
-    (tester) async {
-      final controller = CognitoAuthController(
-        authService: _FakeCognitoAuthService(
-          signInError: Exception('Service temporairement indisponible.'),
-        ),
-      )..isInitializing = false;
+  testWidgets('Keeps generic sign-in errors as snackbars', (tester) async {
+    final controller = CognitoAuthController(
+      authService: _FakeCognitoAuthService(
+        signInError: Exception('Service temporairement indisponible.'),
+      ),
+    )..isInitializing = false;
 
-      await tester.pumpWidget(_app(controller));
+    await tester.pumpWidget(app(controller));
 
-      await tester.enterText(find.byType(TextField).first, 'agent47');
-      await tester.enterText(find.byType(TextField).last, 'password');
-      await tester.tap(find.text('Se connecter'));
-      await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'agent47');
+    await tester.enterText(find.byType(TextField).last, 'password');
+    await tester.tap(find.text('Se connecter'));
+    await tester.pumpAndSettle();
 
-      expect(find.byType(AlertDialog), findsNothing);
-      expect(
-        find.text('Exception: Service temporairement indisponible.'),
-        findsOneWidget,
-      );
-    },
-  );
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(
+      find.text('Exception: Service temporairement indisponible.'),
+      findsOneWidget,
+    );
+  });
 }

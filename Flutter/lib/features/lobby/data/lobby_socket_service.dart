@@ -191,6 +191,58 @@ class LobbySocketService {
     }
   }
 
+  Future<SessionDestination> lookupSession({
+    required String code,
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
+    if (!isConnected) {
+      throw StateError('Connexion au serveur indisponible.');
+    }
+    final normalizedCode = code.trim().toUpperCase();
+    final requestId = _newRequestId();
+    final wait = Completer<SessionDestination>();
+    final subscription = messages.listen(
+      (event) {
+        if (event['type'] != 'session:resolved') return;
+        final payload = event['payload'];
+        if (payload is! Map ||
+            payload['requestId'] != requestId ||
+            payload['code'] != normalizedCode ||
+            wait.isCompleted) {
+          return;
+        }
+        final destination = switch (payload['destination']) {
+          'lobby' => SessionDestination.lobby,
+          'game' => SessionDestination.game,
+          'notFound' => SessionDestination.notFound,
+          _ => null,
+        };
+        if (destination == null) {
+          wait.completeError(StateError('Réponse du serveur invalide.'));
+        } else {
+          wait.complete(destination);
+        }
+      },
+      onDone: () {
+        if (!wait.isCompleted) {
+          wait.completeError(StateError('Recherche annulée.'));
+        }
+      },
+    );
+    _emitMessage(<String, dynamic>{
+      'type': 'session:lookup',
+      'payload': <String, dynamic>{
+        'code': normalizedCode,
+        'requestId': requestId,
+      },
+    });
+    try {
+      return await wait.future.timeout(timeout);
+    } finally {
+      await subscription.cancel();
+    }
+  }
+
   void sendLobbyChat(String text) {
     _emitMessage(<String, dynamic>{
       'type': 'lobby:chat',
@@ -285,7 +337,8 @@ class LobbySocketService {
         if (code != null && code.isNotEmpty) 'code': code.toUpperCase(),
         if (oldPlayerId != null && oldPlayerId.isNotEmpty)
           'oldPlayerId': oldPlayerId,
-        if (cognitoSub != null && cognitoSub.isNotEmpty) 'cognitoSub': cognitoSub,
+        if (cognitoSub != null && cognitoSub.isNotEmpty)
+          'cognitoSub': cognitoSub,
       },
     });
   }
@@ -333,6 +386,8 @@ class LobbySocketService {
     _messageController = null;
   }
 }
+
+enum SessionDestination { lobby, game, notFound }
 
 class TurnCredentialsResult {
   const TurnCredentialsResult({
