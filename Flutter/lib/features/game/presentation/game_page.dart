@@ -85,6 +85,9 @@ class _GamePageState extends State<GamePage>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final GameController _controller;
   late final AnimationController _guidancePulseController;
+  bool _hasPulseEffects = false;
+  bool _animationsDisabled = false;
+  bool _appIsResumed = true;
   late final MapController _mapController;
   final ValueNotifier<double?> _headingDeg = ValueNotifier<double?>(null);
   StreamSubscription<CompassEvent>? _compassSub;
@@ -164,7 +167,7 @@ class _GamePageState extends State<GamePage>
       duration: const Duration(milliseconds: 1300),
       lowerBound: 0,
       upperBound: 1,
-    )..repeat(reverse: true);
+    );
     _pingExpiryTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       final count = _activeRolePings.length;
       _pruneExpiredPings();
@@ -183,13 +186,26 @@ class _GamePageState extends State<GamePage>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (MediaQuery.disableAnimationsOf(context)) {
-      _guidancePulseController.stop();
+    _animationsDisabled = MediaQuery.disableAnimationsOf(context);
+    _syncGuidancePulse();
+    if (_animationsDisabled) {
       _guidancePulseController.value = 0.5;
-    } else if (!_guidancePulseController.isAnimating) {
-      _guidancePulseController.repeat(reverse: true);
     }
   }
+
+  void _syncGuidancePulse() {
+    if (_hasPulseEffects && !_animationsDisabled && _appIsResumed) {
+      if (!_guidancePulseController.isAnimating) {
+        _guidancePulseController.repeat(reverse: true);
+      }
+    } else {
+      _guidancePulseController.stop();
+    }
+  }
+
+  bool get _rogueActionReady =>
+      (_controller.playerRole ?? '').toUpperCase() == 'ROGUE' &&
+      _controller.canTriggerRogueObjectiveCapture;
 
   @override
   void dispose() {
@@ -201,6 +217,7 @@ class _GamePageState extends State<GamePage>
     _guidancePulseController.dispose();
     _chatController.dispose();
     _controller.dispose();
+    _mapController.dispose();
     super.dispose();
   }
 
@@ -214,13 +231,10 @@ class _GamePageState extends State<GamePage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appIsResumed = state == AppLifecycleState.resumed;
+    _syncGuidancePulse();
     if (state == AppLifecycleState.resumed) {
-      if (!MediaQuery.disableAnimationsOf(context)) {
-        _guidancePulseController.repeat(reverse: true);
-      }
       unawaited(_controller.onAppResumed());
-    } else {
-      _guidancePulseController.stop();
     }
   }
 
@@ -293,6 +307,8 @@ class _GamePageState extends State<GamePage>
           return 'Récupération de la position en temps réel...';
         }();
         if (!_gameMapRevealed) {
+          _hasPulseEffects = false;
+          _syncGuidancePulse();
           return Scaffold(
             body: Center(
               child: Column(
@@ -359,6 +375,22 @@ class _GamePageState extends State<GamePage>
                   .map((o) => o.point)
                   .toList(growable: false)
             : const <GeoPoint>[];
+
+        final guidancePath = _controller.isGameFinished
+            ? _controller.buildPathToRallyPoint()
+            : _controller.gameStarted
+            ? const <GeoPoint>[]
+            : _controller.buildPathToMyStartZone();
+        _hasPulseEffects =
+            (fallbackCenter != null &&
+                (guidancePath.length >= 2 ||
+                    capturingDisplayPoints.isNotEmpty ||
+                    _activeRolePings.isNotEmpty ||
+                    _controller.rallyPoint != null)) ||
+            (winnerType == null &&
+                (startCountdownSeconds != null ||
+                    (_isActionFabOpen && _rogueActionReady)));
+        _syncGuidancePulse();
 
         return Scaffold(
           extendBodyBehindAppBar: true,
@@ -504,11 +536,7 @@ class _GamePageState extends State<GamePage>
                                 ? Colors.purpleAccent
                                 : Colors.red,
                             objectiveMarkerSize: isRogue ? 30 : 18,
-                            guidancePath: _controller.isGameFinished
-                                ? _controller.buildPathToRallyPoint()
-                                : _controller.gameStarted
-                                ? const <GeoPoint>[]
-                                : _controller.buildPathToMyStartZone(),
+                            guidancePath: guidancePath,
                             guidancePathColor: _controller.isGameFinished
                                 ? Colors.amber
                                 : guidanceColor,
@@ -925,10 +953,7 @@ class _GamePageState extends State<GamePage>
                   child: Align(
                     alignment: Alignment.bottomCenter,
                     child: winnerType == null
-                        ? AnimatedBuilder(
-                            animation: _guidancePulseController,
-                            builder: (context, _) => _buildActionFabMenu(),
-                          )
+                        ? RepaintBoundary(child: _buildActionFabMenu())
                         : const SizedBox.shrink(),
                   ),
                 ),
@@ -1258,8 +1283,7 @@ class _GamePageState extends State<GamePage>
     final roleActionLabel = role == 'ROGUE'
         ? 'Hacker objectif'
         : 'Ciblage rogue';
-    final rogueActionReady =
-        role == 'ROGUE' && _controller.canTriggerRogueObjectiveCapture;
+    final rogueActionReady = _rogueActionReady;
     return SizedBox(
       width: 280,
       height: 220,
@@ -1337,7 +1361,6 @@ class _GamePageState extends State<GamePage>
                     ? Colors.white
                     : Colors.black87,
                 pulseAura: rogueActionReady,
-                pulseValue: _guidancePulseController.value,
               ),
             ),
           Positioned(
@@ -1401,32 +1424,38 @@ class _GamePageState extends State<GamePage>
     Color backgroundColor = Colors.white,
     Color foregroundColor = Colors.black87,
     bool pulseAura = false,
-    double pulseValue = 0,
   }) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        boxShadow: pulseAura
-            ? <BoxShadow>[
-                BoxShadow(
-                  color: Colors.redAccent.withValues(
-                    alpha: 0.35 + (pulseValue * 0.45),
-                  ),
-                  blurRadius: 8 + (pulseValue * 14),
-                  spreadRadius: 1 + (pulseValue * 4),
+    final button = FloatingActionButton(
+      heroTag: 'game-action-${icon.codePoint}-$tooltip',
+      mini: true,
+      tooltip: tooltip,
+      onPressed: onTap,
+      backgroundColor: backgroundColor,
+      foregroundColor: foregroundColor,
+      child: Icon(icon),
+    );
+    if (!pulseAura) return button;
+    return AnimatedBuilder(
+      animation: _guidancePulseController,
+      child: button,
+      builder: (context, child) {
+        final pulse = _guidancePulseController.value;
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: Colors.redAccent.withValues(
+                  alpha: 0.35 + (pulse * 0.45),
                 ),
-              ]
-            : const <BoxShadow>[],
-      ),
-      child: FloatingActionButton(
-        heroTag: 'game-action-${icon.codePoint}-$tooltip',
-        mini: true,
-        tooltip: tooltip,
-        onPressed: onTap,
-        backgroundColor: backgroundColor,
-        foregroundColor: foregroundColor,
-        child: Icon(icon),
-      ),
+                blurRadius: 8 + (pulse * 14),
+                spreadRadius: 1 + (pulse * 4),
+              ),
+            ],
+          ),
+          child: child,
+        );
+      },
     );
   }
 

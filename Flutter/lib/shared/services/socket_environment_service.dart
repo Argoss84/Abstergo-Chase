@@ -1,4 +1,5 @@
 import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_defaults.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SocketEnvironmentConfig {
@@ -14,12 +15,16 @@ class SocketEnvironmentConfig {
 }
 
 class SocketEnvironmentService {
+  SocketEnvironmentService({bool defaultUseProduction = kReleaseMode})
+    : _defaultUseProduction = defaultUseProduction;
+
   static const String _useProductionKey = 'socket.environment.use_production';
+  final bool _defaultUseProduction;
 
   Future<bool> useProduction() async {
     final prefs = await SharedPreferences.getInstance();
-    // Default to development for local/docker test workflows.
-    return prefs.getBool(_useProductionKey) ?? false;
+    // New store installations use production; local debug stays on Docker.
+    return prefs.getBool(_useProductionKey) ?? _defaultUseProduction;
   }
 
   Future<void> setUseProduction(bool value) async {

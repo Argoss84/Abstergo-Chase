@@ -12,6 +12,8 @@ class LobbySocketService {
   String? _connectedPath;
   StreamController<Map<String, dynamic>>? _messageController;
   bool _hasConnectedAtLeastOnce = false;
+  bool _disposed = false;
+  int _connectionRevision = 0;
 
   Stream<Map<String, dynamic>> get messages {
     _messageController ??= StreamController<Map<String, dynamic>>.broadcast();
@@ -32,6 +34,7 @@ class LobbySocketService {
     required String socketPath,
     Duration timeout = const Duration(seconds: 12),
   }) async {
+    if (_disposed) throw StateError('Connexion fermée.');
     _messageController ??= StreamController<Map<String, dynamic>>.broadcast();
     final origin = serverUrl.toString();
     final sameEndpoint =
@@ -41,7 +44,11 @@ class LobbySocketService {
       return;
     }
 
+    final revision = ++_connectionRevision;
     await SignalingWakeService.instance.ensureAwake(serverUrl);
+    if (_disposed || revision != _connectionRevision) {
+      throw StateError('Connexion annulée.');
+    }
 
     if (_socket != null && !sameEndpoint) {
       _socket!.dispose();
@@ -288,6 +295,7 @@ class LobbySocketService {
   Future<TurnCredentialsResult?> requestTurnCredentials({
     Duration timeout = const Duration(seconds: 8),
   }) async {
+    if (_disposed || _socket?.connected != true) return null;
     final wait = Completer<TurnCredentialsResult?>();
     late final StreamSubscription<Map<String, dynamic>> sub;
     final requestId = _newRequestId();
@@ -379,6 +387,9 @@ class LobbySocketService {
   }
 
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    _connectionRevision++;
     _socket?.dispose();
     _socket = null;
     _hasConnectedAtLeastOnce = false;

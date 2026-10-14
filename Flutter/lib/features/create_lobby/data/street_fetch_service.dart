@@ -1,8 +1,23 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart';
+
+List<List<GeoPoint>> _parseWalkableStreets(String body) =>
+    const StreetFetchService()._extractStreets(body);
+
+class StreetFetchCancellation {
+  final Completer<void> _cancelled = Completer<void>();
+  bool get isCancelled => _cancelled.isCompleted;
+  Future<void> get whenCancelled => _cancelled.future;
+
+  void cancel() {
+    if (!isCancelled) _cancelled.complete();
+  }
+}
 
 class StreetFetchService {
   const StreetFetchService();
@@ -14,6 +29,7 @@ class StreetFetchService {
   Future<List<List<GeoPoint>>> fetchWalkableStreets({
     required GeoPoint center,
     required int mapRadiusMeters,
+    StreetFetchCancellation? cancellation,
   }) async {
     final bbox = _buildBbox(center, mapRadiusMeters.toDouble());
     final endpoints = <Uri>[
@@ -24,8 +40,21 @@ class StreetFetchService {
     Object? lastError;
     for (final endpoint in endpoints) {
       for (var attempt = 1; attempt <= _maxAttemptsPerEndpoint; attempt++) {
+        if (cancellation?.isCancelled == true) {
+          throw StateError('Chargement cartographique annulé.');
+        }
         try {
-          final response = await http.get(endpoint).timeout(_requestTimeout);
+          final client = http.Client();
+          cancellation?.whenCancelled.then((_) => client.close());
+          final http.Response response;
+          try {
+            response = await client.get(endpoint).timeout(_requestTimeout);
+          } finally {
+            client.close();
+          }
+          if (cancellation?.isCancelled == true) {
+            throw StateError('Chargement cartographique annulé.');
+          }
           if (response.statusCode < 200 || response.statusCode >= 300) {
             lastError = Exception(
               'Erreur récupération rues: ${response.statusCode} ${response.reasonPhrase}',
@@ -37,14 +66,21 @@ class StreetFetchService {
             break;
           }
 
-          final streets = _extractStreets(response.body);
+          final body = response.body;
+          final streets = body.length < 65536
+              ? _extractStreets(body)
+              : await compute(
+                  _parseWalkableStreets,
+                  body,
+                  debugLabel: 'street-xml',
+                );
           if (streets.isEmpty) {
-            lastError =
-                Exception('Aucune rue trouvée pour cette zone.');
+            lastError = Exception('Aucune rue trouvée pour cette zone.');
             break;
           }
           return streets;
         } catch (error) {
+          if (cancellation?.isCancelled == true) rethrow;
           lastError = error;
           if (attempt < _maxAttemptsPerEndpoint) {
             await _backoffDelay(attempt);

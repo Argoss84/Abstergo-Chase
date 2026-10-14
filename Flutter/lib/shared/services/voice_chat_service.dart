@@ -1,30 +1,34 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:broken_veil_protocol/app/config/app_runtime_config.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
-typedef VoiceSignalSender = Future<void> Function(
-  String targetId,
-  Map<String, dynamic> signal,
-);
+typedef VoiceSignalSender =
+    Future<void> Function(String targetId, Map<String, dynamic> signal);
 
 class VoiceChatService {
   VoiceChatService({
     required VoiceSignalSender signalSender,
     void Function(String peerId, bool active)? onVoiceActivity,
-  })  : _signalSender = signalSender,
-        _onVoiceActivity = onVoiceActivity;
+  }) : _signalSender = signalSender,
+       _onVoiceActivity = onVoiceActivity;
 
   final VoiceSignalSender _signalSender;
   final void Function(String peerId, bool active)? _onVoiceActivity;
 
   String? _selfId;
   final Map<String, RTCPeerConnection> _peers = <String, RTCPeerConnection>{};
+  final Map<String, Future<RTCPeerConnection>> _peerInitFutures = {};
+  final Map<String, List<RTCIceCandidate>> _pendingCandidates = {};
+  final Set<String> _remoteDescriptionSet = {};
   final Map<String, RTCDataChannel> _metaChannels = <String, RTCDataChannel>{};
   final Set<String> _wantedPeers = <String>{};
   MediaStream? _localStream;
   Future<MediaStream>? _localStreamInitFuture;
   bool _enabled = false;
+  bool _disposed = false;
+  int _generation = 0;
   bool get isEnabled => _enabled;
   bool _transmissionActive = true;
   DateTime? _lastLocalStreamFailureAt;
@@ -41,16 +45,31 @@ class VoiceChatService {
     required String selfId,
     required List<String> peerIds,
   }) async {
+    if (_disposed) return;
+    final identityChanged = _selfId != null && _selfId != selfId;
+    if (identityChanged) {
+      _generation++;
+      _peerInitFutures.clear();
+    }
+    final generation = _generation;
     try {
       _selfId = selfId;
       _wantedPeers
         ..clear()
         ..addAll(peerIds.where((id) => id.isNotEmpty && id != selfId));
-      _localStream = await _ensureLocalStream();
+      if (identityChanged) await _disposeAllPeers();
+      if (_disposed || generation != _generation) return;
+      final stream = await _ensureLocalStream();
+      if (_disposed || generation != _generation) {
+        if (!_disposed && !_enabled) await _setLocalAudioEnabled(false);
+        return;
+      }
+      _localStream = stream;
       _enabled = true;
       await _setLocalAudioEnabled(_transmissionActive);
       await _syncPeers();
     } catch (_) {
+      if (_disposed || generation != _generation) return;
       // Never crash gameplay/lobby because of voice stack failures.
       _enabled = false;
       await _disposeAllPeers();
@@ -70,19 +89,24 @@ class VoiceChatService {
     if (inFlight != null) {
       return inFlight;
     }
-    final future = navigator.mediaDevices.getUserMedia(
-      <String, dynamic>{
-        'audio': <String, dynamic>{
-          'echoCancellation': true,
-          'noiseSuppression': true,
-          'autoGainControl': true,
-        },
-        'video': false,
-      },
-    ).then((stream) {
-      _lastLocalStreamFailureAt = null;
-      return stream;
-    });
+    final future = navigator.mediaDevices
+        .getUserMedia(<String, dynamic>{
+          'audio': <String, dynamic>{
+            'echoCancellation': true,
+            'noiseSuppression': true,
+            'autoGainControl': true,
+          },
+          'video': false,
+        })
+        .then((stream) async {
+          if (_disposed) {
+            await _disposeLocalStream(stream);
+            throw StateError('Voice service disposed.');
+          }
+          _localStream = stream;
+          _lastLocalStreamFailureAt = null;
+          return stream;
+        });
     _localStreamInitFuture = future;
     try {
       return await future;
@@ -95,6 +119,8 @@ class VoiceChatService {
   }
 
   Future<void> disable() async {
+    _generation++;
+    _peerInitFutures.clear();
     _enabled = false;
     _wantedPeers.clear();
     await _disposeAllPeers();
@@ -107,13 +133,28 @@ class VoiceChatService {
   }
 
   Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
     await disable();
-    final tracks = _localStream?.getTracks() ?? const <MediaStreamTrack>[];
-    for (final track in tracks) {
-      await track.stop();
-    }
-    await _localStream?.dispose();
+    final stream = _localStream;
     _localStream = null;
+    if (stream != null) await _disposeLocalStream(stream);
+  }
+
+  Future<void> _disposeLocalStream(MediaStream stream) async {
+    final tracks = stream.getTracks();
+    for (final track in tracks) {
+      try {
+        await track.stop();
+      } catch (_) {
+        // Continue releasing the remaining native resources.
+      }
+    }
+    try {
+      await stream.dispose();
+    } catch (_) {
+      // A native stream can already be closed when the app leaves the page.
+    }
   }
 
   Future<void> updatePeers(List<String> peerIds) async {
@@ -131,16 +172,15 @@ class VoiceChatService {
     required Map<String, dynamic> signal,
   }) async {
     try {
-      if (!_enabled) return;
+      if (_disposed || !_enabled) return;
       final type = signal['type']?.toString();
       if (type == null || fromId.isEmpty) return;
       final pc = await _ensurePeer(fromId);
       if (type == 'offer') {
         final sdp = signal['sdp']?.toString();
         if (sdp == null || sdp.isEmpty) return;
-        await pc.setRemoteDescription(
-          RTCSessionDescription(sdp, 'offer'),
-        );
+        await pc.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
+        await _flushCandidates(fromId, pc);
         final answer = await pc.createAnswer(<String, dynamic>{});
         await pc.setLocalDescription(answer);
         await _signalSender(fromId, <String, dynamic>{
@@ -152,23 +192,36 @@ class VoiceChatService {
       if (type == 'answer') {
         final sdp = signal['sdp']?.toString();
         if (sdp == null || sdp.isEmpty) return;
-        await pc.setRemoteDescription(
-          RTCSessionDescription(sdp, 'answer'),
-        );
+        await pc.setRemoteDescription(RTCSessionDescription(sdp, 'answer'));
+        await _flushCandidates(fromId, pc);
         return;
       }
       if (type == 'candidate') {
         final candidate = signal['candidate']?.toString();
         if (candidate == null || candidate.isEmpty) return;
         final sdpMid = signal['sdpMid']?.toString();
-        final sdpMLineIndex =
-            int.tryParse(signal['sdpMLineIndex']?.toString() ?? '');
-        await pc.addCandidate(
-          RTCIceCandidate(candidate, sdpMid, sdpMLineIndex),
+        final sdpMLineIndex = int.tryParse(
+          signal['sdpMLineIndex']?.toString() ?? '',
         );
+        final iceCandidate = RTCIceCandidate(candidate, sdpMid, sdpMLineIndex);
+        if (_remoteDescriptionSet.contains(fromId)) {
+          await pc.addCandidate(iceCandidate);
+        } else {
+          final pending = _pendingCandidates[fromId] ??= [];
+          if (pending.length < 64) pending.add(iceCandidate);
+        }
       }
     } catch (_) {
       return;
+    }
+  }
+
+  Future<void> _flushCandidates(String peerId, RTCPeerConnection pc) async {
+    if (_disposed || !_enabled || _peers[peerId] != pc) return;
+    _remoteDescriptionSet.add(peerId);
+    final pending = _pendingCandidates.remove(peerId) ?? const [];
+    for (final candidate in pending) {
+      await pc.addCandidate(candidate);
     }
   }
 
@@ -185,21 +238,28 @@ class VoiceChatService {
     });
     for (final channel in _metaChannels.values) {
       if (channel.state == RTCDataChannelState.RTCDataChannelOpen) {
-        channel.send(RTCDataChannelMessage(payload));
+        unawaited(
+          channel.send(RTCDataChannelMessage(payload)).catchError((Object _) {
+            // A channel can close between its state check and the native send.
+          }),
+        );
       }
     }
   }
 
   Future<void> _syncPeers() async {
-    final toRemove =
-        _peers.keys.where((id) => !_wantedPeers.contains(id)).toList();
+    final toRemove = _peers.keys
+        .where((id) => !_wantedPeers.contains(id))
+        .toList();
     for (final peerId in toRemove) {
       await _disposePeer(peerId);
     }
     final self = _selfId ?? '';
-    for (final peerId in _wantedPeers) {
+    for (final peerId in _wantedPeers.toList(growable: false)) {
+      if (_disposed || !_enabled || !_wantedPeers.contains(peerId)) continue;
       if (_peers.containsKey(peerId)) continue;
-      final pc = await _ensurePeer(peerId);
+      final pc = await _ensurePeer(peerId, requireWanted: true);
+      if (_disposed || !_enabled || !_wantedPeers.contains(peerId)) continue;
       final amInitiator = self.compareTo(peerId) < 0;
       if (amInitiator) {
         await _ensureMetaChannel(peerId, pc);
@@ -213,12 +273,42 @@ class VoiceChatService {
     }
   }
 
-  Future<RTCPeerConnection> _ensurePeer(String peerId) async {
+  Future<RTCPeerConnection> _ensurePeer(
+    String peerId, {
+    bool requireWanted = false,
+  }) {
     final existing = _peers[peerId];
-    if (existing != null) return existing;
-    final pc = await createPeerConnection(
-      <String, dynamic>{'iceServers': _iceServers},
-    );
+    if (existing != null) return Future.value(existing);
+    final pending = _peerInitFutures[peerId];
+    if (pending != null) return pending;
+    late final Future<RTCPeerConnection> future;
+    future = _createPeer(peerId, requireWanted: requireWanted).whenComplete(() {
+      if (identical(_peerInitFutures[peerId], future)) {
+        _peerInitFutures.remove(peerId);
+      }
+    });
+    return _peerInitFutures[peerId] = future;
+  }
+
+  Future<RTCPeerConnection> _createPeer(
+    String peerId, {
+    required bool requireWanted,
+  }) async {
+    final generation = _generation;
+    final pc = await createPeerConnection(<String, dynamic>{
+      'iceServers': _iceServers,
+    });
+    if (_disposed ||
+        !_enabled ||
+        generation != _generation ||
+        (requireWanted && !_wantedPeers.contains(peerId))) {
+      try {
+        await pc.close();
+      } finally {
+        await pc.dispose();
+      }
+      throw StateError('Peer initialization cancelled.');
+    }
     _peers[peerId] = pc;
     final local = _localStream;
     if (local != null) {
@@ -227,6 +317,9 @@ class VoiceChatService {
       }
     }
     pc.onIceCandidate = (candidate) async {
+      if (_disposed || generation != _generation || _peers[peerId] != pc) {
+        return;
+      }
       final c = candidate.candidate;
       if (c == null || c.isEmpty) return;
       await _signalSender(peerId, <String, dynamic>{
@@ -237,6 +330,10 @@ class VoiceChatService {
       });
     };
     pc.onDataChannel = (channel) {
+      if (_disposed || generation != _generation || _peers[peerId] != pc) {
+        unawaited(channel.close().catchError((Object _) {}));
+        return;
+      }
       _bindMetaChannel(peerId, channel);
     };
     return pc;
@@ -252,6 +349,10 @@ class VoiceChatService {
   }
 
   void _bindMetaChannel(String peerId, RTCDataChannel channel) {
+    if (_disposed || !_enabled) {
+      unawaited(channel.close().catchError((Object _) {}));
+      return;
+    }
     _metaChannels[peerId] = channel;
     channel.onMessage = (msg) {
       if (msg.isBinary) return;
@@ -269,9 +370,25 @@ class VoiceChatService {
 
   Future<void> _disposePeer(String peerId) async {
     final channel = _metaChannels.remove(peerId);
-    await channel?.close();
     final pc = _peers.remove(peerId);
-    await pc?.close();
+    _pendingCandidates.remove(peerId);
+    _remoteDescriptionSet.remove(peerId);
+    try {
+      await channel?.close();
+    } catch (_) {
+      // Closing one channel must not prevent other peers from being released.
+    }
+    try {
+      await pc?.close();
+    } catch (_) {
+      // The peer may have closed after a network interruption.
+    } finally {
+      try {
+        await pc?.dispose();
+      } catch (_) {
+        // Native disposal remains best-effort.
+      }
+    }
   }
 
   Future<void> _disposeAllPeers() async {

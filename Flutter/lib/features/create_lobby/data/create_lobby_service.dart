@@ -12,6 +12,7 @@ class CreateLobbyService {
   io.Socket? _socket;
   String? _connectedOrigin;
   String? _connectedPath;
+  int _connectionRevision = 0;
 
   bool get isConnected => _socket?.connected == true;
 
@@ -28,7 +29,11 @@ class CreateLobbyService {
       return;
     }
 
+    final revision = ++_connectionRevision;
     await SignalingWakeService.instance.ensureAwake(serverUrl);
+    if (revision != _connectionRevision) {
+      throw StateError('Connexion annulée.');
+    }
 
     if (_socket != null && !sameEndpoint) {
       _socket!.dispose();
@@ -83,6 +88,7 @@ class CreateLobbyService {
   }
 
   void disconnect() {
+    _connectionRevision++;
     _socket?.dispose();
     _socket = null;
     _connectedOrigin = null;
@@ -97,11 +103,16 @@ class CreateLobbyService {
     Map<String, dynamic>? gameConfig,
     Duration timeout = const Duration(seconds: 12),
   }) async {
+    final revision = _connectionRevision;
     await _ensureConnected(
       serverUrl: serverUrl,
       socketPath: socketPath,
       timeout: timeout,
     );
+
+    if (_socket == null || _connectionRevision > revision + 1) {
+      throw StateError('Création annulée.');
+    }
 
     final completer = Completer<CreatedLobbySession>();
     final socket = _socket!;
@@ -128,11 +139,7 @@ class CreateLobbyService {
             hostId != null &&
             !completer.isCompleted) {
           completer.complete(
-            CreatedLobbySession(
-              code: code,
-              playerId: playerId,
-              hostId: hostId,
-            ),
+            CreatedLobbySession(code: code, playerId: playerId, hostId: hostId),
           );
         }
       }
@@ -152,7 +159,8 @@ class CreateLobbyService {
       'type': 'lobby:create',
       'payload': <String, dynamic>{
         'playerName': playerName,
-        if (cognitoSub != null && cognitoSub.isNotEmpty) 'cognitoSub': cognitoSub,
+        if (cognitoSub != null && cognitoSub.isNotEmpty)
+          'cognitoSub': cognitoSub,
         'gameConfig': ?gameConfig,
       },
       'meta': <String, dynamic>{'clientVersion': _clientVersion},

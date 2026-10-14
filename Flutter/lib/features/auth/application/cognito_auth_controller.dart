@@ -4,11 +4,15 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 class CognitoAuthController extends ChangeNotifier {
-  CognitoAuthController({CognitoAuthService? authService})
-    : _authService = authService ?? CognitoAuthService();
+  CognitoAuthController({
+    CognitoAuthService? authService,
+    AccountApiService? accountApiService,
+  }) : _authService = authService ?? CognitoAuthService(),
+       _accountApiService = accountApiService ?? AccountApiService();
 
   final CognitoAuthService _authService;
-  final AccountApiService _accountApiService = AccountApiService();
+  final AccountApiService _accountApiService;
+  bool _disposed = false;
   Timer? _sessionGuardTimer;
 
   bool isInitializing = true;
@@ -21,11 +25,13 @@ class CognitoAuthController extends ChangeNotifier {
   bool get isHostedUiConfigured => _authService.isHostedUiConfigured;
 
   Future<void> initialize() async {
+    if (_disposed) return;
     isInitializing = true;
     error = null;
     notifyListeners();
     try {
       final session = await _authService.restoreSession();
+      if (_disposed) return;
       if (session != null) {
         isAuthenticated = true;
         username = session.username;
@@ -49,6 +55,7 @@ class CognitoAuthController extends ChangeNotifier {
     required String username,
     required String password,
   }) async {
+    if (_disposed || isSubmitting) return false;
     isSubmitting = true;
     error = null;
     notifyListeners();
@@ -57,6 +64,7 @@ class CognitoAuthController extends ChangeNotifier {
         username: username,
         password: password,
       );
+      if (_disposed) return false;
       this.username = session.username;
       isAuthenticated = true;
       _startSessionGuard();
@@ -79,8 +87,10 @@ class CognitoAuthController extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
+    if (_disposed) return;
     final token = await _authService.getAccessToken();
     await _authService.clearSession();
+    if (_disposed) return;
     isAuthenticated = false;
     username = null;
     error = null;
@@ -90,15 +100,16 @@ class CognitoAuthController extends ChangeNotifier {
     if (token == null || token.isEmpty) {
       return;
     }
-    try {
-      unawaited(_accountApiService.logout(token));
-    } catch (_) {
-      // Logout API is best-effort and must not block UI navigation.
-    }
+    unawaited(
+      _accountApiService.logout(token).catchError((Object _) {
+        // Logout API is best-effort and must not block UI navigation.
+      }),
+    );
   }
 
   Future<void> handleSessionInvalidated(String message) async {
     await _authService.clearSession();
+    if (_disposed) return;
     isAuthenticated = false;
     username = null;
     error = message;
@@ -107,11 +118,13 @@ class CognitoAuthController extends ChangeNotifier {
   }
 
   Future<bool> signInWithGoogle() async {
+    if (_disposed || isSubmitting) return false;
     isSubmitting = true;
     error = null;
     notifyListeners();
     try {
       final session = await _authService.signInWithGoogle();
+      if (_disposed) return false;
       username = session.username;
       isAuthenticated = true;
       _startSessionGuard();
@@ -172,5 +185,17 @@ class CognitoAuthController extends ChangeNotifier {
     if (error is SessionInvalidatedException) {
       await handleSessionInvalidated(error.message);
     }
+  }
+
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _stopSessionGuard();
+    super.dispose();
   }
 }

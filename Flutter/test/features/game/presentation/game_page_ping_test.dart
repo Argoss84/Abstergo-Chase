@@ -106,6 +106,51 @@ void main() {
     return controller;
   }
 
+  testWidgets('An idle game does not keep scheduling animation frames', (
+    tester,
+  ) async {
+    await pumpGame(tester);
+    await tester.pumpAndSettle(
+      const Duration(milliseconds: 100),
+      EnginePhase.sendSemanticsUpdate,
+      const Duration(seconds: 2),
+    );
+    expect(tester.binding.hasScheduledFrame, isFalse);
+  });
+
+  testWidgets('An incoming ping resumes its pulse after an idle game', (
+    tester,
+  ) async {
+    final controller = await pumpGame(tester);
+    await tester.pumpAndSettle(
+      const Duration(milliseconds: 100),
+      EnginePhase.sendSemanticsUpdate,
+      const Duration(seconds: 2),
+    );
+    final now = DateTime.now().millisecondsSinceEpoch;
+    controller.roleChat.add(
+      GameChatMessage(
+        playerId: 'ally',
+        playerName: 'Allié',
+        text:
+            '[PING]${jsonEncode(<String, dynamic>{'kind': 'role-ping', 'id': 'go_here', 'lat': mapCenter.latitude, 'lng': mapCenter.longitude, 'msg': 'Ici', 'ts': now})}',
+        timestampMs: now,
+      ),
+    );
+    controller.notifyListeners();
+    await tester.pump();
+    double pingRadius() => tester
+        .widgetList<CircleLayer>(find.byType(CircleLayer))
+        .expand((layer) => layer.circles)
+        .where((circle) => circle.radius >= 6 && circle.radius <= 19)
+        .single
+        .radius;
+    final initialRadius = pingRadius();
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(pingRadius(), isNot(initialRadius));
+    expect(find.text('Ici'), findsOneWidget);
+  });
+
   testWidgets('A short single-finger press does not open or send a ping', (
     tester,
   ) async {
@@ -136,59 +181,61 @@ void main() {
     expect(wheel, findsNothing);
     expect(controller.sentMessages, hasLength(1));
     expect(controller.sentMessages.single, startsWith('[PING]'));
-    final payload = jsonDecode(
-      controller.sentMessages.single.substring('[PING]'.length),
-    ) as Map<String, dynamic>;
+    final payload =
+        jsonDecode(controller.sentMessages.single.substring('[PING]'.length))
+            as Map<String, dynamic>;
     expect(payload['id'], 'go_here');
   });
 
-  testWidgets('Dragging the map cancels the wheel even after the finger stops', (
-    tester,
-  ) async {
-    final controller = await pumpGame(tester);
-    final mapController = tester
-        .widget<FlutterMap>(find.byType(FlutterMap))
-        .mapController!;
-    final initialCenter = mapController.camera.center;
-    final finger = await tester.startGesture(firstPosition, pointer: 1);
-    await tester.pump(const Duration(milliseconds: 100));
-    await finger.moveBy(const Offset(60, 0));
-    await tester.pump(const Duration(milliseconds: 100));
-    await finger.moveBy(const Offset(60, 0));
-    await tester.pump(holdDelay);
-
-    expect(mapController.camera.center, isNot(initialCenter));
-    expect(wheel, findsNothing);
-    await finger.up();
-    await tester.pump();
-    expect(controller.sentMessages, isEmpty);
-
-    final fresh = await tester.startGesture(firstPosition, pointer: 2);
-    await tester.pump(holdDelay);
-    expect(wheel, findsOneWidget);
-    await fresh.cancel();
-    await tester.pump();
-    expect(wheel, findsNothing);
-    expect(controller.sentMessages, isEmpty);
-  });
-
-  testWidgets('Slow drift cancels the wheel even after returning to the origin', (
-    tester,
-  ) async {
-    final controller = await pumpGame(tester);
-    final finger = await tester.startGesture(firstPosition, pointer: 1);
-    for (var step = 0; step < 3; step++) {
+  testWidgets(
+    'Dragging the map cancels the wheel even after the finger stops',
+    (tester) async {
+      final controller = await pumpGame(tester);
+      final mapController = tester
+          .widget<FlutterMap>(find.byType(FlutterMap))
+          .mapController!;
+      final initialCenter = mapController.camera.center;
+      final finger = await tester.startGesture(firstPosition, pointer: 1);
       await tester.pump(const Duration(milliseconds: 100));
-      await finger.moveBy(const Offset(0, kTouchSlop / 2));
-    }
-    await finger.moveTo(firstPosition);
-    await tester.pump(holdDelay);
+      await finger.moveBy(const Offset(60, 0));
+      await tester.pump(const Duration(milliseconds: 100));
+      await finger.moveBy(const Offset(60, 0));
+      await tester.pump(holdDelay);
 
-    expect(wheel, findsNothing);
-    await finger.up();
-    await tester.pump();
-    expect(controller.sentMessages, isEmpty);
-  });
+      expect(mapController.camera.center, isNot(initialCenter));
+      expect(wheel, findsNothing);
+      await finger.up();
+      await tester.pump();
+      expect(controller.sentMessages, isEmpty);
+
+      final fresh = await tester.startGesture(firstPosition, pointer: 2);
+      await tester.pump(holdDelay);
+      expect(wheel, findsOneWidget);
+      await fresh.cancel();
+      await tester.pump();
+      expect(wheel, findsNothing);
+      expect(controller.sentMessages, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'Slow drift cancels the wheel even after returning to the origin',
+    (tester) async {
+      final controller = await pumpGame(tester);
+      final finger = await tester.startGesture(firstPosition, pointer: 1);
+      for (var step = 0; step < 3; step++) {
+        await tester.pump(const Duration(milliseconds: 100));
+        await finger.moveBy(const Offset(0, kTouchSlop / 2));
+      }
+      await finger.moveTo(firstPosition);
+      await tester.pump(holdDelay);
+
+      expect(wheel, findsNothing);
+      await finger.up();
+      await tester.pump();
+      expect(controller.sentMessages, isEmpty);
+    },
+  );
 
   testWidgets('Minor finger jitter still allows a long press and selection', (
     tester,
@@ -247,24 +294,23 @@ void main() {
   });
 
   for (final releaseFirst in <bool>[false, true]) {
-    testWidgets(
-      'A second finger cancels the pending press when '
-      '${releaseFirst ? 'the first' : 'the second'} finger is lifted first',
-      (tester) async {
-        final controller = await pumpGame(tester);
-        final first = await tester.startGesture(firstPosition, pointer: 1);
-        await tester.pump(const Duration(milliseconds: 400));
-        final second = await tester.startGesture(secondPosition, pointer: 2);
-        await tester.pump(const Duration(milliseconds: 50));
-        await (releaseFirst ? first : second).up();
-        await tester.pump(holdDelay);
-        expect(wheel, findsNothing);
+    testWidgets('A second finger cancels the pending press when '
+        '${releaseFirst ? 'the first' : 'the second'} finger is lifted first', (
+      tester,
+    ) async {
+      final controller = await pumpGame(tester);
+      final first = await tester.startGesture(firstPosition, pointer: 1);
+      await tester.pump(const Duration(milliseconds: 400));
+      final second = await tester.startGesture(secondPosition, pointer: 2);
+      await tester.pump(const Duration(milliseconds: 50));
+      await (releaseFirst ? first : second).up();
+      await tester.pump(holdDelay);
+      expect(wheel, findsNothing);
 
-        await (releaseFirst ? second : first).up();
-        await tester.pump();
-        expect(controller.sentMessages, isEmpty);
-      },
-    );
+      await (releaseFirst ? second : first).up();
+      await tester.pump();
+      expect(controller.sentMessages, isEmpty);
+    });
   }
 
   testWidgets('A second finger closes an open wheel without sending a ping', (
@@ -289,37 +335,34 @@ void main() {
   });
 
   for (final cancel in <bool>[false, true]) {
-    testWidgets(
-      'Tracks all fingers until ${cancel ? 'cancelled' : 'released'} '
-      'and allows a fresh single-finger press',
-      (tester) async {
-        final controller = await pumpGame(tester);
-        final first = await tester.startGesture(firstPosition, pointer: 1);
-        final second = await tester.startGesture(secondPosition, pointer: 2);
-        final third = await tester.startGesture(
-          const Offset(500, 300),
-          pointer: 3,
-        );
-        await tester.pump(holdDelay);
-        expect(wheel, findsNothing);
+    testWidgets('Tracks all fingers until ${cancel ? 'cancelled' : 'released'} '
+        'and allows a fresh single-finger press', (tester) async {
+      final controller = await pumpGame(tester);
+      final first = await tester.startGesture(firstPosition, pointer: 1);
+      final second = await tester.startGesture(secondPosition, pointer: 2);
+      final third = await tester.startGesture(
+        const Offset(500, 300),
+        pointer: 3,
+      );
+      await tester.pump(holdDelay);
+      expect(wheel, findsNothing);
 
-        await (cancel ? first.cancel() : first.up());
-        await (cancel ? second.cancel() : second.up());
-        final fourth = await tester.startGesture(firstPosition, pointer: 4);
-        await tester.pump(holdDelay);
-        expect(wheel, findsNothing);
-        await (cancel ? third.cancel() : third.up());
-        await (cancel ? fourth.cancel() : fourth.up());
-        await tester.pump();
+      await (cancel ? first.cancel() : first.up());
+      await (cancel ? second.cancel() : second.up());
+      final fourth = await tester.startGesture(firstPosition, pointer: 4);
+      await tester.pump(holdDelay);
+      expect(wheel, findsNothing);
+      await (cancel ? third.cancel() : third.up());
+      await (cancel ? fourth.cancel() : fourth.up());
+      await tester.pump();
 
-        final fresh = await tester.startGesture(firstPosition, pointer: 5);
-        await tester.pump(holdDelay);
-        expect(wheel, findsOneWidget);
-        await fresh.cancel();
-        await tester.pump();
-        expect(wheel, findsNothing);
-        expect(controller.sentMessages, isEmpty);
-      },
-    );
+      final fresh = await tester.startGesture(firstPosition, pointer: 5);
+      await tester.pump(holdDelay);
+      expect(wheel, findsOneWidget);
+      await fresh.cancel();
+      await tester.pump();
+      expect(wheel, findsNothing);
+      expect(controller.sentMessages, isEmpty);
+    });
   }
 }

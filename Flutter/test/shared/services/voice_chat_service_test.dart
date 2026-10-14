@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:broken_veil_protocol/features/game/application/game_controller.dart';
 import 'package:broken_veil_protocol/features/game/data/game_socket_service.dart'
     as game_socket;
@@ -55,6 +57,9 @@ void main() {
   var microphoneEnabled = true;
   var failNextUserMedia = false;
   var failNextPeerConnection = false;
+  var failNextPeerClose = false;
+  Completer<void>? mediaGate;
+  Completer<void>? peerGate;
 
   Iterable<MethodCall> callsFor(String method) =>
       calls.where((call) => call.method == method);
@@ -77,11 +82,15 @@ void main() {
     microphoneEnabled = true;
     failNextUserMedia = false;
     failNextPeerConnection = false;
+    failNextPeerClose = false;
+    mediaGate = null;
+    peerGate = null;
     messenger.setMockMethodCallHandler(events, (_) async => null);
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       switch (call.method) {
         case 'getUserMedia':
+          await mediaGate?.future;
           if (failNextUserMedia) {
             failNextUserMedia = false;
             throw PlatformException(code: 'PermissionDenied');
@@ -99,6 +108,7 @@ void main() {
             'videoTracks': <dynamic>[],
           };
         case 'createPeerConnection':
+          await peerGate?.future;
           if (failNextPeerConnection) {
             failNextPeerConnection = false;
             throw PlatformException(code: 'PeerConnectionFailed');
@@ -129,6 +139,12 @@ void main() {
           return null;
         case 'createAnswer':
           return <String, dynamic>{'sdp': 'answer-sdp', 'type': 'answer'};
+        case 'peerConnectionClose':
+          if (failNextPeerClose) {
+            failNextPeerClose = false;
+            throw PlatformException(code: 'AlreadyClosed');
+          }
+          return null;
         default:
           return null;
       }
@@ -167,6 +183,149 @@ void main() {
     expect(signals, hasLength(3));
   });
 
+  test(
+    'concurrent voice initialization shares microphone and peer creation',
+    () async {
+      mediaGate = Completer<void>();
+      peerGate = Completer<void>();
+      final service = VoiceChatService(signalSender: (_, _) async {});
+      addTearDown(service.dispose);
+      final first = service.enable(selfId: 'self-z', peerIds: ['peer-a']);
+      final second = service.enable(selfId: 'self-z', peerIds: ['peer-a']);
+      await Future<void>.delayed(Duration.zero);
+      expect(callsFor('getUserMedia'), hasLength(1));
+      mediaGate!.complete();
+      await Future<void>.delayed(Duration.zero);
+      expect(callsFor('createPeerConnection'), hasLength(1));
+      peerGate!.complete();
+      await Future.wait([first, second]);
+      expect(service.isEnabled, isTrue);
+      expect(callsFor('addTrack'), hasLength(1));
+    },
+  );
+
+  test(
+    'disabling while microphone permission is pending cannot reopen it',
+    () async {
+      mediaGate = Completer<void>();
+      final service = VoiceChatService(signalSender: (_, _) async {});
+      addTearDown(service.dispose);
+      final pending = service.enable(selfId: 'self-z', peerIds: ['peer-a']);
+      await Future<void>.delayed(Duration.zero);
+      await service.disable();
+      mediaGate!.complete();
+      await pending;
+      expect(service.isEnabled, isFalse);
+      expect(microphoneEnabled, isFalse);
+      expect(callsFor('createPeerConnection'), isEmpty);
+    },
+  );
+
+  test(
+    'leaving during microphone initialization releases the late stream',
+    () async {
+      mediaGate = Completer<void>();
+      final service = VoiceChatService(signalSender: (_, _) async {});
+      final pending = service.enable(selfId: 'self-z', peerIds: ['peer-a']);
+      await Future<void>.delayed(Duration.zero);
+      await service.dispose();
+      mediaGate!.complete();
+      await pending;
+      expect(service.isEnabled, isFalse);
+      expect(callsFor('streamDispose'), hasLength(1));
+      expect(callsFor('createPeerConnection'), isEmpty);
+    },
+  );
+
+  test(
+    'leaving during peer initialization releases its native subscription',
+    () async {
+      peerGate = Completer<void>();
+      final service = VoiceChatService(signalSender: (_, _) async {});
+      final pending = service.enable(selfId: 'self-z', peerIds: ['peer-a']);
+      await Future<void>.delayed(Duration.zero);
+      await service.dispose();
+      peerGate!.complete();
+      await pending;
+      expect(service.isEnabled, isFalse);
+      expect(callsFor('peerConnectionClose'), hasLength(1));
+      expect(callsFor('peerConnectionDispose'), hasLength(1));
+    },
+  );
+
+  test(
+    'ICE candidates arriving before the remote description are retained',
+    () async {
+      final service = VoiceChatService(signalSender: (_, _) async {});
+      addTearDown(service.dispose);
+      await service.enable(selfId: 'self-z', peerIds: ['peer-a']);
+      await service.handleSignal(
+        fromId: 'peer-a',
+        signal: {
+          'type': 'candidate',
+          'candidate': 'candidate-test',
+          'sdpMid': 'audio',
+          'sdpMLineIndex': 0,
+        },
+      );
+      expect(callsFor('addCandidate'), isEmpty);
+      await service.handleSignal(
+        fromId: 'peer-a',
+        signal: {'type': 'offer', 'sdp': 'offer-sdp'},
+      );
+      expect(callsFor('addCandidate'), hasLength(1));
+      final methods = calls.map((call) => call.method).toList();
+      expect(
+        methods.indexOf('setRemoteDescription'),
+        lessThan(methods.indexOf('addCandidate')),
+      );
+    },
+  );
+
+  test(
+    'a changed socket identity recreates voice peers and preserves mute',
+    () async {
+      final service = VoiceChatService(signalSender: (_, _) async {});
+      addTearDown(service.dispose);
+      await service.setTransmissionActive(false);
+      await service.enable(selfId: 'self-y', peerIds: ['peer-a']);
+      await service.enable(selfId: 'self-z', peerIds: ['peer-a']);
+      expect(service.isEnabled, isTrue);
+      expect(microphoneEnabled, isFalse);
+      expect(callsFor('getUserMedia'), hasLength(1));
+      expect(callsFor('createPeerConnection'), hasLength(2));
+      expect(callsFor('peerConnectionDispose'), hasLength(1));
+    },
+  );
+
+  test('one failed native close does not leak the other voice peers', () async {
+    final service = VoiceChatService(signalSender: (_, _) async {});
+    addTearDown(service.dispose);
+    await service.enable(selfId: 'self-z', peerIds: ['peer-a', 'peer-b']);
+    failNextPeerClose = true;
+    await service.disable();
+    expect(callsFor('peerConnectionClose'), hasLength(2));
+    expect(callsFor('peerConnectionDispose'), hasLength(2));
+    expect(microphoneEnabled, isFalse);
+  });
+
+  test('an incoming offer can precede the refreshed player roster', () async {
+    final signals = <Map<String, dynamic>>[];
+    final service = VoiceChatService(
+      signalSender: (_, signal) async => signals.add(signal),
+    );
+    addTearDown(service.dispose);
+    await service.enable(selfId: 'self-z', peerIds: []);
+    await service.handleSignal(
+      fromId: 'peer-new',
+      signal: {'type': 'offer', 'sdp': 'offer-sdp'},
+    );
+    expect(signals.single['type'], 'answer');
+    await service.updatePeers(['peer-new']);
+    expect(callsFor('createPeerConnection'), hasLength(1));
+    expect(callsFor('peerConnectionClose'), isEmpty);
+  });
+
   test('peer synchronization never reopens a muted microphone', () async {
     final service = VoiceChatService(signalSender: (_, _) async {});
     addTearDown(service.dispose);
@@ -180,9 +339,9 @@ void main() {
     expect(microphoneEnabled, isFalse);
     expect(audioEnabledWhenAttached, <bool>[false, false]);
     expect(
-      callsFor('mediaStreamTrackSetEnable').map(
-        (call) => call.arguments['enabled'],
-      ),
+      callsFor(
+        'mediaStreamTrackSetEnable',
+      ).map((call) => call.arguments['enabled']),
       everyElement(isFalse),
     );
     expect(callsFor('getUserMedia'), hasLength(1));
@@ -259,22 +418,25 @@ void main() {
       expectConnectionRetained();
     });
 
-    test('global voice setting still disables and can reenable voice', () async {
-      await controller.refreshVoiceSettings();
-      await VoiceSettingsService().setEnabled(false);
-      await controller.refreshVoiceSettings();
-      await controller.toggleVoiceChatEnabled();
-      expect(controller.isVoiceChatEnabled, isFalse);
-      expect(controller.isMicrophoneEnabled, isFalse);
-      expect(controller.isPlayerAudibleForCurrentRole(ally), isFalse);
-      expect(microphoneEnabled, isFalse);
-      expect(callsFor('peerConnectionClose'), hasLength(1));
-      await VoiceSettingsService().setEnabled(true);
-      await controller.refreshVoiceSettings();
-      expect(controller.isMicrophoneEnabled, isTrue);
-      expect(microphoneEnabled, isTrue);
-      expect(callsFor('createPeerConnection'), hasLength(2));
-    });
+    test(
+      'global voice setting still disables and can reenable voice',
+      () async {
+        await controller.refreshVoiceSettings();
+        await VoiceSettingsService().setEnabled(false);
+        await controller.refreshVoiceSettings();
+        await controller.toggleVoiceChatEnabled();
+        expect(controller.isVoiceChatEnabled, isFalse);
+        expect(controller.isMicrophoneEnabled, isFalse);
+        expect(controller.isPlayerAudibleForCurrentRole(ally), isFalse);
+        expect(microphoneEnabled, isFalse);
+        expect(callsFor('peerConnectionClose'), hasLength(1));
+        await VoiceSettingsService().setEnabled(true);
+        await controller.refreshVoiceSettings();
+        expect(controller.isMicrophoneEnabled, isTrue);
+        expect(microphoneEnabled, isTrue);
+        expect(callsFor('createPeerConnection'), hasLength(2));
+      },
+    );
 
     test('microphone button can restart globally reenabled voice', () async {
       await VoiceSettingsService().setEnabled(false);
@@ -305,56 +467,61 @@ void main() {
     });
   });
 
-  test('lobby mute survives resync and unmute retains the connection', () async {
-    final controller = LobbyController(socketService: _VoiceLobbySocketService())
-      ..bootstrapData = const LobbyBootstrapData(
-        code: 'ABC123',
-        serverUrl: 'http://localhost:3000',
-        socketPath: '/socket.io',
-        playerName: 'Self',
-      )
-      ..players.add(
-        const LobbyPlayer(id: 'peer-a', name: 'Ally', isHost: false),
-      );
-    addTearDown(controller.dispose);
-    await controller.recoverAfterResume();
+  test(
+    'lobby mute survives resync and unmute retains the connection',
+    () async {
+      final controller =
+          LobbyController(socketService: _VoiceLobbySocketService())
+            ..bootstrapData = const LobbyBootstrapData(
+              code: 'ABC123',
+              serverUrl: 'http://localhost:3000',
+              socketPath: '/socket.io',
+              playerName: 'Self',
+            )
+            ..players.add(
+              const LobbyPlayer(id: 'peer-a', name: 'Ally', isHost: false),
+            );
+      addTearDown(controller.dispose);
+      await controller.recoverAfterResume();
 
-    for (var i = 0; i < 3; i++) {
+      for (var i = 0; i < 3; i++) {
+        await controller.toggleVoiceChat();
+        expect(controller.isVoiceChatEnabled, isTrue);
+        expect(controller.isMicrophoneEnabled, isFalse);
+        expect(microphoneEnabled, isFalse);
+        await controller.recoverAfterResume();
+        expect(microphoneEnabled, isFalse);
+        await controller.toggleVoiceChat();
+        expect(controller.isMicrophoneEnabled, isTrue);
+        expect(microphoneEnabled, isTrue);
+        expectConnectionRetained();
+      }
+      await VoiceSettingsService().setEnabled(false);
       await controller.toggleVoiceChat();
-      expect(controller.isVoiceChatEnabled, isTrue);
+      expect(controller.isVoiceChatEnabled, isFalse);
       expect(controller.isMicrophoneEnabled, isFalse);
       expect(microphoneEnabled, isFalse);
-      await controller.recoverAfterResume();
-      expect(microphoneEnabled, isFalse);
+      expect(callsFor('peerConnectionClose'), hasLength(1));
+      await VoiceSettingsService().setEnabled(true);
       await controller.toggleVoiceChat();
       expect(controller.isMicrophoneEnabled, isTrue);
       expect(microphoneEnabled, isTrue);
-      expectConnectionRetained();
-    }
-    await VoiceSettingsService().setEnabled(false);
-    await controller.toggleVoiceChat();
-    expect(controller.isVoiceChatEnabled, isFalse);
-    expect(controller.isMicrophoneEnabled, isFalse);
-    expect(microphoneEnabled, isFalse);
-    expect(callsFor('peerConnectionClose'), hasLength(1));
-    await VoiceSettingsService().setEnabled(true);
-    await controller.toggleVoiceChat();
-    expect(controller.isMicrophoneEnabled, isTrue);
-    expect(microphoneEnabled, isTrue);
-    expect(callsFor('createPeerConnection'), hasLength(2));
-  });
+      expect(callsFor('createPeerConnection'), hasLength(2));
+    },
+  );
 
   test('lobby unmute retries a failed voice connection', () async {
-    final controller = LobbyController(socketService: _VoiceLobbySocketService())
-      ..bootstrapData = const LobbyBootstrapData(
-        code: 'ABC123',
-        serverUrl: 'http://localhost:3000',
-        socketPath: '/socket.io',
-        playerName: 'Self',
-      )
-      ..players.add(
-        const LobbyPlayer(id: 'peer-a', name: 'Ally', isHost: false),
-      );
+    final controller =
+        LobbyController(socketService: _VoiceLobbySocketService())
+          ..bootstrapData = const LobbyBootstrapData(
+            code: 'ABC123',
+            serverUrl: 'http://localhost:3000',
+            socketPath: '/socket.io',
+            playerName: 'Self',
+          )
+          ..players.add(
+            const LobbyPlayer(id: 'peer-a', name: 'Ally', isHost: false),
+          );
     addTearDown(controller.dispose);
     failNextPeerConnection = true;
     await controller.recoverAfterResume();

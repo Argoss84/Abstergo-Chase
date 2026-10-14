@@ -101,23 +101,41 @@ export async function appendGameEvent({
   payloadJson = null,
   createdAt = null,
 }) {
-  const result = await pool.query(
-    `
-    WITH next_seq AS (
-      SELECT COALESCE(MAX(sequence_no), 0) + 1 AS seq
-      FROM game_events
-      WHERE game_id = $1
-    )
-    INSERT INTO game_events
-      (game_id, event_type, actor_user_id, actor_external_id, payload_json, created_at, sequence_no)
-    SELECT
-      $1, $2, $3, $4, $5::jsonb, COALESCE($6::timestamptz, NOW()), next_seq.seq
-    FROM next_seq
-    RETURNING *
-    `,
-    [gameId, eventType, actorUserId, actorExternalId, payloadJson ? JSON.stringify(payloadJson) : null, createdAt]
-  );
-  return result.rows[0];
+  const client = await pool.connect();
+  let releaseError;
+  try {
+    await client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
+    // Allocate sequences only after acquiring this game's lock. The insert
+    // gets a fresh snapshot, including the preceding writer's committed event.
+    await client.query('SELECT id FROM games WHERE id = $1 FOR NO KEY UPDATE', [gameId]);
+    const result = await client.query(
+      `
+      WITH next_seq AS (
+        SELECT COALESCE(MAX(sequence_no), 0) + 1 AS seq
+        FROM game_events
+        WHERE game_id = $1
+      )
+      INSERT INTO game_events
+        (game_id, event_type, actor_user_id, actor_external_id, payload_json, created_at, sequence_no)
+      SELECT
+        $1, $2, $3, $4, $5::jsonb, COALESCE($6::timestamptz, NOW()), next_seq.seq
+      FROM next_seq
+      RETURNING *
+      `,
+      [gameId, eventType, actorUserId, actorExternalId, payloadJson ? JSON.stringify(payloadJson) : null, createdAt]
+    );
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      releaseError = rollbackError;
+    }
+    throw error;
+  } finally {
+    client.release(releaseError);
+  }
 }
 
 export async function getGameEvents(gameId, limit = 200, offset = 0) {

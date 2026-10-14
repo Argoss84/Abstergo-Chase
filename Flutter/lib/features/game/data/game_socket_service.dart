@@ -10,6 +10,8 @@ class GameSocketService {
   String? _origin;
   String? _path;
   StreamController<Map<String, dynamic>>? _messages;
+  bool _disposed = false;
+  int _connectionRevision = 0;
 
   Stream<Map<String, dynamic>> get messages {
     _messages ??= StreamController<Map<String, dynamic>>.broadcast();
@@ -23,11 +25,16 @@ class GameSocketService {
     required String socketPath,
     Duration timeout = const Duration(seconds: 12),
   }) async {
+    if (_disposed) throw StateError('Connexion fermée.');
     final origin = serverUrl.toString();
     final same = _origin == origin && _path == socketPath;
     if (_socket != null && _socket!.connected && same) return;
 
+    final revision = ++_connectionRevision;
     await SignalingWakeService.instance.ensureAwake(serverUrl);
+    if (_disposed || revision != _connectionRevision) {
+      throw StateError('Connexion annulée.');
+    }
 
     if (_socket != null && !same) {
       _socket!.dispose();
@@ -108,7 +115,8 @@ class GameSocketService {
       'payload': <String, dynamic>{
         'code': code.toUpperCase(),
         'playerName': playerName,
-        if (cognitoSub != null && cognitoSub.isNotEmpty) 'cognitoSub': cognitoSub,
+        if (cognitoSub != null && cognitoSub.isNotEmpty)
+          'cognitoSub': cognitoSub,
         if (previousPlayerId != null && previousPlayerId.isNotEmpty)
           'oldPlayerId': previousPlayerId,
       },
@@ -122,10 +130,7 @@ class GameSocketService {
     });
   }
 
-  void pushState({
-    required Map<String, dynamic> state,
-    String? targetId,
-  }) {
+  void pushState({required Map<String, dynamic> state, String? targetId}) {
     _emit(<String, dynamic>{
       'type': 'game:state-sync-request',
       'payload': <String, dynamic>{
@@ -150,10 +155,7 @@ class GameSocketService {
     });
   }
 
-  void updatePlayerStatus({
-    required String playerId,
-    required String status,
-  }) {
+  void updatePlayerStatus({required String playerId, required String status}) {
     _emit(<String, dynamic>{
       'type': 'game:player-status-update-request',
       'payload': <String, dynamic>{
@@ -164,10 +166,7 @@ class GameSocketService {
     });
   }
 
-  void sendRoleChat({
-    required String role,
-    required String text,
-  }) {
+  void sendRoleChat({required String role, required String text}) {
     final upper = role.toUpperCase();
     final type = upper == 'ROGUE' ? 'game:chat:rogue' : 'game:chat:agent';
     _emit(<String, dynamic>{
@@ -207,6 +206,7 @@ class GameSocketService {
   Future<TurnCredentialsResult?> requestTurnCredentials({
     Duration timeout = const Duration(seconds: 8),
   }) async {
+    if (_disposed || _socket?.connected != true) return null;
     final wait = Completer<TurnCredentialsResult?>();
     late final StreamSubscription<Map<String, dynamic>> sub;
     final requestId = _requestId();
@@ -232,12 +232,10 @@ class GameSocketService {
         );
       }
     });
-    _emit(
-      <String, dynamic>{
-        'type': 'turn:credentials-request',
-        'payload': <String, dynamic>{'requestId': requestId},
-      },
-    );
+    _emit(<String, dynamic>{
+      'type': 'turn:credentials-request',
+      'payload': <String, dynamic>{'requestId': requestId},
+    });
     try {
       return await wait.future.timeout(timeout);
     } catch (_) {
@@ -247,10 +245,7 @@ class GameSocketService {
     }
   }
 
-  void leaveGame({
-    required String code,
-    required String playerId,
-  }) {
+  void leaveGame({required String code, required String playerId}) {
     _emit(<String, dynamic>{
       'type': 'game:leave',
       'payload': <String, dynamic>{
@@ -275,6 +270,9 @@ class GameSocketService {
   String _requestId() => DateTime.now().microsecondsSinceEpoch.toString();
 
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    _connectionRevision++;
     _socket?.dispose();
     _socket = null;
     _messages?.close();

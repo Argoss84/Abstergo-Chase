@@ -19,7 +19,7 @@ class CreateLobbyController extends ChangeNotifier {
     StreetFetchService? streetFetchService,
     StreetContourService? streetContourService,
     StreetSnapService? streetSnapService,
-  }) : _service = service ?? CreateLobbyService.instance,
+  }) : _service = service ?? CreateLobbyService(),
        _locationService = locationService ?? const LocationService(),
        _objectiveGenerationService =
            objectiveGenerationService ?? ObjectiveGenerationService(),
@@ -35,6 +35,8 @@ class CreateLobbyController extends ChangeNotifier {
   final StreetContourService _streetContourService;
   final StreetSnapService _streetSnapService;
   bool _disposed = false;
+  int _streetRequestId = 0;
+  StreetFetchCancellation? _streetCancellation;
 
   CreateLobbyFormData form = CreateLobbyFormData.initial();
   String displayName = '';
@@ -60,6 +62,8 @@ class CreateLobbyController extends ChangeNotifier {
 
   bool get canCreateLobby =>
       !isSubmitting &&
+      !isLoadingStreets &&
+      selectedPosition != null &&
       displayName.trim().isNotEmpty &&
       objectivesGenerated &&
       hasCompleteMapConfiguration;
@@ -86,27 +90,36 @@ class CreateLobbyController extends ChangeNotifier {
   }
 
   void setDisplayName(String value) {
+    if (_disposed || displayName == value) return;
     displayName = value;
     notifyListeners();
   }
 
   void setServerUrl(String value) {
+    if (_disposed || serverUrl == value) return;
     serverUrl = value;
     notifyListeners();
   }
 
   void setSocketPath(String value) {
+    if (_disposed || socketPath == value) return;
     socketPath = value;
     notifyListeners();
   }
 
   void updateForm(CreateLobbyFormData value) {
+    if (_disposed) return;
     final objectiveCountChanged = value.objectiveNumber != form.objectiveNumber;
+    final radiusChanged = value.mapRadius != form.mapRadius;
     form = value;
-    if (objectiveCountChanged) {
+    if (objectiveCountChanged || radiusChanged) {
       _resetMapConfiguration();
     }
-    notifyListeners();
+    if (radiusChanged && selectedPosition != null) {
+      unawaited(fetchStreets());
+    } else {
+      notifyListeners();
+    }
   }
 
   Future<void> loadCurrentPosition() async {
@@ -120,6 +133,10 @@ class CreateLobbyController extends ChangeNotifier {
       if (_disposed) return;
       currentPosition = point;
       selectedPosition = null;
+      _streetRequestId++;
+      _streetCancellation?.cancel();
+      isLoadingStreets = false;
+      _resetMapConfiguration();
       streets = <List<GeoPoint>>[];
       outerStreetContour = <GeoPoint>[];
       streetsLoadError = null;
@@ -137,6 +154,7 @@ class CreateLobbyController extends ChangeNotifier {
   }
 
   void setSelectedPosition(GeoPoint point) {
+    if (_disposed) return;
     selectedPosition = point;
     form = form.copyWith(
       mapCenterLatitude: point.latitude.toString(),
@@ -148,6 +166,7 @@ class CreateLobbyController extends ChangeNotifier {
   }
 
   void handleMapTap(GeoPoint point) {
+    if (_disposed) return;
     if (isManualPlacement) {
       _placeManualPoint(point);
       return;
@@ -156,6 +175,7 @@ class CreateLobbyController extends ChangeNotifier {
   }
 
   void beginManualPlacement() {
+    if (_disposed || isLoadingStreets) return;
     if (selectedPosition == null) {
       lastError = 'Sélectionnez un centre de carte.';
       notifyListeners();
@@ -204,6 +224,7 @@ class CreateLobbyController extends ChangeNotifier {
   }
 
   void generateObjectives() {
+    if (_disposed || isLoadingStreets) return;
     final center = selectedPosition;
     if (center == null) {
       lastError = 'Sélectionnez un centre de carte.';
@@ -238,8 +259,15 @@ class CreateLobbyController extends ChangeNotifier {
   }
 
   Future<void> fetchStreets() async {
+    if (_disposed) return;
+    _streetCancellation?.cancel();
+    final requestId = ++_streetRequestId;
     final center = selectedPosition;
+    final radius = form.mapRadius;
     if (center == null) {
+      isLoadingStreets = false;
+      _streetCancellation = null;
+      _resetMapConfiguration();
       streets = <List<GeoPoint>>[];
       outerStreetContour = <GeoPoint>[];
       streetsLoadError = null;
@@ -248,31 +276,46 @@ class CreateLobbyController extends ChangeNotifier {
     }
 
     isLoadingStreets = true;
+    final cancellation = _streetCancellation = StreetFetchCancellation();
     streetsLoadError = null;
     streets = <List<GeoPoint>>[];
+    outerStreetContour = <GeoPoint>[];
+    _resetMapConfiguration();
     notifyListeners();
 
     try {
       final fetched = await _streetFetchService.fetchWalkableStreets(
         center: center,
-        mapRadiusMeters: form.mapRadius,
+        mapRadiusMeters: radius,
+        cancellation: cancellation,
       );
-      streets = fetched;
-      outerStreetContour = _streetContourService.computeOuterContour(
+      if (_disposed || requestId != _streetRequestId) return;
+      final contour = await _streetContourService.computeOuterContourAsync(
         center: center,
-        radiusMeters: form.mapRadius,
-        streets: streets,
+        radiusMeters: radius,
+        streets: fetched,
       );
+      if (_disposed || requestId != _streetRequestId) return;
+      streets = fetched;
+      outerStreetContour = contour;
     } catch (error) {
+      if (_disposed || requestId != _streetRequestId) return;
       streetsLoadError = error.toString();
       outerStreetContour = <GeoPoint>[];
     } finally {
-      isLoadingStreets = false;
-      notifyListeners();
+      cancellation.cancel();
+      if (identical(_streetCancellation, cancellation)) {
+        _streetCancellation = null;
+      }
+      if (!_disposed && requestId == _streetRequestId) {
+        isLoadingStreets = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<void> createLobby() async {
+    if (_disposed || isSubmitting || isLoadingStreets) return;
     final uri = Uri.tryParse(serverUrl.trim());
     if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
       lastError = 'Connexion impossible : paramètres invalides.';
@@ -340,13 +383,15 @@ class CreateLobbyController extends ChangeNotifier {
               .toList(growable: false),
         },
       );
+      if (_disposed) return;
       createdLobbySession = session;
       createdLobbyCode = session.code;
     } catch (error) {
+      if (_disposed) return;
       lastError = error.toString();
     } finally {
       isSubmitting = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -357,6 +402,8 @@ class CreateLobbyController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _streetCancellation?.cancel();
+    _service.disconnect();
     super.dispose();
   }
 }
