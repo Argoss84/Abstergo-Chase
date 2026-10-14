@@ -6,6 +6,7 @@ import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_d
 import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
 import 'package:broken_veil_protocol/features/game/data/game_socket_service.dart';
 import 'package:broken_veil_protocol/features/game/domain/game_models.dart';
+import 'package:broken_veil_protocol/features/game/domain/street_path_finder.dart';
 import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
 import 'package:broken_veil_protocol/features/lobby/data/player_session_store.dart';
 import 'package:broken_veil_protocol/shared/services/voice_chat_service.dart';
@@ -61,6 +62,12 @@ class GameController extends ChangeNotifier {
   }
 
   final GameSocketService _socketService;
+  final StreetPathFinder _streetPathFinder = StreetPathFinder();
+  bool _disposed = false;
+  Future<void>? _voiceSyncFuture;
+  bool _voiceSyncRequested = false;
+  Future<void>? _positionRefreshFuture;
+  bool _forcePositionPublish = false;
   late final VoiceChatService _voiceChatService;
   final PlayerSessionStore _playerSessionStore = PlayerSessionStore();
   final VoiceSettingsService _voiceSettingsService = VoiceSettingsService();
@@ -119,7 +126,8 @@ class GameController extends ChangeNotifier {
   final Map<String, int> _voiceActiveSeenAtMs = <String, int>{};
   final Map<String, GeoPoint> _lastKnownPositionByPlayerId =
       <String, GeoPoint>{};
-  final Map<String, GeoPoint> _lastKnownPositionByIdentity = <String, GeoPoint>{};
+  final Map<String, GeoPoint> _lastKnownPositionByIdentity =
+      <String, GeoPoint>{};
   int _turnExpiresAtMs = 0;
   static const double _kRogueTargetingHalfConeDeg = 20.0;
   static const int _maxGameChatMessages = 150;
@@ -182,6 +190,7 @@ class GameController extends ChangeNotifier {
   }
 
   Future<void> initialize(GameBootstrapData data) async {
+    if (_disposed) return;
     bootstrap = data;
     gameCode = data.codeOverride ?? data.lobby.code;
     playerId = data.playerId;
@@ -208,11 +217,12 @@ class GameController extends ChangeNotifier {
             isHost: p.isHost,
             role: p.role,
             status: p.status,
-            latitude: (data.initialPlayerPosition != null && p.id == data.playerId)
+            latitude:
+                (data.initialPlayerPosition != null && p.id == data.playerId)
                 ? data.initialPlayerPosition!.latitude
                 : null,
-            longitude: (data.initialPlayerPosition != null &&
-                    p.id == data.playerId)
+            longitude:
+                (data.initialPlayerPosition != null && p.id == data.playerId)
                 ? data.initialPlayerPosition!.longitude
                 : null,
           );
@@ -234,6 +244,7 @@ class GameController extends ChangeNotifier {
 
     try {
       final voiceSettings = await _voiceSettingsService.load();
+      if (_disposed) return;
       isVoiceChatEnabled = voiceSettings.enabled;
       voiceMode = voiceSettings.mode;
       voiceActivationThreshold = voiceSettings.activationThreshold;
@@ -241,17 +252,21 @@ class GameController extends ChangeNotifier {
         serverUrl: Uri.parse(data.lobby.serverUrl),
         socketPath: data.lobby.socketPath,
       );
+      if (_disposed) return;
       _messagesSub?.cancel();
       _messagesSub = _socketService.messages.listen(_onMessage);
       _startJoinWatchdog();
       _sendJoinGame();
       await _startPositionTracking();
-      await _syncVoiceState();
+      if (_disposed) return;
       _startVoiceActivityTimer();
       connectionStatus = _hasJoinedGame ? 'connected' : 'connecting';
       isLoading = false;
       notifyListeners();
+      // Microphone and TURN initialization must not hold the game loading UI.
+      unawaited(_syncVoiceState());
     } catch (e) {
+      if (_disposed) return;
       error = e.toString();
       connectionStatus = 'error';
       isLoading = false;
@@ -278,35 +293,64 @@ class GameController extends ChangeNotifier {
 
   Future<void> _startPositionTracking() async {
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) return;
+    if (_disposed || !serviceEnabled) return;
     var permission = await Geolocator.checkPermission();
+    if (_disposed) return;
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
+    if (_disposed) return;
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
       return;
     }
     await _refreshPositionFromDevice(forcePublish: false);
-    _positionSub?.cancel();
+    if (_disposed) return;
+    await _positionSub?.cancel();
+    if (_disposed) return;
     _positionSub =
         Geolocator.getPositionStream(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.high,
             distanceFilter: 5,
           ),
-        ).listen(_onDevicePosition);
+        ).listen(
+          _onDevicePosition,
+          onError: (Object _) {
+            if (_disposed) return;
+            hasRealtimePosition = false;
+            notifyListeners();
+          },
+        );
   }
 
   Future<void> onAppResumed() async {
+    if (_disposed) return;
+    if (_socketService.isConnected) {
+      if (_needsRejoin) {
+        if (!_joinInFlight) _sendJoinGame();
+      } else if (_hasJoinedGame) {
+        _socketService.requestGameSync();
+      }
+    }
     await _refreshPositionFromDevice(forcePublish: true);
   }
 
-  Future<void> _refreshPositionFromDevice({required bool forcePublish}) async {
+  Future<void> _refreshPositionFromDevice({required bool forcePublish}) {
+    if (_disposed) return Future<void>.value();
+    _forcePositionPublish = _forcePositionPublish || forcePublish;
+    return _positionRefreshFuture ??= _readDevicePosition().whenComplete(() {
+      _positionRefreshFuture = null;
+      _forcePositionPublish = false;
+    });
+  }
+
+  Future<void> _readDevicePosition() async {
     try {
       final lastKnown = await Geolocator.getLastKnownPosition();
+      if (_disposed) return;
       if (lastKnown != null) {
-        _applyDevicePosition(lastKnown, forcePublish: forcePublish);
+        _applyDevicePosition(lastKnown, forcePublish: _forcePositionPublish);
       }
       final current = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
@@ -314,8 +358,10 @@ class GameController extends ChangeNotifier {
           timeLimit: Duration(seconds: 4),
         ),
       );
-      _applyDevicePosition(current, forcePublish: forcePublish);
+      if (_disposed) return;
+      _applyDevicePosition(current, forcePublish: _forcePositionPublish);
     } catch (_) {
+      if (_disposed) return;
       _syncSelfMarkerFromMyPosition();
       notifyListeners();
     }
@@ -326,6 +372,7 @@ class GameController extends ChangeNotifier {
   }
 
   void _applyDevicePosition(Position position, {required bool forcePublish}) {
+    if (_disposed) return;
     final previousPosition = myPosition;
     final previousOutOfZone = isOutOfGameZone;
     final hadRealtimePosition = hasRealtimePosition;
@@ -633,6 +680,7 @@ class GameController extends ChangeNotifier {
   }
 
   void _onMessage(Map<String, dynamic> event) {
+    if (_disposed) return;
     final type = event['type']?.toString();
     final payload = event['payload'];
     switch (type) {
@@ -831,10 +879,7 @@ class GameController extends ChangeNotifier {
             ),
           );
           if (roleChat.length > _maxGameChatMessages) {
-            roleChat.removeRange(
-              0,
-              roleChat.length - _maxGameChatMessages,
-            );
+            roleChat.removeRange(0, roleChat.length - _maxGameChatMessages);
           }
           notifyListeners();
         }
@@ -866,6 +911,7 @@ class GameController extends ChangeNotifier {
         notifyListeners();
         return;
       case 'game:closed':
+        _joinWatchdogTimer?.cancel();
         error = 'Partie fermée.';
         connectionStatus = 'closed';
         notifyListeners();
@@ -1106,11 +1152,7 @@ class GameController extends ChangeNotifier {
         'Joueur';
     final role = raw['role']?.toString() ?? previousById[id]?.role;
     var previous = id.isEmpty ? null : previousById[id];
-    previous ??= _findPlayerByNameRole(
-      name,
-      role,
-      source: previousById.values,
-    );
+    previous ??= _findPlayerByNameRole(name, role, source: previousById.values);
     final lat = double.tryParse(raw['latitude']?.toString() ?? '');
     final lng = double.tryParse(raw['longitude']?.toString() ?? '');
     return _withLastKnownPosition(
@@ -1663,7 +1705,7 @@ class GameController extends ChangeNotifier {
   void _startJoinWatchdog() {
     _joinWatchdogTimer?.cancel();
     _joinWatchdogTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      if (_hasJoinedGame) return;
+      if (_hasJoinedGame && !_needsRejoin) return;
       if (!_socketService.isConnected) return;
       final now = DateTime.now().millisecondsSinceEpoch;
       if (_joinInFlight && now - _lastJoinAttemptMs < 5000) return;
@@ -1700,9 +1742,7 @@ class GameController extends ChangeNotifier {
               player.id == playerId || isPlayerVisibleForCurrentRole(player),
         )
         .map(playerWithDisplayPosition)
-        .where(
-          (player) => player.latitude != null && player.longitude != null,
-        )
+        .where((player) => player.latitude != null && player.longitude != null)
         .toList(growable: false);
   }
 
@@ -1803,7 +1843,22 @@ class GameController extends ChangeNotifier {
     });
   }
 
-  Future<void> _syncVoiceState() async {
+  Future<void> _syncVoiceState() {
+    if (_disposed) return Future<void>.value();
+    _voiceSyncRequested = true;
+    return _voiceSyncFuture ??= _runVoiceSync().whenComplete(() {
+      _voiceSyncFuture = null;
+    });
+  }
+
+  Future<void> _runVoiceSync() async {
+    do {
+      _voiceSyncRequested = false;
+      await _syncVoiceStateOnce();
+    } while (!_disposed && _voiceSyncRequested);
+  }
+
+  Future<void> _syncVoiceStateOnce() async {
     try {
       final me = playerId;
       if (me == null || me.isEmpty || !isVoiceChatEnabled) {
@@ -1811,11 +1866,21 @@ class GameController extends ChangeNotifier {
         return;
       }
       await _refreshTurnIfNeeded();
+      if (_disposed) return;
+      if (!isVoiceChatEnabled) {
+        await _voiceChatService.disable();
+        return;
+      }
+      if (me != playerId) {
+        _voiceSyncRequested = true;
+        return;
+      }
       final peers = players
           .where((p) => isPlayerAudibleForCurrentRole(p))
           .map((p) => p.id)
           .toList();
       await _applyTransmissionGate();
+      if (_disposed) return;
       await _voiceChatService.enable(selfId: me, peerIds: peers);
     } catch (_) {
       isVoiceChatEnabled = false;
@@ -1878,7 +1943,11 @@ class GameController extends ChangeNotifier {
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now < _turnExpiresAtMs) return;
     final creds = await _socketService.requestTurnCredentials();
-    if (creds == null || creds.urls.isEmpty) return;
+    if (_disposed) return;
+    if (creds == null || creds.urls.isEmpty) {
+      _turnExpiresAtMs = DateTime.now().millisecondsSinceEpoch + 5000;
+      return;
+    }
     final servers = <Map<String, dynamic>>[];
     for (final url in creds.urls) {
       final isTurn = url.startsWith('turn:');
@@ -2049,7 +2118,7 @@ class GameController extends ChangeNotifier {
     final streetNetwork =
         _effectiveGameConfig?.mapStreetNetwork ?? const <List<GeoPoint>>[];
     if (streetNetwork.isNotEmpty) {
-      final graphPath = _shortestPathOnStreetNetwork(
+      final graphPath = _streetPathFinder.findPath(
         start: start,
         target: target,
         streets: streetNetwork,
@@ -2078,132 +2147,6 @@ class GameController extends ChangeNotifier {
         : backward;
 
     return <GeoPoint>[start, if (best.isNotEmpty) ...best, target];
-  }
-
-  List<GeoPoint> _shortestPathOnStreetNetwork({
-    required GeoPoint start,
-    required GeoPoint target,
-    required List<List<GeoPoint>> streets,
-  }) {
-    final nodes = <GeoPoint>[];
-    final nodeIndexByKey = <String, int>{};
-    final adjacency = <int, Map<int, double>>{};
-
-    int ensureNode(GeoPoint p) {
-      final key =
-          '${p.latitude.toStringAsFixed(6)},${p.longitude.toStringAsFixed(6)}';
-      final existing = nodeIndexByKey[key];
-      if (existing != null) return existing;
-      final idx = nodes.length;
-      nodes.add(p);
-      nodeIndexByKey[key] = idx;
-      adjacency[idx] = <int, double>{};
-      return idx;
-    }
-
-    void addEdge(int a, int b) {
-      if (a == b) return;
-      final pa = nodes[a];
-      final pb = nodes[b];
-      final distance = Geolocator.distanceBetween(
-        pa.latitude,
-        pa.longitude,
-        pb.latitude,
-        pb.longitude,
-      );
-      final existingAB = adjacency[a]![b];
-      if (existingAB == null || distance < existingAB) {
-        adjacency[a]![b] = distance;
-      }
-      final existingBA = adjacency[b]![a];
-      if (existingBA == null || distance < existingBA) {
-        adjacency[b]![a] = distance;
-      }
-    }
-
-    for (final street in streets) {
-      if (street.length < 2) continue;
-      var previous = ensureNode(street.first);
-      for (var i = 1; i < street.length; i++) {
-        final current = ensureNode(street[i]);
-        addEdge(previous, current);
-        previous = current;
-      }
-    }
-    if (nodes.length < 2) return const <GeoPoint>[];
-
-    final startNode = _nearestNodeIndex(nodes, start);
-    final targetNode = _nearestNodeIndex(nodes, target);
-    if (startNode == -1 || targetNode == -1) return const <GeoPoint>[];
-
-    final distances = <int, double>{};
-    final previous = <int, int>{};
-    final visited = <int>{};
-    for (var i = 0; i < nodes.length; i++) {
-      distances[i] = double.infinity;
-    }
-    distances[startNode] = 0;
-
-    while (visited.length < nodes.length) {
-      int? current;
-      var currentDistance = double.infinity;
-      for (var i = 0; i < nodes.length; i++) {
-        if (visited.contains(i)) continue;
-        final d = distances[i] ?? double.infinity;
-        if (d < currentDistance) {
-          currentDistance = d;
-          current = i;
-        }
-      }
-      if (current == null || currentDistance == double.infinity) break;
-      if (current == targetNode) break;
-      visited.add(current);
-
-      final neighbors = adjacency[current] ?? const <int, double>{};
-      for (final entry in neighbors.entries) {
-        final next = entry.key;
-        if (visited.contains(next)) continue;
-        final candidate = currentDistance + entry.value;
-        if (candidate < (distances[next] ?? double.infinity)) {
-          distances[next] = candidate;
-          previous[next] = current;
-        }
-      }
-    }
-
-    if ((distances[targetNode] ?? double.infinity) == double.infinity) {
-      return const <GeoPoint>[];
-    }
-
-    final reversePath = <GeoPoint>[nodes[targetNode]];
-    var cursor = targetNode;
-    while (cursor != startNode) {
-      final prev = previous[cursor];
-      if (prev == null) break;
-      cursor = prev;
-      reversePath.add(nodes[cursor]);
-    }
-    final pathOnStreets = reversePath.reversed.toList(growable: false);
-    return <GeoPoint>[start, ...pathOnStreets, target];
-  }
-
-  int _nearestNodeIndex(List<GeoPoint> nodes, GeoPoint target) {
-    var best = -1;
-    var bestDistance = double.infinity;
-    for (var i = 0; i < nodes.length; i++) {
-      final p = nodes[i];
-      final d = Geolocator.distanceBetween(
-        p.latitude,
-        p.longitude,
-        target.latitude,
-        target.longitude,
-      );
-      if (d < bestDistance) {
-        bestDistance = d;
-        best = i;
-      }
-    }
-    return best;
   }
 
   int _nearestPointIndex(List<GeoPoint> points, GeoPoint target) {
@@ -2283,8 +2226,12 @@ class GameController extends ChangeNotifier {
         })
         .toList(growable: false);
     if (relevant.isEmpty) return false;
-    final agents = relevant.where((p) => (p.role ?? '').toUpperCase() == 'AGENT').length;
-    final rogues = relevant.where((p) => (p.role ?? '').toUpperCase() == 'ROGUE').length;
+    final agents = relevant
+        .where((p) => (p.role ?? '').toUpperCase() == 'AGENT')
+        .length;
+    final rogues = relevant
+        .where((p) => (p.role ?? '').toUpperCase() == 'ROGUE')
+        .length;
     if (agents < 1 || rogues < 1) return false;
     return relevant.every(isPlayerInStartZone);
   }
@@ -2309,10 +2256,7 @@ class GameController extends ChangeNotifier {
         .toList(growable: false);
   }
 
-  void _appendChatMessage(
-    List<GameChatMessage> messages,
-    Map payload,
-  ) {
+  void _appendChatMessage(List<GameChatMessage> messages, Map payload) {
     messages.add(
       GameChatMessage(
         playerId: payload['playerId']?.toString() ?? '',
@@ -2337,7 +2281,13 @@ class GameController extends ChangeNotifier {
   }
 
   @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
+  @override
   void dispose() {
+    _disposed = true;
     _startCountdownTimer?.cancel();
     _countdownTimer?.cancel();
     _joinWatchdogTimer?.cancel();

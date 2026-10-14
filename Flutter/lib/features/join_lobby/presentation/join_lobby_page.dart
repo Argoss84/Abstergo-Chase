@@ -100,11 +100,13 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
   ) async {
     try {
       final token = await auth.getAccessToken();
-      if (token == null || token.isEmpty) {
+      if (!mounted || token == null || token.isEmpty) {
         return;
       }
       await _accountApiService.syncUser(token, username: auth.username);
+      if (!mounted) return;
       final profile = await _accountApiService.getMyProfile(token);
+      if (!mounted) return;
       final username = profile.username?.trim();
       if (username == null || username.isEmpty) {
         return;
@@ -116,7 +118,7 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
       }
       setState(() {});
     } catch (error) {
-      if (error is SessionInvalidatedException) {
+      if (mounted && error is SessionInvalidatedException) {
         await ref
             .read(authControllerProvider)
             .handleSessionInvalidated(error.message);

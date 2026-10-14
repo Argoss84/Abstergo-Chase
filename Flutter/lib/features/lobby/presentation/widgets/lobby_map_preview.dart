@@ -228,82 +228,89 @@ class LobbyMapPreview extends StatelessWidget {
                 maxZoom: _kOsmMaxZoom,
               ),
             ),
-            CircleLayer(
-              circles: [
-                if (outerStreetContour.length < 3)
-                  CircleMarker(
-                    point: centerLatLng,
-                    radius: mapRadiusMeters.toDouble(),
-                    useRadiusInMeter: true,
-                    color: Colors.blue.withValues(alpha: 0.1),
-                    borderStrokeWidth: 2,
-                    borderColor: Colors.blue,
-                  ),
-                if (showObjectives && showObjectiveZones)
-                  ...objectiveZones
-                      .where((zone) => !zone.hugsStreets)
-                      .map(
-                        (zone) => CircleMarker(
-                          point: LatLng(
-                            zone.center.latitude,
-                            zone.center.longitude,
-                          ),
-                          radius: zone.radiusMeters,
+            RepaintBoundary(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  CircleLayer(
+                    circles: [
+                      if (outerStreetContour.length < 3)
+                        CircleMarker(
+                          point: centerLatLng,
+                          radius: mapRadiusMeters.toDouble(),
                           useRadiusInMeter: true,
-                          color: Colors.red.withValues(alpha: 0.08),
-                          borderStrokeWidth: 1,
-                          borderColor: Colors.red,
+                          color: Colors.blue.withValues(alpha: 0.1),
+                          borderStrokeWidth: 2,
+                          borderColor: Colors.blue,
                         ),
-                      ),
-                if (showObjectives && showObjectiveZones)
-                  ...inactiveObjectiveZones
-                      .where((zone) => !zone.hugsStreets)
-                      .map(
-                        (zone) => CircleMarker(
-                          point: LatLng(
-                            zone.center.latitude,
-                            zone.center.longitude,
-                          ),
-                          radius: zone.radiusMeters,
+                      if (showObjectives && showObjectiveZones)
+                        ...objectiveZones
+                            .where((zone) => !zone.hugsStreets)
+                            .map(
+                              (zone) => CircleMarker(
+                                point: LatLng(
+                                  zone.center.latitude,
+                                  zone.center.longitude,
+                                ),
+                                radius: zone.radiusMeters,
+                                useRadiusInMeter: true,
+                                color: Colors.red.withValues(alpha: 0.08),
+                                borderStrokeWidth: 1,
+                                borderColor: Colors.red,
+                              ),
+                            ),
+                      if (showObjectives && showObjectiveZones)
+                        ...inactiveObjectiveZones
+                            .where((zone) => !zone.hugsStreets)
+                            .map(
+                              (zone) => CircleMarker(
+                                point: LatLng(
+                                  zone.center.latitude,
+                                  zone.center.longitude,
+                                ),
+                                radius: zone.radiusMeters,
+                                useRadiusInMeter: true,
+                                color: Colors.grey.withValues(alpha: 0.08),
+                                borderStrokeWidth: 1,
+                                borderColor: Colors.grey,
+                              ),
+                            ),
+                      if (agentLatLng != null)
+                        CircleMarker(
+                          point: agentLatLng,
+                          radius: startZoneRadiusMeters.toDouble(),
                           useRadiusInMeter: true,
-                          color: Colors.grey.withValues(alpha: 0.08),
-                          borderStrokeWidth: 1,
-                          borderColor: Colors.grey,
+                          color: Colors.blue.withValues(alpha: 0.1),
+                          borderStrokeWidth: 1.5,
+                          borderColor: Colors.blue,
                         ),
-                      ),
-                if (agentLatLng != null)
-                  CircleMarker(
-                    point: agentLatLng,
-                    radius: startZoneRadiusMeters.toDouble(),
-                    useRadiusInMeter: true,
-                    color: Colors.blue.withValues(alpha: 0.1),
-                    borderStrokeWidth: 1.5,
-                    borderColor: Colors.blue,
+                      if (rogueLatLng != null)
+                        CircleMarker(
+                          point: rogueLatLng,
+                          radius: startZoneRadiusMeters.toDouble(),
+                          useRadiusInMeter: true,
+                          color: Colors.green.withValues(alpha: 0.1),
+                          borderStrokeWidth: 1.5,
+                          borderColor: Colors.green,
+                        ),
+                    ],
                   ),
-                if (rogueLatLng != null)
-                  CircleMarker(
-                    point: rogueLatLng,
-                    radius: startZoneRadiusMeters.toDouble(),
-                    useRadiusInMeter: true,
-                    color: Colors.green.withValues(alpha: 0.1),
-                    borderStrokeWidth: 1.5,
-                    borderColor: Colors.green,
-                  ),
-              ],
-            ),
-            if (contourLatLng.length >= 3)
-              PolygonLayer(
-                polygons: [
-                  Polygon(
-                    points: contourLatLng,
-                    color: Colors.blue.withValues(alpha: 0.12),
-                    borderColor: Colors.blue,
-                    borderStrokeWidth: 2.5,
-                  ),
+                  if (contourLatLng.length >= 3)
+                    PolygonLayer(
+                      polygons: [
+                        Polygon(
+                          points: contourLatLng,
+                          color: Colors.blue.withValues(alpha: 0.12),
+                          borderColor: Colors.blue,
+                          borderStrokeWidth: 2.5,
+                        ),
+                      ],
+                    ),
+                  if (objectivePolygons.isNotEmpty)
+                    PolygonLayer(polygons: objectivePolygons),
                 ],
               ),
-            if (objectivePolygons.isNotEmpty)
-              PolygonLayer(polygons: objectivePolygons),
+            ),
             if (guidanceLatLng.length >= 2 ||
                 highlightZones.isNotEmpty ||
                 pingMarkers.isNotEmpty)
@@ -446,82 +453,84 @@ class LobbyMapPreview extends StatelessWidget {
                   },
                 ),
               ),
-            MarkerLayer(
-              markers: [
-                if (showCenterMarker)
-                  Marker(
-                    point: centerLatLng,
-                    child: const Icon(
-                      Icons.location_on,
-                      color: Colors.red,
-                      size: 34,
+            RepaintBoundary(
+              child: MarkerLayer(
+                markers: [
+                  if (showCenterMarker)
+                    Marker(
+                      point: centerLatLng,
+                      child: const Icon(
+                        Icons.location_on,
+                        color: Colors.red,
+                        size: 34,
+                      ),
                     ),
-                  ),
-                if (showObjectives && showObjectiveMarkers)
-                  ...objectiveLatLng.map(
-                    (point) => Marker(
-                      point: point,
-                      child: Icon(
-                        objectiveMarkerIcon,
-                        color: objectiveMarkerColor,
-                        size: objectiveMarkerSize,
+                  if (showObjectives && showObjectiveMarkers)
+                    ...objectiveLatLng.map(
+                      (point) => Marker(
+                        point: point,
+                        child: Icon(
+                          objectiveMarkerIcon,
+                          color: objectiveMarkerColor,
+                          size: objectiveMarkerSize,
+                        ),
+                      ),
+                    ),
+                  if (showObjectives && showObjectiveMarkers)
+                    ...inactiveObjectiveLatLng.map(
+                      (point) => Marker(
+                        point: point,
+                        child: Icon(
+                          Icons.block,
+                          color: Colors.grey,
+                          size: objectiveMarkerSize,
+                        ),
+                      ),
+                    ),
+                  if (agentLatLng != null)
+                    Marker(
+                      point: agentLatLng,
+                      child: const Icon(
+                        Icons.trip_origin,
+                        color: Colors.blue,
+                        size: 20,
+                      ),
+                    ),
+                  if (rogueLatLng != null)
+                    Marker(
+                      point: rogueLatLng,
+                      child: const Icon(
+                        Icons.trip_origin,
+                        color: Colors.green,
+                        size: 20,
+                      ),
+                    ),
+                  ...effectivePlayerMarkers.map(
+                    (player) => Marker(
+                      width: 56,
+                      height: 56,
+                      point: LatLng(
+                        player.point.latitude,
+                        player.point.longitude,
+                      ),
+                      child: _PlayerGpsPin(
+                        isAgent: player.isAgent,
+                        aura: player.aura,
                       ),
                     ),
                   ),
-                if (showObjectives && showObjectiveMarkers)
-                  ...inactiveObjectiveLatLng.map(
-                    (point) => Marker(
-                      point: point,
-                      child: Icon(
-                        Icons.block,
-                        color: Colors.grey,
-                        size: objectiveMarkerSize,
-                      ),
+                  ...pingMarkers.map(
+                    (ping) => Marker(
+                      width: 180,
+                      height: 66,
+                      point: LatLng(ping.point.latitude, ping.point.longitude),
+                      alignment: Alignment.topCenter,
+                      rotate: true,
+                      child: _RolePingMarkerWidget(ping: ping),
                     ),
                   ),
-                if (agentLatLng != null)
-                  Marker(
-                    point: agentLatLng,
-                    child: const Icon(
-                      Icons.trip_origin,
-                      color: Colors.blue,
-                      size: 20,
-                    ),
-                  ),
-                if (rogueLatLng != null)
-                  Marker(
-                    point: rogueLatLng,
-                    child: const Icon(
-                      Icons.trip_origin,
-                      color: Colors.green,
-                      size: 20,
-                    ),
-                  ),
-                ...effectivePlayerMarkers.map(
-                  (player) => Marker(
-                    width: 56,
-                    height: 56,
-                    point: LatLng(
-                      player.point.latitude,
-                      player.point.longitude,
-                    ),
-                    child: _PlayerGpsPin(
-                      isAgent: player.isAgent,
-                      aura: player.aura,
-                    ),
-                  ),
-                ),
-                ...pingMarkers.map(
-                  (ping) => Marker(
-                    width: 180,
-                    height: 66,
-                    point: LatLng(ping.point.latitude, ping.point.longitude),
-                    alignment: Alignment.topCenter,
-                    rotate: true,
-                    child: _RolePingMarkerWidget(ping: ping),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),

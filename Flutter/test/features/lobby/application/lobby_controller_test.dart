@@ -4,6 +4,7 @@ import 'package:broken_veil_protocol/features/lobby/application/lobby_controller
 import 'package:broken_veil_protocol/features/lobby/data/lobby_socket_service.dart';
 import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _FailingJoinLobbySocketService extends LobbySocketService {
   final StreamController<Map<String, dynamic>> _messagesController =
@@ -211,6 +212,11 @@ class _ReconnectingLobbySocketService extends LobbySocketService {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => SharedPreferences.setMockInitialValues({
+    'voice.enabled': false,
+  }));
+
   test(
     'triggers game fallback route when lobby join returns lobby not found',
     () async {

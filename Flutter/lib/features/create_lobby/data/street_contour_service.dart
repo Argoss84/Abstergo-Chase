@@ -1,11 +1,36 @@
 import 'dart:math';
 
 import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
+import 'package:flutter/foundation.dart';
+
+typedef _ContourRequest = ({
+  GeoPoint center,
+  int radiusMeters,
+  List<List<GeoPoint>> streets,
+});
+
+List<GeoPoint> _computeStreetContour(_ContourRequest request) {
+  return const StreetContourService().computeOuterContour(
+    center: request.center,
+    radiusMeters: request.radiusMeters,
+    streets: request.streets,
+  );
+}
 
 class StreetContourService {
   const StreetContourService();
 
   static const double _metersPerDegreeLat = 111320.0;
+
+  Future<List<GeoPoint>> computeOuterContourAsync({
+    required GeoPoint center,
+    required int radiusMeters,
+    required List<List<GeoPoint>> streets,
+  }) => compute(_computeStreetContour, (
+    center: center,
+    radiusMeters: radiusMeters,
+    streets: streets,
+  ), debugLabel: 'street-contour');
 
   List<GeoPoint> computeOuterContour({
     required GeoPoint center,

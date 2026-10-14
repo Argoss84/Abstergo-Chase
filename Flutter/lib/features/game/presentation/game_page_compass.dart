@@ -40,7 +40,9 @@ class _CompassBanner extends StatelessWidget {
     final targets = _buildTargets();
     if (targets.isEmpty) return const SizedBox.shrink();
 
-    return _FpsCompassBar(headingDeg: heading, targets: targets);
+    return RepaintBoundary(
+      child: _FpsCompassBar(headingDeg: heading, targets: targets),
+    );
   }
 
   List<_CompassTarget> _buildTargets() {
@@ -286,7 +288,6 @@ class _FpsCompassBar extends StatelessWidget {
       ),
     );
   }
-
 }
 
 class _FpsCompassPainter extends CustomPainter {

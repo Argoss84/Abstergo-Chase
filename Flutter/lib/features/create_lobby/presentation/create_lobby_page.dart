@@ -65,12 +65,7 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
 
     if (!mounted) return;
     if (data is CreateLobbyDetailsResult) {
-      final terrainChanged = data.form.mapRadius != _controller.form.mapRadius;
       _controller.updateForm(data.form);
-      final center = _controller.selectedPosition;
-      if (terrainChanged && center != null) {
-        _controller.setSelectedPosition(center);
-      }
     }
   }
 
@@ -93,11 +88,13 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
   ) async {
     try {
       final token = await auth.getAccessToken();
-      if (token == null || token.isEmpty) {
+      if (!mounted || token == null || token.isEmpty) {
         return;
       }
       await _accountApiService.syncUser(token, username: auth.username);
+      if (!mounted) return;
       final profile = await _accountApiService.getMyProfile(token);
+      if (!mounted) return;
       final username = profile.username?.trim() ?? auth.username?.trim() ?? '';
       final cognitoSub = await auth.getCurrentUserSub();
       if (!mounted) return;
@@ -107,7 +104,7 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
       }
       _controller.lastError = null;
     } catch (error) {
-      if (error is SessionInvalidatedException) {
+      if (mounted && error is SessionInvalidatedException) {
         await ref
             .read(authControllerProvider)
             .handleSessionInvalidated(error.message);

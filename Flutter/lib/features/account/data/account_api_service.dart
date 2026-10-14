@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:broken_veil_protocol/app/config/app_runtime_config.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class SessionInvalidatedException implements Exception {
@@ -59,7 +60,10 @@ class PlayerAccountProfile {
 }
 
 class AccountApiService {
-  AccountApiService();
+  AccountApiService({bool useProduction = kReleaseMode})
+    : _useProduction = useProduction;
+
+  final bool _useProduction;
   static const Duration _requestTimeout = Duration(seconds: 12);
 
   bool _isMultiConnectionRejectionBody(String body) {
@@ -69,11 +73,14 @@ class AccountApiService {
   }
 
   Future<(String preferred, String fallback)> _resolveBaseUrls() async {
-    // Mon compte est temporairement force en environnement DEV uniquement.
-    return (
-      AppRuntimeConfig.serverBddDevelopmentUrl,
-      'http://localhost:5175',
-    );
+    if (_useProduction) {
+      return (
+        AppRuntimeConfig.serverBddProductionUrl,
+        AppRuntimeConfig.serverBddProductionUrl,
+      );
+    }
+    // Preserve the local fallback for debug builds only.
+    return (AppRuntimeConfig.serverBddDevelopmentUrl, 'http://localhost:5175');
   }
 
   bool _isTransportFailure(Object error) {
@@ -87,9 +94,7 @@ class AccountApiService {
     if (response.statusCode == 401 && _isMultiConnectionRejectionBody(body)) {
       throw Exception('Session backend ignorée: ${response.body}');
     }
-    throw Exception(
-      'Echec API (${response.statusCode}): ${response.body}',
-    );
+    throw Exception('Echec API (${response.statusCode}): ${response.body}');
   }
 
   Future<T> _withBaseUrlFallback<T>(
@@ -141,9 +146,7 @@ class AccountApiService {
       final response = await http
           .get(
             Uri.parse('$baseUrl/api/users/me'),
-            headers: {
-              'Authorization': 'Bearer $accessToken',
-            },
+            headers: {'Authorization': 'Bearer $accessToken'},
           )
           .timeout(_requestTimeout);
       if (response.statusCode >= 400) {

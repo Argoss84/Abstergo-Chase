@@ -12,5 +12,7 @@ final authControllerProvider = Provider<CognitoAuthController>((ref) {
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final auth = ref.watch(authControllerProvider);
-  return buildAppRouter(auth);
+  final router = buildAppRouter(auth);
+  ref.onDispose(router.dispose);
+  return router;
 });

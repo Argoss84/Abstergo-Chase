@@ -31,6 +31,9 @@ class LobbyController extends ChangeNotifier {
   final PlayerSessionStore _playerSessionStore;
   late final VoiceChatService _voiceChatService;
   final VoiceSettingsService _voiceSettingsService = VoiceSettingsService();
+  bool _disposed = false;
+  Future<void>? _voiceSyncFuture;
+  bool _voiceSyncRequested = false;
   StreamSubscription<Map<String, dynamic>>? _messagesSub;
 
   bool isLoading = true;
@@ -88,6 +91,7 @@ class LobbyController extends ChangeNotifier {
   static const int _maxLobbyChatMessages = 100;
 
   Future<void> initialize({required LobbyBootstrapData bootstrap}) async {
+    if (_disposed) return;
     bootstrapData = bootstrap;
     lobbyCode = bootstrap.code.toUpperCase();
     isLoading = true;
@@ -100,10 +104,12 @@ class LobbyController extends ChangeNotifier {
     _messagesSub = _socketService.messages.listen(_onMessage);
 
     try {
-      await _bindToLobby(bootstrap, isInitial: true);
-      _regenerateObjectiveNames();
       final voiceSettings = await _voiceSettingsService.load();
+      if (_disposed) return;
       isVoiceChatEnabled = voiceSettings.enabled;
+      await _bindToLobby(bootstrap, isInitial: true);
+      if (_disposed) return;
+      _regenerateObjectiveNames();
       isLoading = false;
       notifyListeners();
       // Keep lobby join UX responsive even if microphone permission stalls.
@@ -111,6 +117,7 @@ class LobbyController extends ChangeNotifier {
       _startVoiceActivityGcTimer();
       _startResyncHeartbeat();
     } catch (e) {
+      if (_disposed) return;
       error = e.toString();
       connectionStatus = 'error';
       isLoading = false;
@@ -140,6 +147,7 @@ class LobbyController extends ChangeNotifier {
   }
 
   void _onMessage(Map<String, dynamic> event) {
+    if (_disposed) return;
     final type = event['type']?.toString();
     final payload = event['payload'];
     switch (type) {
@@ -407,7 +415,9 @@ class LobbyController extends ChangeNotifier {
     cognitoSub: bootstrapData?.cognitoSub,
   );
 
-  void _scheduleDisconnectRecovery({Duration delay = const Duration(seconds: 1)}) {
+  void _scheduleDisconnectRecovery({
+    Duration delay = const Duration(seconds: 1),
+  }) {
     _disconnectRecoveryTimer?.cancel();
     _disconnectRecoveryTimer = Timer(delay, () {
       if (_isBindingSession) return;
@@ -417,14 +427,17 @@ class LobbyController extends ChangeNotifier {
 
   Future<void> recoverAfterResume() async {
     final bootstrap = bootstrapData;
-    if (_isBindingSession || bootstrap == null) return;
+    if (_disposed || _isBindingSession || bootstrap == null) return;
     _isRecoveringSession = true;
     try {
       await _bindToLobby(bootstrap, isInitial: false);
+      if (_disposed) return;
       requestLatestState();
       await _syncVoiceState();
+      if (_disposed) return;
       _startResyncHeartbeat();
     } catch (_) {
+      if (_disposed) return;
       connectionStatus = _socketService.isConnected ? 'connected' : 'error';
       notifyListeners();
       _recoveryAttempts += 1;
@@ -441,7 +454,7 @@ class LobbyController extends ChangeNotifier {
     LobbyBootstrapData bootstrap, {
     required bool isInitial,
   }) async {
-    if (_isBindingSession) return;
+    if (_disposed || _isBindingSession) return;
     _isBindingSession = true;
     if (!isInitial) {
       connectionStatus = 'connecting';
@@ -454,13 +467,16 @@ class LobbyController extends ChangeNotifier {
           socketPath: bootstrap.socketPath,
         );
       }
+      if (_disposed) return;
       final joined = await _socketService.joinLobby(
         code: bootstrap.code,
         playerName: bootstrap.playerName,
         cognitoSub: bootstrap.cognitoSub,
         previousPlayerId: playerId ?? bootstrap.previousPlayerId,
-        reconnectAsHost: isHost || (playerId == null && bootstrap.reconnectAsHost),
+        reconnectAsHost:
+            isHost || (playerId == null && bootstrap.reconnectAsHost),
       );
+      if (_disposed) return;
       lobbyCode = joined.code;
       playerId = joined.playerId;
       isHost = joined.playerId == joined.hostId;
@@ -473,6 +489,7 @@ class LobbyController extends ChangeNotifier {
       _recoveryAttempts = 0;
       _disconnectRecoveryTimer?.cancel();
       await _persistPlayerId();
+      if (_disposed) return;
       requestLatestState();
       notifyListeners();
     } finally {
@@ -635,7 +652,22 @@ class LobbyController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _syncVoiceState() async {
+  Future<void> _syncVoiceState() {
+    if (_disposed) return Future<void>.value();
+    _voiceSyncRequested = true;
+    return _voiceSyncFuture ??= _runVoiceSync().whenComplete(() {
+      _voiceSyncFuture = null;
+    });
+  }
+
+  Future<void> _runVoiceSync() async {
+    do {
+      _voiceSyncRequested = false;
+      await _syncVoiceStateOnce();
+    } while (!_disposed && _voiceSyncRequested);
+  }
+
+  Future<void> _syncVoiceStateOnce() async {
     try {
       final me = playerId;
       if (me == null || me.isEmpty || !isVoiceChatEnabled) {
@@ -643,11 +675,21 @@ class LobbyController extends ChangeNotifier {
         return;
       }
       await _refreshTurnIfNeeded();
+      if (_disposed) return;
+      if (!isVoiceChatEnabled) {
+        await _voiceChatService.disable();
+        return;
+      }
+      if (me != playerId) {
+        _voiceSyncRequested = true;
+        return;
+      }
       final peerIds = players
           .where((p) => p.id != me && p.status.toLowerCase() != 'disconnected')
           .map((p) => p.id)
           .toList(growable: false);
       await _voiceChatService.setTransmissionActive(isMicrophoneEnabled);
+      if (_disposed) return;
       await _voiceChatService.enable(selfId: me, peerIds: peerIds);
     } catch (_) {
       isVoiceChatEnabled = false;
@@ -695,7 +737,11 @@ class LobbyController extends ChangeNotifier {
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now < _turnExpiresAtMs) return;
     final creds = await _socketService.requestTurnCredentials();
-    if (creds == null || creds.urls.isEmpty) return;
+    if (_disposed) return;
+    if (creds == null || creds.urls.isEmpty) {
+      _turnExpiresAtMs = DateTime.now().millisecondsSinceEpoch + 5000;
+      return;
+    }
     final servers = <Map<String, dynamic>>[];
     for (final url in creds.urls) {
       final isTurn = url.startsWith('turn:');
@@ -734,8 +780,8 @@ class LobbyController extends ChangeNotifier {
       victoryConditionObjectives:
           int.tryParse(
             (config['victory_condition_nb_objectivs'] ??
-                    config['victory_condition_nb_objectives'])
-                ?.toString() ??
+                        config['victory_condition_nb_objectives'])
+                    ?.toString() ??
                 '',
           ) ??
           current.victoryConditionObjectives,
@@ -787,7 +833,13 @@ class LobbyController extends ChangeNotifier {
   }
 
   @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
+  @override
   void dispose() {
+    _disposed = true;
     _messagesSub?.cancel();
     _voiceActivityGcTimer?.cancel();
     _disconnectRecoveryTimer?.cancel();
