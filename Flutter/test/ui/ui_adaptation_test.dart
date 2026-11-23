@@ -710,42 +710,47 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('End of game remains scrollable with enlarged text ($theme)', (
-      tester,
-    ) async {
-      final controller = _GameController();
-      await _pump(
-        tester,
-        GamePage(
-          controllerFactory: () => controller,
-          bootstrap: const GameBootstrapData(
-            lobby: LobbyBootstrapData(
-              code: 'ABC123',
-              serverUrl: 'http://localhost:3000',
-              socketPath: '/socket.io',
-              playerName: 'Echo-07',
+    testWidgets(
+      'Rally point and exit stay accessible with enlarged text ($theme)',
+      (tester) async {
+        final controller = _GameController();
+        await _pump(
+          tester,
+          GamePage(
+            controllerFactory: () => controller,
+            bootstrap: const GameBootstrapData(
+              lobby: LobbyBootstrapData(
+                code: 'ABC123',
+                serverUrl: 'http://localhost:3000',
+                socketPath: '/socket.io',
+                playerName: 'Echo-07',
+              ),
+              playerId: 'agent-1',
+              players: [],
             ),
-            playerId: 'agent-1',
-            players: [],
           ),
-        ),
-        dark: dark,
-        size: const Size(320, 480),
-        textScale: 1.5,
-      );
-      controller
-        ..winnerType = 'AGENT'
-        ..winnerReason = 'TIMEOUT';
-      controller.notifyListeners();
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.widgetWithText(FilledButton, 'Quitter'));
-      expect(
-        find.widgetWithText(FilledButton, 'Quitter').hitTestable(),
-        findsOneWidget,
-      );
-      expect(tester.takeException(), isNull);
-      await _capture(tester, 'game-finished-small-$theme');
-    });
+          dark: dark,
+          size: const Size(320, 480),
+          textScale: 1.5,
+        );
+        controller
+          ..winnerType = 'AGENT'
+          ..winnerReason = 'TIMEOUT'
+          ..rallyPoint = const GeoPoint(latitude: 45.7642, longitude: 4.8358);
+        controller.notifyListeners();
+        await tester.pumpAndSettle();
+        expect(
+          find.byTooltip('Centrer sur le rendez-vous').hitTestable(),
+          findsOneWidget,
+        );
+        expect(
+          find.byTooltip('Quitter la partie').hitTestable(),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+        await _capture(tester, 'game-finished-small-$theme');
+      },
+    );
 
     testWidgets('Account form fits an enlarged small screen ($theme)', (
       tester,

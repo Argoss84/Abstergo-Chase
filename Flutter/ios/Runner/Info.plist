@@ -49,5 +49,14 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Le micro est requis pour le chat vocal en partie et en lobby.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Votre position est utilisée pour vous afficher sur le terrain de jeu.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Votre position continue d’être partagée pendant une partie avec l’écran verrouillé.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>location</string>
+	</array>
 </dict>
 </plist>

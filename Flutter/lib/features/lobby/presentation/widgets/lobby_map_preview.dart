@@ -44,6 +44,7 @@ class LobbyMapPreview extends StatelessWidget {
   const LobbyMapPreview({
     super.key,
     required this.center,
+    this.initialCameraCenter,
     required this.mapRadiusMeters,
     required this.outerStreetContour,
     required this.objectives,
@@ -81,6 +82,7 @@ class LobbyMapPreview extends StatelessWidget {
   });
 
   final GeoPoint center;
+  final GeoPoint? initialCameraCenter;
   final int mapRadiusMeters;
   final List<GeoPoint> outerStreetContour;
   final List<GeoPoint> objectives;
@@ -121,6 +123,7 @@ class LobbyMapPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final centerLatLng = LatLng(center.latitude, center.longitude);
+    final cameraCenter = initialCameraCenter ?? center;
     final objectiveLatLng = objectives
         .map((p) => LatLng(p.latitude, p.longitude))
         .toList(growable: false);
@@ -142,6 +145,7 @@ class LobbyMapPreview extends StatelessWidget {
         .map((p) => LatLng(p.latitude, p.longitude))
         .toList(growable: false);
     final contourLatLng = outerStreetContour
+        .where((point) => point.isValid)
         .map((p) => LatLng(p.latitude, p.longitude))
         .toList(growable: false);
     const zoneCalculator = ObjectiveHintZoneCalculator();
@@ -168,9 +172,7 @@ class LobbyMapPreview extends StatelessWidget {
             )
             .toList(growable: false);
     final highlightZones =
-        (showObjectives && showObjectiveZones
-                ? highlightObjectiveZones
-                : const <GeoPoint>[])
+        (showObjectives ? highlightObjectiveZones : const <GeoPoint>[])
             .map(
               (point) => zoneCalculator.calculate(
                 objective: point,
@@ -210,7 +212,10 @@ class LobbyMapPreview extends StatelessWidget {
         child: FlutterMap(
           mapController: mapController,
           options: MapOptions(
-            initialCenter: centerLatLng,
+            initialCenter: LatLng(
+              cameraCenter.latitude,
+              cameraCenter.longitude,
+            ),
             initialZoom: 15.5,
             maxZoom: _kOsmMaxZoom,
             onLongPress: onMapLongPress,
@@ -234,7 +239,7 @@ class LobbyMapPreview extends StatelessWidget {
                 children: [
                   CircleLayer(
                     circles: [
-                      if (outerStreetContour.length < 3)
+                      if (contourLatLng.length < 3)
                         CircleMarker(
                           point: centerLatLng,
                           radius: mapRadiusMeters.toDouble(),
@@ -328,9 +333,7 @@ class LobbyMapPreview extends StatelessWidget {
                       children: [
                         CircleLayer(
                           circles: [
-                            if (showObjectives &&
-                                showObjectiveZones &&
-                                highlightObjectiveZoneRadiusMeters > 0)
+                            if (highlightObjectiveZoneRadiusMeters > 0)
                               ...highlightZones
                                   .where((zone) => !zone.hugsStreets)
                                   .map(
@@ -342,20 +345,18 @@ class LobbyMapPreview extends StatelessWidget {
                                       radius: zone.radiusMeters,
                                       useRadiusInMeter: true,
                                       color: Colors.orange.withValues(
-                                        alpha: 0.18 + (highlightPulse * 0.30),
+                                        alpha: 0.16 + (highlightPulse * 0.60),
                                       ),
                                       borderStrokeWidth:
-                                          2 + (highlightPulse * 1.4),
-                                      borderColor: Colors.deepOrangeAccent
-                                          .withValues(
-                                            alpha:
-                                                0.65 + (highlightPulse * 0.35),
-                                          ),
+                                          3 + (highlightPulse * 3.0),
+                                      borderColor: Color.lerp(
+                                        Colors.deepOrange,
+                                        Colors.amberAccent,
+                                        highlightPulse,
+                                      )!,
                                     ),
                                   ),
-                            if (showObjectives &&
-                                showObjectiveZones &&
-                                highlightObjectiveZoneRadiusMeters > 0)
+                            if (highlightObjectiveZoneRadiusMeters > 0)
                               ...highlightZones
                                   .where((zone) => !zone.hugsStreets)
                                   .map(
@@ -366,11 +367,11 @@ class LobbyMapPreview extends StatelessWidget {
                                       ),
                                       radius:
                                           zone.radiusMeters +
-                                          (18 + (highlightPulse * 55)),
+                                          (5 + (highlightPulse * 14)),
                                       useRadiusInMeter: true,
                                       color: Colors.transparent,
                                       borderStrokeWidth:
-                                          1.8 - (highlightPulse * 1.0),
+                                          3.5 - (highlightPulse * 2.0),
                                       borderColor: Colors.deepOrangeAccent
                                           .withValues(
                                             alpha:
@@ -406,26 +407,23 @@ class LobbyMapPreview extends StatelessWidget {
                             ),
                           ],
                         ),
-                        if (showObjectives &&
-                            showObjectiveZones &&
-                            highlightZones.isNotEmpty)
+                        if (highlightZones.isNotEmpty)
                           PolygonLayer(
                             polygons: [
-                              if (showObjectives &&
-                                  showObjectiveZones &&
-                                  highlightObjectiveZoneRadiusMeters > 0)
+                              if (highlightObjectiveZoneRadiusMeters > 0)
                                 ..._hintPolygons(
                                   highlightZones.where(
                                     (zone) => zone.hugsStreets,
                                   ),
                                   fillColor: Colors.deepOrangeAccent.withValues(
-                                    alpha: 0.18 + (highlightPulse * 0.30),
+                                    alpha: 0.16 + (highlightPulse * 0.60),
                                   ),
-                                  borderColor: Colors.deepOrangeAccent
-                                      .withValues(
-                                        alpha: 0.65 + (highlightPulse * 0.35),
-                                      ),
-                                  strokeWidth: 2 + (highlightPulse * 1.4),
+                                  borderColor: Color.lerp(
+                                    Colors.deepOrange,
+                                    Colors.amberAccent,
+                                    highlightPulse,
+                                  )!,
+                                  strokeWidth: 3 + (highlightPulse * 3.0),
                                 ),
                             ],
                           ),
@@ -637,14 +635,15 @@ class _RolePingMarkerWidget extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                Text(
-                  ping.message,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
+                if (ping.message.isNotEmpty)
+                  Text(
+                    ping.message,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
               ],
             ),
           ),

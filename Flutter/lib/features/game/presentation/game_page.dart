@@ -6,12 +6,14 @@ import 'dart:convert';
 
 import 'package:broken_veil_protocol/features/game/application/game_controller.dart';
 import 'package:broken_veil_protocol/features/game/domain/game_models.dart';
+import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
 import 'package:broken_veil_protocol/features/join_lobby/presentation/join_lobby_page.dart';
 import 'package:broken_veil_protocol/features/lobby/data/player_session_store.dart';
 import 'package:broken_veil_protocol/features/lobby/presentation/widgets/lobby_map_preview.dart';
 import 'package:broken_veil_protocol/shared/services/tts_service.dart';
 import 'package:broken_veil_protocol/shared/services/vibration_service.dart';
+import 'package:broken_veil_protocol/shared/services/voice_chat_service.dart';
 import 'package:broken_veil_protocol/shared/services/voice_settings_service.dart';
 import 'package:flutter/gestures.dart' show kTouchSlop;
 import 'package:flutter/services.dart';
@@ -164,7 +166,7 @@ class _GamePageState extends State<GamePage>
     WidgetsBinding.instance.addObserver(this);
     _guidancePulseController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1300),
+      duration: const Duration(milliseconds: 900),
       lowerBound: 0,
       upperBound: 1,
     );
@@ -178,8 +180,10 @@ class _GamePageState extends State<GamePage>
       ..initialize(widget.bootstrap);
     _compassSub = FlutterCompass.events?.listen((event) {
       // heading is degrees, clockwise from north
-      _headingDeg.value = event.heading;
-      _applyCompassRotation(event.heading);
+      final heading = event.heading;
+      if (heading == null || !heading.isFinite) return;
+      _headingDeg.value = heading;
+      _applyCompassRotation(heading);
     });
   }
 
@@ -235,6 +239,8 @@ class _GamePageState extends State<GamePage>
     _syncGuidancePulse();
     if (state == AppLifecycleState.resumed) {
       unawaited(_controller.onAppResumed());
+    } else {
+      unawaited(_controller.setPushToTalkPressed(false));
     }
   }
 
@@ -310,6 +316,16 @@ class _GamePageState extends State<GamePage>
           _hasPulseEffects = false;
           _syncGuidancePulse();
           return Scaffold(
+            appBar: AppBar(
+              title: const Text('Partie'),
+              actions: [
+                IconButton(
+                  tooltip: 'Informations de la partie',
+                  onPressed: _openGameInfo,
+                  icon: const Icon(Icons.info_outline),
+                ),
+              ],
+            ),
             body: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -332,7 +348,7 @@ class _GamePageState extends State<GamePage>
         final objectiveZoneRadius =
             effectiveGameConfig?.objectiveZoneRadius ??
             widget.bootstrap.lobby.form?.objectiveZoneRadius ??
-            50;
+            CreateLobbyDefaults.objectiveZoneRadius;
         final roleUpper = (_controller.playerRole ?? '').toUpperCase();
         final isRogue = roleUpper == 'ROGUE';
         final guidanceColor = isRogue ? Colors.green : Colors.blue;
@@ -341,6 +357,8 @@ class _GamePageState extends State<GamePage>
         final winnerType = _controller.winnerType;
         final winnerReason = (_controller.winnerReason ?? '').toUpperCase();
         final outOfZone = _controller.isOutOfGameZone;
+        final reentryPoint = _controller.reentryPoint;
+        final objectiveIntrusions = _controller.objectiveIntrusions;
         final myPos = _controller.myPosition;
         _syncCompassMapCenter(myPos);
         final startCountdownSeconds = _startCountdownSeconds();
@@ -368,16 +386,15 @@ class _GamePageState extends State<GamePage>
             .where((o) => o.captured)
             .map((o) => o.point)
             .toList(growable: false);
-        final capturingDisplayPoints = !isRogue
-            ? _controller.objectives
-                  .where((o) => !o.captured)
-                  .where((o) => o.state.toUpperCase() == 'CAPTURING')
-                  .map((o) => o.point)
-                  .toList(growable: false)
-            : const <GeoPoint>[];
+        final capturingDisplayPoints = _controller.objectives
+            .where((o) => o.state.toUpperCase() == 'CAPTURING')
+            .map((o) => o.point)
+            .toList(growable: false);
 
         final guidancePath = _controller.isGameFinished
             ? _controller.buildPathToRallyPoint()
+            : reentryPoint != null
+            ? _controller.buildPathToReentryPoint()
             : _controller.gameStarted
             ? const <GeoPoint>[]
             : _controller.buildPathToMyStartZone();
@@ -439,7 +456,8 @@ class _GamePageState extends State<GamePage>
               ),
               IconButton(
                 tooltip: 'Quitter la partie',
-                onPressed: () => _quitGame(clearSavedLobbyCode: false),
+                onPressed: () =>
+                    _quitGame(clearSavedLobbyCode: winnerType != null),
                 icon: const Icon(Icons.logout),
               ),
             ],
@@ -500,11 +518,12 @@ class _GamePageState extends State<GamePage>
                         : LobbyMapPreview(
                             mapController: _mapController,
                             height: null,
-                            center: _controller.myPosition ?? fallbackCenter,
+                            center: fallbackCenter,
+                            initialCameraCenter: _controller.myPosition,
                             mapRadiusMeters:
                                 effectiveGameConfig?.mapRadius ??
                                 widget.bootstrap.lobby.form?.mapRadius ??
-                                1000,
+                                CreateLobbyDefaults.mapRadius,
                             outerStreetContour:
                                 effectiveGameConfig?.mapStreets.isNotEmpty ==
                                     true
@@ -537,7 +556,9 @@ class _GamePageState extends State<GamePage>
                                 : Colors.red,
                             objectiveMarkerSize: isRogue ? 30 : 18,
                             guidancePath: guidancePath,
-                            guidancePathColor: _controller.isGameFinished
+                            guidancePathColor:
+                                _controller.isGameFinished ||
+                                    reentryPoint != null
                                 ? Colors.amber
                                 : guidanceColor,
                             guidancePathDotted: true,
@@ -556,20 +577,26 @@ class _GamePageState extends State<GamePage>
                                     pulseValue: _pingPulseFor(ping.createdAtMs),
                                   ),
                                 )
-                                .followedBy(
-                                  _controller.rallyPoint == null
-                                      ? const <MapPingMarker>[]
-                                      : <MapPingMarker>[
-                                          MapPingMarker(
-                                            point: _controller.rallyPoint!,
-                                            color: Colors.amber,
-                                            playerName: 'Fin de partie',
-                                            message: 'Point de ralliement',
-                                            pulseValue:
-                                                _guidancePulseController.value,
-                                          ),
-                                        ],
-                                )
+                                .followedBy(<MapPingMarker>[
+                                  if (winnerType != null &&
+                                      _controller.rallyPoint != null)
+                                    MapPingMarker(
+                                      point: _controller.rallyPoint!,
+                                      color: Colors.amber,
+                                      playerName: 'Rendez-vous',
+                                      message: '',
+                                      pulseValue:
+                                          _guidancePulseController.value,
+                                    ),
+                                  if (winnerType == null &&
+                                      reentryPoint != null)
+                                    MapPingMarker(
+                                      point: reentryPoint,
+                                      color: Colors.amber,
+                                      playerName: 'Point de retour',
+                                      message: '',
+                                    ),
+                                ])
                                 .toList(growable: false),
                             onMapPointerDown: _onMapPointerDown,
                             onMapPointerMove: _onMapPointerMove,
@@ -642,32 +669,21 @@ class _GamePageState extends State<GamePage>
                         isError: true,
                       ),
                     ),
-                  if (winnerType == null && outOfZone)
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 12,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.65),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Text(
-                              'Retournez dans la zone de jeux',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
+                  if (winnerType == null && _controller.error == null)
+                    if (outOfZone || objectiveIntrusions.isNotEmpty)
+                      Positioned(
+                        top: topInset,
+                        left: 12,
+                        right: 12,
+                        child: AppNotice(
+                          isError: outOfZone,
+                          message: outOfZone
+                              ? (reentryPoint == null
+                                    ? 'Entrez dans la zone de jeu.'
+                                    : 'Revenez par votre point de sortie pour reprendre le jeu.')
+                              : 'Rogue détecté · ${objectiveIntrusions.join(', ')}',
                         ),
                       ),
-                    ),
                   if (winnerType == null && startCountdownSeconds != null)
                     Positioned.fill(
                       child: IgnorePointer(
@@ -952,7 +968,9 @@ class _GamePageState extends State<GamePage>
                   bottom: MediaQuery.paddingOf(context).bottom + 16,
                   child: Align(
                     alignment: Alignment.bottomCenter,
-                    child: winnerType == null
+                    child:
+                        winnerType == null &&
+                            !(_controller.gameStarted && outOfZone)
                         ? RepaintBoundary(child: _buildActionFabMenu())
                         : const SizedBox.shrink(),
                   ),
@@ -960,67 +978,12 @@ class _GamePageState extends State<GamePage>
               if (winnerType != null)
                 Positioned(
                   top: topInset,
-                  bottom: MediaQuery.paddingOf(context).bottom + 88,
                   left: 16,
                   right: 16,
-                  child: Align(
-                    alignment: Alignment.topCenter,
+                  child: Center(
                     child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 420),
-                      child: SingleChildScrollView(
-                        child: Card(
-                          margin: const EdgeInsets.all(16),
-                          child: Padding(
-                            padding: const EdgeInsets.all(18),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Text(
-                                  'Fin de partie',
-                                  style: TextStyle(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                Text(
-                                  (winnerType.toUpperCase() == 'AGENT')
-                                      ? 'Victoire des Agents'
-                                      : 'Victoire des Rogues',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w700,
-                                    color: (winnerType.toUpperCase() == 'AGENT')
-                                        ? Theme.of(context).colorScheme.primary
-                                        : Theme.of(
-                                            context,
-                                          ).colorScheme.secondary,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  _winnerReasonMessage(
-                                    winnerType: winnerType,
-                                    winnerReason: winnerReason,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                                const SizedBox(height: 8),
-                                const Text(
-                                  'Rejoignez le point de ralliement affiché sur la carte.',
-                                  textAlign: TextAlign.center,
-                                ),
-                                const SizedBox(height: 16),
-                                FilledButton(
-                                  onPressed: () =>
-                                      _quitGame(clearSavedLobbyCode: true),
-                                  child: const Text('Quitter'),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
+                      constraints: const BoxConstraints(maxWidth: 460),
+                      child: _buildRallyCard(winnerType, winnerReason),
                     ),
                   ),
                 ),
@@ -1499,13 +1462,17 @@ class _GamePageState extends State<GamePage>
   }
 
   void _applyCompassRotation(double? heading) {
-    if (!_compassModeEnabled || heading == null) return;
+    if (!_compassModeEnabled || heading == null || !heading.isFinite) return;
     // Keep player forward direction at top of screen.
     _mapController.rotate(-heading);
   }
 
   void _syncCompassMapCenter(GeoPoint? playerPosition) {
-    if (!_compassModeEnabled || playerPosition == null) return;
+    if (!_compassModeEnabled ||
+        playerPosition == null ||
+        !playerPosition.isValid) {
+      return;
+    }
     if (_sameGeoPoint(_lastCompassCenteredPosition, playerPosition)) return;
     _lastCompassCenteredPosition = playerPosition;
     _pendingCompassCenteredPosition = playerPosition;
@@ -1750,30 +1717,24 @@ class _GamePageState extends State<GamePage>
   GeoPoint? _resolveCenter() {
     final effectiveGameConfig =
         _controller.liveGameConfig ?? widget.bootstrap.gameConfig;
-    if (effectiveGameConfig != null) {
+    if (effectiveGameConfig != null && effectiveGameConfig.mapCenter.isValid) {
       return effectiveGameConfig.mapCenter;
     }
     final form = widget.bootstrap.lobby.form;
     if (form != null) {
-      final lat = double.tryParse(form.mapCenterLatitude);
-      final lng = double.tryParse(form.mapCenterLongitude);
-      if (lat != null && lng != null) {
-        return GeoPoint(latitude: lat, longitude: lng);
-      }
+      final center = GeoPoint.tryParse(
+        form.mapCenterLatitude,
+        form.mapCenterLongitude,
+      );
+      if (center != null) return center;
     }
-    if (widget.bootstrap.lobby.objectives.isNotEmpty) {
-      return widget.bootstrap.lobby.objectives.first;
-    }
-    if (widget.bootstrap.lobby.agentStartZone != null) {
-      return widget.bootstrap.lobby.agentStartZone;
-    }
-    if (widget.bootstrap.lobby.rogueStartZone != null) {
-      return widget.bootstrap.lobby.rogueStartZone;
-    }
-    if (widget.bootstrap.lobby.outerStreetContour.isNotEmpty) {
-      return widget.bootstrap.lobby.outerStreetContour.first;
-    }
-    return null;
+    return [
+      ...widget.bootstrap.lobby.objectives,
+      widget.bootstrap.lobby.agentStartZone,
+      widget.bootstrap.lobby.rogueStartZone,
+      ...widget.bootstrap.lobby.outerStreetContour,
+      _controller.myPosition,
+    ].whereType<GeoPoint>().where((point) => point.isValid).firstOrNull;
   }
 
   void _onMapPointerDown(PointerDownEvent event, LatLng point) {
@@ -2043,132 +2004,174 @@ class _GamePageState extends State<GamePage>
     });
   }
 
+  Widget _buildRallyCard(String winnerType, String winnerReason) {
+    final point = _controller.rallyPoint;
+    final winner = winnerType.toUpperCase() == 'AGENT'
+        ? 'Victoire des Agents'
+        : 'Victoire des Rogues';
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.location_on),
+        title: Text(point == null ? 'Fin de partie' : 'Point de rendez-vous'),
+        subtitle: Text(
+          '$winner · ${_winnerReasonMessage(winnerType: winnerType, winnerReason: winnerReason)}',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: point == null
+            ? null
+            : IconButton(
+                onPressed: () {
+                  if (_compassModeEnabled) _toggleCompassMode();
+                  _mapController.move(
+                    LatLng(point.latitude, point.longitude),
+                    _kDefaultGameMapZoom,
+                  );
+                },
+                tooltip: 'Centrer sur le rendez-vous',
+                icon: const Icon(Icons.my_location),
+              ),
+      ),
+    );
+  }
+
   Future<void> _openGameInfo() async {
     final bootstrap = widget.bootstrap.lobby;
-    final config = widget.bootstrap.gameConfig;
-    final form = bootstrap.form;
-    final code = (_controller.gameCode ?? bootstrap.code).toUpperCase();
-    final role = (_controller.playerRole ?? 'AUCUN').toUpperCase();
-    await showModalBottomSheet(
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) => SafeArea(
-          child: SizedBox(
-            height: MediaQuery.of(context).size.height * 0.9,
-            child: ListView(
-              padding: const EdgeInsets.all(16),
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (context) => FractionallySizedBox(
+        heightFactor: 0.84,
+        child: AnimatedBuilder(
+          animation: _controller,
+          builder: (context, _) {
+            final config =
+                _controller.liveGameConfig ?? widget.bootstrap.gameConfig;
+            final form = bootstrap.form;
+            final bonus =
+                config?.captureTimeBonusSeconds ??
+                form?.captureTimeBonusSeconds ??
+                0;
+            final interval =
+                config?.rogueAgentPositionIntervalSeconds ??
+                form?.rogueAgentPositionIntervalSeconds ??
+                0;
+            final participants = _controller.voiceParticipants;
+            final networkStatus = switch (_controller.connectionStatus) {
+              'connected' => 'Connecté',
+              'error' => 'Erreur de connexion',
+              'closed' => 'Partie fermée',
+              _ => 'Connexion en cours',
+            };
+            final voiceStatus = _controller.isReconnectingVoice
+                ? 'Reconnexion en cours'
+                : !_controller.isVoiceChatEnabled
+                ? 'Désactivé'
+                : _controller.hasVoiceError
+                ? 'Connexion vocale indisponible'
+                : _controller.isVoiceReady
+                ? 'Prêt · ${participants.where((p) => _controller.voiceStatusFor(p.id) == VoicePeerStatus.connected).length} en ligne'
+                : 'Connexion en cours';
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
               children: [
-                const Text(
-                  'Informations de la partie',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                Text(
+                  'Communication',
+                  style: Theme.of(context).textTheme.headlineSmall,
                 ),
-                const SizedBox(height: 14),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Code de la partie',
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(height: 8),
-                        SelectableText(
-                          code,
-                          style: const TextStyle(
-                            fontSize: 30,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 4,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      children: [
-                        _kvInfo('Rôle', role),
-                        _kvInfo('Joueurs', '${_controller.players.length}'),
-                        _kvInfo(
-                          'Objectifs',
-                          '${_controller.objectives.length}',
-                        ),
-                        _kvInfo(
-                          'Temps restant',
-                          _controller.remainingSeconds != null
-                              ? _formatDuration(_controller.remainingSeconds!)
-                              : 'n/a',
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      children: [
-                        _kvInfo(
-                          'Rayon map',
-                          '${config?.mapRadius ?? form?.mapRadius ?? 0} m',
-                        ),
-                        _kvInfo(
-                          'Duree',
-                          '${form?.duration ?? _controller.remainingSeconds ?? 0} sec',
-                        ),
-                        _kvInfo(
-                          'Victoire objectifs',
-                          '${form?.victoryConditionObjectives ?? 'n/a'}',
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                const SizedBox(height: 12),
                 Card(
                   child: Column(
                     children: [
-                      SwitchListTile(
-                        value: _controller.isMicrophoneEnabled,
-                        secondary: Icon(
-                          _controller.isMicrophoneEnabled
-                              ? Icons.mic
-                              : Icons.mic_off,
-                        ),
-                        title: const Text('Microphone'),
-                        subtitle: Text(
-                          _controller.isMicrophoneEnabled
-                              ? 'Micro actif — appuyer pour couper'
-                              : 'Micro coupé — appuyer pour activer',
-                        ),
-                        onChanged: (_) async {
-                          await _controller.toggleVoiceChatEnabled();
-                          if (context.mounted) {
-                            setModalState(() {});
-                          }
-                        },
+                      ListTile(
+                        leading: const Icon(Icons.sync),
+                        title: const Text('Serveur de jeu'),
+                        subtitle: Text(networkStatus),
                       ),
-                      SwitchListTile(
-                        value: _controller.canListenOtherRoles,
-                        title: const Text('Écoute inter-rôles (option)'),
-                        subtitle: const Text(
-                          'Permet d’écouter les rôles différents',
+                      const Divider(height: 1),
+                      ListTile(
+                        leading: const Icon(Icons.headset_mic_outlined),
+                        title: const Text('Chat vocal'),
+                        subtitle: Text(voiceStatus),
+                      ),
+                      for (final player in participants)
+                        ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.person_outline),
+                          title: Text(player.name),
+                          subtitle: Text(switch (_controller.voiceStatusFor(
+                            player.id,
+                          )) {
+                            VoicePeerStatus.connected => 'Connecté au vocal',
+                            VoicePeerStatus.connecting =>
+                              'Connexion au vocal en cours',
+                            VoicePeerStatus.disconnected => 'Vocal déconnecté',
+                          }),
                         ),
-                        onChanged: (_) {
-                          _controller.toggleListenOtherRoles();
-                          setModalState(() {});
-                        },
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: OutlinedButton.icon(
+                          onPressed: _controller.canReconnectVoice
+                              ? _controller.reconnectVoice
+                              : null,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Reconnecter le vocal'),
+                        ),
                       ),
                     ],
                   ),
                 ),
+                SwitchListTile(
+                  value: _controller.isMicrophoneEnabled,
+                  secondary: Icon(
+                    _controller.isMicrophoneEnabled ? Icons.mic : Icons.mic_off,
+                  ),
+                  title: const Text('Microphone'),
+                  onChanged: (_) => _controller.toggleVoiceChatEnabled(),
+                ),
+                SwitchListTile(
+                  value: _controller.canListenOtherRoles,
+                  title: const Text('Écoute inter-rôles'),
+                  onChanged: (_) => _controller.toggleListenOtherRoles(),
+                ),
+                ExpansionTile(
+                  title: const Text('Informations de la partie'),
+                  childrenPadding: const EdgeInsets.symmetric(horizontal: 16),
+                  children: [
+                    _kvInfo(
+                      'Code',
+                      (_controller.gameCode ?? bootstrap.code).toUpperCase(),
+                    ),
+                    _kvInfo(
+                      'Rôle',
+                      (_controller.playerRole ?? 'Aucun').toUpperCase(),
+                    ),
+                    _kvInfo('Joueurs', '${_controller.players.length}'),
+                    _kvInfo('Objectifs', '${_controller.objectives.length}'),
+                    _kvInfo(
+                      'Rayon du terrain',
+                      '${config?.mapRadius ?? form?.mapRadius ?? CreateLobbyDefaults.mapRadius} m',
+                    ),
+                    _kvInfo(
+                      'Durée',
+                      _formatDuration(
+                        config?.durationSeconds ??
+                            form?.duration ??
+                            CreateLobbyDefaults.durationSeconds,
+                      ),
+                    ),
+                    if (bonus > 0) _kvInfo('Bonus par capture', '+$bonus s'),
+                    _kvInfo(
+                      'Positions des Agents',
+                      interval == 0 ? 'Temps réel' : 'Toutes les $interval s',
+                    ),
+                  ],
+                ),
               ],
-            ),
-          ),
+            );
+          },
         ),
       ),
     );

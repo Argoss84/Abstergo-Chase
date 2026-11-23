@@ -613,6 +613,106 @@ void main() {
 
     controller.dispose();
   });
+
+  test(
+    'Rogue allies update live while Agent markers keep their sampled positions',
+    () async {
+      final socket = _NoopGameSocketService();
+      final controller = GameController(socketService: socket);
+      addTearDown(controller.dispose);
+      await controller.initialize(_minimalGameBootstrap());
+      controller.liveGameConfig = LobbyGameConfig.fromMap({
+        'rogue_agent_position_interval_seconds': 30,
+      });
+      void sendPositions(double longitude) {
+        socket.emit({
+          'type': 'state:sync',
+          'payload': {
+            'started': true,
+            'players': [
+              {'id_player': 'host-1', 'role': 'ROGUE', 'displayName': 'Rogue'},
+              {
+                'id_player': 'ally',
+                'role': 'ROGUE',
+                'displayName': 'Rogue',
+                'latitude': 45.76,
+                'longitude': longitude,
+              },
+              {
+                'id_player': 'opponent',
+                'role': 'AGENT',
+                'latitude': 45.76,
+                'longitude': longitude,
+              },
+            ],
+          },
+        });
+      }
+
+      sendPositions(4.835);
+      await Future<void>.delayed(Duration.zero);
+      sendPositions(4.836);
+      await Future<void>.delayed(Duration.zero);
+
+      final positions = {
+        for (final player in controller.mapMarkerPlayers)
+          player.id: player.longitude,
+      };
+      expect(positions, {'ally': 4.836, 'opponent': 4.835});
+      expect(
+        controller.players.firstWhere((p) => p.id == 'opponent').longitude,
+        4.836,
+      );
+    },
+  );
+
+  test('awards the time bonus once when a Rogue completes a capture', () async {
+    SharedPreferences.setMockInitialValues({'voice.enabled': false});
+    final socket = _NoopGameSocketService();
+    final controller = GameController(socketService: socket);
+    addTearDown(controller.dispose);
+    await controller.initialize(_minimalGameBootstrap());
+    controller.liveGameConfig = LobbyGameConfig.fromMap({
+      'capture_time_bonus_seconds': 30,
+      'victory_condition_nb_objectivs': 2,
+      'hack_duration_ms': 1,
+    });
+    controller
+      ..gameStarted = true
+      ..remainingSeconds = 120
+      ..players.add(
+        const GamePlayer(
+          id: 'rogue',
+          name: 'Rogue',
+          isHost: false,
+          role: 'ROGUE',
+          latitude: 45.764043,
+          longitude: 4.835659,
+        ),
+      );
+    void relay(Map<String, dynamic> action) {
+      socket.emit({
+        'type': 'game:action-relay',
+        'payload': {'fromId': 'rogue', 'action': action},
+      });
+    }
+
+    relay({'type': 'rogue-capture-request'});
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.objectives.single.state, 'CAPTURING');
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    for (var i = 0; i < 2; i++) {
+      relay({
+        'type': 'position-update',
+        'latitude': 45.764043,
+        'longitude': 4.835659,
+      });
+    }
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.objectives.single.captured, isTrue);
+    expect(controller.remainingSeconds, 150);
+    expect(controller.isGameFinished, isFalse);
+  });
 }
 
 GameBootstrapData _minimalGameBootstrap() {

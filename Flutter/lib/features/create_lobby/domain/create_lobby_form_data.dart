@@ -13,6 +13,11 @@ class CreateLobbyFormData {
     required this.mapCenterLatitude,
     required this.mapCenterLongitude,
     required this.mapRadius,
+    this.captureTimeBonusSeconds = CreateLobbyDefaults.captureTimeBonusSeconds,
+    this.objectiveIntrusionAlertsEnabled =
+        CreateLobbyDefaults.objectiveIntrusionAlertsEnabled,
+    this.rogueAgentPositionIntervalSeconds =
+        CreateLobbyDefaults.rogueAgentPositionIntervalSeconds,
   });
 
   factory CreateLobbyFormData.initial() {
@@ -43,6 +48,25 @@ class CreateLobbyFormData {
   final String mapCenterLatitude;
   final String mapCenterLongitude;
   final int mapRadius;
+  final int captureTimeBonusSeconds;
+  final bool objectiveIntrusionAlertsEnabled;
+  final int rogueAgentPositionIntervalSeconds;
+
+  Map<String, dynamic> toGameSettings() => <String, dynamic>{
+    'objectif_number': objectiveNumber,
+    'duration': duration > 0 ? duration : CreateLobbyDefaults.durationSeconds,
+    'victory_condition_nb_objectivs': victoryConditionObjectives,
+    'hack_duration_ms': hackDurationMs,
+    'start_zone_radius': startZoneRadius,
+    'rogue_range': rogueRange,
+    'agent_range': agentRange,
+    'map_center_latitude': mapCenterLatitude,
+    'map_center_longitude': mapCenterLongitude,
+    'map_radius': mapRadius,
+    'capture_time_bonus_seconds': captureTimeBonusSeconds,
+    'objective_intrusion_alerts_enabled': objectiveIntrusionAlertsEnabled,
+    'rogue_agent_position_interval_seconds': rogueAgentPositionIntervalSeconds,
+  };
 
   CreateLobbyFormData copyWith({
     int? objectiveNumber,
@@ -56,6 +80,9 @@ class CreateLobbyFormData {
     String? mapCenterLatitude,
     String? mapCenterLongitude,
     int? mapRadius,
+    int? captureTimeBonusSeconds,
+    bool? objectiveIntrusionAlertsEnabled,
+    int? rogueAgentPositionIntervalSeconds,
   }) {
     return CreateLobbyFormData(
       objectiveNumber: objectiveNumber ?? this.objectiveNumber,
@@ -70,6 +97,14 @@ class CreateLobbyFormData {
       mapCenterLatitude: mapCenterLatitude ?? this.mapCenterLatitude,
       mapCenterLongitude: mapCenterLongitude ?? this.mapCenterLongitude,
       mapRadius: mapRadius ?? this.mapRadius,
+      captureTimeBonusSeconds:
+          captureTimeBonusSeconds ?? this.captureTimeBonusSeconds,
+      objectiveIntrusionAlertsEnabled:
+          objectiveIntrusionAlertsEnabled ??
+          this.objectiveIntrusionAlertsEnabled,
+      rogueAgentPositionIntervalSeconds:
+          rogueAgentPositionIntervalSeconds ??
+          this.rogueAgentPositionIntervalSeconds,
     );
   }
 }

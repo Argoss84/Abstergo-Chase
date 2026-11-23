@@ -138,6 +138,11 @@ class LobbyGameConfig {
     this.objectives = const <GeoPoint>[],
     required this.mapStreets,
     this.mapStreetNetwork = const <List<GeoPoint>>[],
+    this.captureTimeBonusSeconds = CreateLobbyDefaults.captureTimeBonusSeconds,
+    this.objectiveIntrusionAlertsEnabled =
+        CreateLobbyDefaults.objectiveIntrusionAlertsEnabled,
+    this.rogueAgentPositionIntervalSeconds =
+        CreateLobbyDefaults.rogueAgentPositionIntervalSeconds,
   });
 
   final GeoPoint mapCenter;
@@ -154,17 +159,21 @@ class LobbyGameConfig {
   final List<GeoPoint> objectives;
   final List<GeoPoint> mapStreets;
   final List<List<GeoPoint>> mapStreetNetwork;
+  final int captureTimeBonusSeconds;
+  final bool objectiveIntrusionAlertsEnabled;
+  final int rogueAgentPositionIntervalSeconds;
 
   factory LobbyGameConfig.fromMap(Map<dynamic, dynamic> raw) {
-    GeoPoint? parsePoint(dynamic lat, dynamic lng) {
-      final latitude = double.tryParse(lat?.toString() ?? '');
-      final longitude = double.tryParse(lng?.toString() ?? '');
-      if (latitude == null || longitude == null) return null;
-      return GeoPoint(latitude: latitude, longitude: longitude);
+    GeoPoint? parsePair(Object? raw) {
+      if (raw is! List || raw.length < 2) return null;
+      return GeoPoint.tryParse(raw[0], raw[1]);
     }
 
     final center =
-        parsePoint(raw['map_center_latitude'], raw['map_center_longitude']) ??
+        GeoPoint.tryParse(
+          raw['map_center_latitude'],
+          raw['map_center_longitude'],
+        ) ??
         const GeoPoint(latitude: 0, longitude: 0);
 
     final contour = <GeoPoint>[];
@@ -172,15 +181,7 @@ class LobbyGameConfig {
     if (streets is List && streets.isNotEmpty) {
       final first = streets.first;
       if (first is List) {
-        for (final pair in first) {
-          if (pair is List && pair.length >= 2) {
-            final lat = double.tryParse(pair[0].toString());
-            final lng = double.tryParse(pair[1].toString());
-            if (lat != null && lng != null) {
-              contour.add(GeoPoint(latitude: lat, longitude: lng));
-            }
-          }
-        }
+        contour.addAll(first.map(parsePair).whereType<GeoPoint>());
       }
     }
 
@@ -189,16 +190,7 @@ class LobbyGameConfig {
     if (rawNetwork is List) {
       for (final segment in rawNetwork) {
         if (segment is! List) continue;
-        final points = <GeoPoint>[];
-        for (final pair in segment) {
-          if (pair is List && pair.length >= 2) {
-            final lat = double.tryParse(pair[0].toString());
-            final lng = double.tryParse(pair[1].toString());
-            if (lat != null && lng != null) {
-              points.add(GeoPoint(latitude: lat, longitude: lng));
-            }
-          }
-        }
+        final points = segment.map(parsePair).whereType<GeoPoint>().toList();
         if (points.length >= 2) {
           network.add(points);
         }
@@ -209,38 +201,34 @@ class LobbyGameConfig {
     final rawObjectives = raw['objective_points'] ?? raw['objectives'];
     if (rawObjectives is List) {
       for (final rawPoint in rawObjectives) {
-        if (rawPoint is List && rawPoint.length >= 2) {
-          final lat = double.tryParse(rawPoint[0].toString());
-          final lng = double.tryParse(rawPoint[1].toString());
-          if (lat != null && lng != null) {
-            objectives.add(GeoPoint(latitude: lat, longitude: lng));
-          }
-        } else if (rawPoint is Map) {
-          final parsed = parsePoint(
-            rawPoint['latitude'] ?? rawPoint['lat'],
-            rawPoint['longitude'] ?? rawPoint['lng'] ?? rawPoint['lon'],
-          );
-          if (parsed != null) {
-            objectives.add(parsed);
-          }
-        }
+        final parsed = rawPoint is Map
+            ? GeoPoint.tryParse(
+                rawPoint['latitude'] ?? rawPoint['lat'],
+                rawPoint['longitude'] ?? rawPoint['lng'] ?? rawPoint['lon'],
+              )
+            : parsePair(rawPoint);
+        if (parsed != null) objectives.add(parsed);
       }
     }
 
     return LobbyGameConfig(
       mapCenter: center,
-      mapRadius: int.tryParse(raw['map_radius']?.toString() ?? '') ?? 1000,
+      mapRadius:
+          int.tryParse(raw['map_radius']?.toString() ?? '') ??
+          CreateLobbyDefaults.mapRadius,
       objectiveZoneRadius:
           int.tryParse(raw['objectiv_zone_radius']?.toString() ?? '') ??
           CreateLobbyDefaults.objectiveZoneRadius,
       startZoneRadius:
           int.tryParse(raw['start_zone_radius']?.toString() ?? '') ??
           CreateLobbyDefaults.startZoneRadius,
-      durationSeconds: int.tryParse(raw['duration']?.toString() ?? '') ?? 900,
+      durationSeconds:
+          int.tryParse(raw['duration']?.toString() ?? '') ??
+          CreateLobbyDefaults.durationSeconds,
       victoryConditionObjectives: int.tryParse(
         (raw['victory_condition_nb_objectivs'] ??
-                raw['victory_condition_nb_objectives'])
-            ?.toString() ??
+                    raw['victory_condition_nb_objectives'])
+                ?.toString() ??
             '',
       ),
       hackDurationMs:
@@ -249,17 +237,31 @@ class LobbyGameConfig {
       agentRange:
           int.tryParse(raw['agent_range']?.toString() ?? '') ??
           CreateLobbyDefaults.agentRange,
-      startZone: parsePoint(
+      startZone: GeoPoint.tryParse(
         raw['start_zone_latitude'],
         raw['start_zone_longitude'],
       ),
-      rogueStartZone: parsePoint(
+      rogueStartZone: GeoPoint.tryParse(
         raw['start_zone_rogue_latitude'],
         raw['start_zone_rogue_longitude'],
       ),
       objectives: objectives,
       mapStreets: contour,
       mapStreetNetwork: network,
+      captureTimeBonusSeconds:
+          int.tryParse(
+            raw['capture_time_bonus_seconds']?.toString() ?? '',
+          )?.clamp(0, 3600) ??
+          CreateLobbyDefaults.captureTimeBonusSeconds,
+      objectiveIntrusionAlertsEnabled:
+          raw['objective_intrusion_alerts_enabled'] is bool
+          ? raw['objective_intrusion_alerts_enabled'] as bool
+          : CreateLobbyDefaults.objectiveIntrusionAlertsEnabled,
+      rogueAgentPositionIntervalSeconds:
+          int.tryParse(
+            raw['rogue_agent_position_interval_seconds']?.toString() ?? '',
+          )?.clamp(0, 3600) ??
+          CreateLobbyDefaults.rogueAgentPositionIntervalSeconds,
     );
   }
 }

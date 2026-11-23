@@ -42,10 +42,7 @@ Future<_ChatGameController> _pumpGame(
     controller
       ..winnerType = 'AGENT'
       ..winnerReason = 'TIMEOUT'
-      ..rallyPoint = const GeoPoint(
-        latitude: 45.764043,
-        longitude: 4.835659,
-      )
+      ..rallyPoint = const GeoPoint(latitude: 45.764043, longitude: 4.835659)
       ..globalChat.add(_message(99));
   }
   await tester.pumpWidget(
@@ -162,7 +159,10 @@ void main() {
       expect(find.byType(TextField), findsOneWidget);
       expect(find.text('Envoyer'), findsOneWidget);
       for (var index = 0; index < messageCount; index++) {
-        expect(find.text('Joueur: Message $index').hitTestable(), findsOneWidget);
+        expect(
+          find.text('Joueur: Message $index').hitTestable(),
+          findsOneWidget,
+        );
         if (index > 0) {
           expect(
             tester.getTopLeft(find.text('Joueur: Message ${index - 1}')).dy,
@@ -177,11 +177,8 @@ void main() {
   testWidgets('Keeps map chat accessible after game end', (tester) async {
     await _pumpGame(tester, finished: true);
 
-    expect(find.text('Fin de partie'), findsOneWidget);
-    expect(
-      find.text('Rejoignez le point de ralliement affiché sur la carte.'),
-      findsOneWidget,
-    );
+    expect(find.text('Point de rendez-vous'), findsOneWidget);
+    expect(find.byTooltip('Centrer sur le rendez-vous'), findsOneWidget);
 
     await _openChat(tester);
 
