@@ -670,6 +670,15 @@ class GameController extends ChangeNotifier {
         config?.mapCenter ??
         GeoPoint.tryParse(form?.mapCenterLatitude, form?.mapCenterLongitude);
     if (center == null || !center.isValid) return;
+    final rogueStart = config?.rogueStartZone ?? lobby?.rogueStartZone;
+    final includeRogueStart =
+        config?.rogueStartZonePlayable ??
+        lobby?.rogueStartZonePlayable ??
+        false;
+    final startRadius =
+        config?.startZoneRadius ??
+        form?.startZoneRadius ??
+        CreateLobbyDefaults.startZoneRadius;
     _playArea = PlayArea(
       center: center,
       radiusMeters:
@@ -680,6 +689,13 @@ class GameController extends ChangeNotifier {
       contour: config?.mapStreets.isNotEmpty == true
           ? config!.mapStreets
           : lobby?.outerStreetContour ?? const [],
+      includedCircle:
+          includeRogueStart &&
+              rogueStart != null &&
+              rogueStart.isValid &&
+              startRadius > 0
+          ? (center: rogueStart, radiusMeters: startRadius.toDouble())
+          : null,
     );
   }
 

@@ -4,6 +4,56 @@ import 'package:broken_veil_protocol/features/game/domain/player_zone.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  GeoPoint pointAt(double eastMeters, [double northMeters = 0]) =>
+      GeoPoint(latitude: northMeters / 111195, longitude: eastMeters / 111195);
+
+  for (final streetContour in [false, true]) {
+    test(
+      'crossing the main ${streetContour ? 'contour' : 'circle'} inside the Rogue starting zone keeps the player in bounds',
+      () {
+        final area = PlayArea(
+          center: pointAt(0),
+          radiusMeters: 125,
+          contour: streetContour
+              ? [
+                  pointAt(-125, -125),
+                  pointAt(125, -125),
+                  pointAt(125, 125),
+                  pointAt(-125, 125),
+                ]
+              : [],
+          includedCircle: (center: pointAt(115), radiusMeters: 25),
+        );
+        expect(
+          area.crossing(pointAt(100), pointAt(155)).longitude,
+          closeTo(pointAt(140).longitude, 0.000001),
+        );
+        var state = PlayerZone.update(area, pointAt(100), enforceReentry: true);
+
+        void move(double eastMeters) {
+          state = PlayerZone.update(
+            area,
+            pointAt(eastMeters),
+            enforceReentry: true,
+            previous: state,
+          );
+        }
+
+        move(135);
+        expect(state.restricted, isFalse);
+        move(155);
+        expect(state.restricted, isTrue);
+        expect(
+          state.reentryPoint?.longitude,
+          closeTo(pointAt(140).longitude, 0.000001),
+        );
+        move(135);
+        expect(state.restricted, isFalse);
+        expect(state.reentryPoint, isNull);
+      },
+    );
+  }
+
   test(
     'requires crossing back near the original exit even after a wrong reentry',
     () {

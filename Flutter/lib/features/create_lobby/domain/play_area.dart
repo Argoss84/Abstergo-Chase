@@ -2,12 +2,13 @@ import 'dart:math';
 
 import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
 
-/// Uses the same street contour as the map, or the circle when there is none.
+/// Uses the street contour or the map circle, plus any included start zone.
 class PlayArea {
   PlayArea({
     required this.center,
     required this.radiusMeters,
     List<GeoPoint> contour = const [],
+    ({GeoPoint center, double radiusMeters})? includedCircle,
   }) : _longitudeScale = 111195 * max(1e-6, cos(center.latitude * pi / 180)) {
     final vertices = contour
         .where((point) => point.isValid)
@@ -17,16 +18,29 @@ class PlayArea {
       vertices.removeLast();
     }
     _vertices = vertices.length >= 3 ? vertices : const [];
+    _includedCircle = includedCircle == null
+        ? null
+        : (
+            center: _project(includedCircle.center),
+            radiusMeters: includedCircle.radiusMeters,
+          );
   }
 
   final GeoPoint center;
   final double radiusMeters;
   final double _longitudeScale;
   late final List<Point<double>> _vertices;
+  late final ({Point<double> center, double radiusMeters})? _includedCircle;
   static const _latitudeScale = 111195.0;
 
-  bool contains(GeoPoint point) {
-    final p = _project(point);
+  bool contains(GeoPoint point) => _containsProjected(_project(point));
+
+  bool _containsProjected(Point<double> p) {
+    final included = _includedCircle;
+    if (included != null &&
+        p.distanceTo(included.center) <= included.radiusMeters) {
+      return true;
+    }
     if (_vertices.isEmpty) return p.magnitude <= radiusMeters;
     var inside = false;
     for (var i = 0, j = _vertices.length - 1; i < _vertices.length; j = i++) {
@@ -40,6 +54,7 @@ class PlayArea {
     return inside;
   }
 
+  /// Nearest point on the boundary of the main terrain.
   GeoPoint nearestBoundary(GeoPoint point) {
     final p = _project(point);
     if (_vertices.isEmpty) {
@@ -66,47 +81,69 @@ class PlayArea {
     return _unproject(closest);
   }
 
-  /// First border crossing along the GPS segment, measured from [from].
+  /// First exit along a GPS segment from an inside fix to an outside fix.
   GeoPoint crossing(GeoPoint from, GeoPoint to) {
     final start = _project(from);
     final delta = _project(to) - start;
-    double? first;
-    if (_vertices.isEmpty) {
-      final a = _dot(delta, delta);
-      final b = 2 * _dot(start, delta);
-      final c = _dot(start, start) - radiusMeters * radiusMeters;
-      final discriminant = b * b - 4 * a * c;
-      if (a > 0 && discriminant >= 0) {
-        final root = sqrt(discriminant);
-        final near = (-b - root) / (2 * a);
-        final far = (-b + root) / (2 * a);
-        if (near >= 0 && near <= 1) {
-          first = near;
-        } else if (far >= 0 && far <= 1) {
-          first = far;
-        }
-      }
-    } else {
-      for (var i = 0, j = _vertices.length - 1; i < _vertices.length; j = i++) {
-        final a = _vertices[j];
-        final edge = _vertices[i] - a;
-        final determinant = _cross(delta, edge);
-        if (determinant.abs() < 1e-9) continue;
-        final offset = a - start;
-        final t = _cross(offset, edge) / determinant;
-        final u = _cross(offset, delta) / determinant;
-        if (t >= 0 &&
-            t <= 1 &&
-            u >= 0 &&
-            u <= 1 &&
-            (first == null || t < first)) {
-          first = t;
-        }
+    final included = _includedCircle;
+    final crossings = [
+      if (_vertices.isEmpty)
+        ..._circleCrossings(start, delta, radiusMeters)
+      else
+        ..._contourCrossings(start, delta),
+      if (included != null)
+        ..._circleCrossings(
+          start - included.center,
+          delta,
+          included.radiusMeters,
+        ),
+    ]..sort();
+    for (var i = 0; i < crossings.length; i++) {
+      final fraction = crossings[i];
+      final next = i + 1 < crossings.length ? crossings[i + 1] : 1.0;
+      if (i + 1 < crossings.length && fraction == next) continue;
+      // An edge inside either part of the terrain is not an exit.
+      final after = start + delta * ((fraction + next) / 2);
+      if (!_containsProjected(after)) {
+        return _unproject(start + delta * fraction);
       }
     }
-    return first == null
-        ? nearestBoundary(to)
-        : _unproject(start + delta * first);
+    return nearestBoundary(to);
+  }
+
+  Iterable<double> _circleCrossings(
+    Point<double> start,
+    Point<double> delta,
+    double radius,
+  ) sync* {
+    final a = _dot(delta, delta);
+    final b = 2 * _dot(start, delta);
+    final c = _dot(start, start) - radius * radius;
+    final discriminant = b * b - 4 * a * c;
+    if (a == 0 || discriminant < 0) return;
+    final root = sqrt(discriminant);
+    final first = (-b - root) / (2 * a);
+    final second = (-b + root) / (2 * a);
+    if (first >= 0 && first <= 1) yield first;
+    if (second != first && second >= 0 && second <= 1) yield second;
+  }
+
+  Iterable<double> _contourCrossings(
+    Point<double> start,
+    Point<double> delta,
+  ) sync* {
+    for (var i = 0, j = _vertices.length - 1; i < _vertices.length; j = i++) {
+      final a = _vertices[j];
+      final edge = _vertices[i] - a;
+      final determinant = _cross(delta, edge);
+      if (determinant.abs() < 1e-9) continue;
+      final offset = a - start;
+      final t = _cross(offset, edge) / determinant;
+      final u = _cross(offset, delta) / determinant;
+      if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+        yield t;
+      }
+    }
   }
 
   Point<double> _project(GeoPoint point) => Point(

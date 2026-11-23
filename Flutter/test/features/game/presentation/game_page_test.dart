@@ -6,8 +6,15 @@ import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _ChatGameController extends GameController {
+  int leaveCalls = 0;
+
+  @override
+  void leaveGame() => leaveCalls++;
+
   @override
   Future<void> initialize(GameBootstrapData data) async {
     bootstrap = data;
@@ -45,27 +52,37 @@ Future<_ChatGameController> _pumpGame(
       ..rallyPoint = const GeoPoint(latitude: 45.764043, longitude: 4.835659)
       ..globalChat.add(_message(99));
   }
-  await tester.pumpWidget(
-    MaterialApp(
-      home: TickerMode(
-        // Disable the map's repeating pulse, but keep modal animations enabled.
-        enabled: false,
-        child: GamePage(
-          bootstrap: const GameBootstrapData(
-            lobby: LobbyBootstrapData(
-              code: 'ABC123',
-              serverUrl: 'http://localhost:3000',
-              socketPath: '/socket.io',
-              playerName: 'Joueur',
+  final router = GoRouter(
+    initialLocation: '/game',
+    routes: [
+      GoRoute(
+        path: '/',
+        builder: (_, _) => const Scaffold(body: Text('Accueil test')),
+      ),
+      GoRoute(
+        path: '/game',
+        builder: (_, _) => TickerMode(
+          // Disable the map's repeating pulse, but keep modal animations enabled.
+          enabled: false,
+          child: GamePage(
+            bootstrap: const GameBootstrapData(
+              lobby: LobbyBootstrapData(
+                code: 'ABC123',
+                serverUrl: 'http://localhost:3000',
+                socketPath: '/socket.io',
+                playerName: 'Joueur',
+              ),
+              playerId: 'player-1',
+              players: <LobbyPlayer>[],
             ),
-            playerId: 'player-1',
-            players: <LobbyPlayer>[],
+            controllerFactory: () => controller,
           ),
-          controllerFactory: () => controller,
         ),
       ),
-    ),
+    ],
   );
+  addTearDown(router.dispose);
+  await tester.pumpWidget(MaterialApp.router(routerConfig: router));
   addTearDown(() async {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
@@ -74,8 +91,10 @@ Future<_ChatGameController> _pumpGame(
   return controller;
 }
 
-Future<void> _openChat(WidgetTester tester) async {
-  await tester.tap(find.byIcon(Icons.chat_bubble_outline));
+Future<void> _openChat(WidgetTester tester, {bool finished = false}) async {
+  await tester.tap(
+    find.byTooltip(finished ? 'Chat de fin de partie' : 'Chat équipe'),
+  );
   await tester.pumpAndSettle();
 }
 
@@ -84,6 +103,7 @@ void main() {
   const compassChannel = MethodChannel('hemanthraj/flutter_compass');
 
   setUp(() {
+    SharedPreferences.setMockInitialValues({});
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(compassChannel, (_) async => null);
   });
@@ -180,9 +200,55 @@ void main() {
     expect(find.text('Point de rendez-vous'), findsOneWidget);
     expect(find.byTooltip('Centrer sur le rendez-vous'), findsOneWidget);
 
-    await _openChat(tester);
+    await _openChat(tester, finished: true);
 
     expect(find.text('Chat de fin de partie'), findsOneWidget);
     expect(find.text('Joueur: Message 99'), findsOneWidget);
+  });
+
+  testWidgets('Leaves the finished game only after confirmation', (
+    tester,
+  ) async {
+    final controller = await _pumpGame(tester, finished: true);
+    final exit = find.widgetWithText(TextButton, 'Quitter la partie');
+
+    await tester.tap(exit);
+    await tester.pumpAndSettle();
+    expect(find.text('Quitter la partie ?'), findsOneWidget);
+    await tester.tap(find.text('Annuler'));
+    await tester.pumpAndSettle();
+    expect(controller.leaveCalls, 0);
+    expect(find.text('Point de rendez-vous'), findsOneWidget);
+
+    await tester.tap(exit);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Quitter'));
+    await tester.pumpAndSettle();
+    expect(controller.leaveCalls, 1);
+    expect(find.text('Accueil test'), findsOneWidget);
+  });
+
+  testWidgets('Floating actions use the selected role and their own icons', (
+    tester,
+  ) async {
+    final controller = await _pumpGame(tester);
+    controller.playerRole = 'AGENT';
+    controller.notifyListeners();
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.forum_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.headset_mic_outlined), findsOneWidget);
+    await tester.tap(find.byTooltip('Ouvrir les actions'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Fermer les actions'), findsOneWidget);
+    expect(find.byIcon(Icons.qr_code_2), findsOneWidget);
+    expect(find.byIcon(Icons.my_location), findsOneWidget);
+    expect(find.byIcon(Icons.center_focus_strong), findsOneWidget);
+
+    controller.playerRole = 'ROGUE';
+    controller.notifyListeners();
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Pirater un objectif'), findsOneWidget);
+    expect(find.byIcon(Icons.terminal), findsOneWidget);
   });
 }

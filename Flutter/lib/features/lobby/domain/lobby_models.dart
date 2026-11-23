@@ -63,6 +63,7 @@ class LobbyBootstrapData {
     this.objectives = const <GeoPoint>[],
     this.agentStartZone,
     this.rogueStartZone,
+    this.rogueStartZonePlayable = false,
     this.outerStreetContour = const <GeoPoint>[],
   });
 
@@ -77,6 +78,7 @@ class LobbyBootstrapData {
   final List<GeoPoint> objectives;
   final GeoPoint? agentStartZone;
   final GeoPoint? rogueStartZone;
+  final bool rogueStartZonePlayable;
   final List<GeoPoint> outerStreetContour;
 
   LobbyBootstrapData copyWith({
@@ -91,6 +93,7 @@ class LobbyBootstrapData {
     List<GeoPoint>? objectives,
     Object? agentStartZone = _noChange,
     Object? rogueStartZone = _noChange,
+    bool? rogueStartZonePlayable,
     List<GeoPoint>? outerStreetContour,
   }) {
     return LobbyBootstrapData(
@@ -115,6 +118,8 @@ class LobbyBootstrapData {
       rogueStartZone: identical(rogueStartZone, _noChange)
           ? this.rogueStartZone
           : rogueStartZone as GeoPoint?,
+      rogueStartZonePlayable:
+          rogueStartZonePlayable ?? this.rogueStartZonePlayable,
       outerStreetContour: outerStreetContour ?? this.outerStreetContour,
     );
   }
@@ -135,6 +140,7 @@ class LobbyGameConfig {
     required this.agentRange,
     required this.startZone,
     required this.rogueStartZone,
+    this.rogueStartZonePlayable = false,
     this.objectives = const <GeoPoint>[],
     required this.mapStreets,
     this.mapStreetNetwork = const <List<GeoPoint>>[],
@@ -156,6 +162,7 @@ class LobbyGameConfig {
   final int agentRange;
   final GeoPoint? startZone;
   final GeoPoint? rogueStartZone;
+  final bool rogueStartZonePlayable;
   final List<GeoPoint> objectives;
   final List<GeoPoint> mapStreets;
   final List<List<GeoPoint>> mapStreetNetwork;
@@ -245,6 +252,7 @@ class LobbyGameConfig {
         raw['start_zone_rogue_latitude'],
         raw['start_zone_rogue_longitude'],
       ),
+      rogueStartZonePlayable: raw['rogue_start_zone_playable'] == true,
       objectives: objectives,
       mapStreets: contour,
       mapStreetNetwork: network,

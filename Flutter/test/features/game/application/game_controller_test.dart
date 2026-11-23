@@ -666,6 +666,48 @@ void main() {
     },
   );
 
+  test(
+    'applies the playable Rogue starting zone from the server configuration',
+    () async {
+      SharedPreferences.setMockInitialValues({'voice.enabled': false});
+      final socket = _NoopGameSocketService();
+      final controller = GameController(socketService: socket);
+      addTearDown(controller.dispose);
+      final game = _minimalGameBootstrap();
+      final config = {
+        'map_center_latitude': 0.0,
+        'map_center_longitude': 0.0,
+        'map_radius': 125,
+        'start_zone_radius': 25,
+        'start_zone_rogue_latitude': 0.0,
+        'start_zone_rogue_longitude': 115 / 111195,
+      };
+      await controller.initialize(
+        GameBootstrapData(
+          lobby: game.lobby,
+          playerId: game.playerId,
+          players: game.players,
+          gameConfig: LobbyGameConfig.fromMap(config),
+          initialPlayerPosition: GeoPoint(latitude: 0, longitude: 135 / 111195),
+        ),
+      );
+      expect(controller.isOutOfGameZone, isTrue);
+
+      socket.emit({
+        'type': 'game:joined',
+        'payload': {
+          'code': 'ABC123',
+          'playerId': game.playerId,
+          'game': {
+            'config': {...config, 'rogue_start_zone_playable': true},
+          },
+        },
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.isOutOfGameZone, isFalse);
+    },
+  );
+
   test('awards the time bonus once when a Rogue completes a capture', () async {
     SharedPreferences.setMockInitialValues({'voice.enabled': false});
     final socket = _NoopGameSocketService();

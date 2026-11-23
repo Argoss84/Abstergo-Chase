@@ -50,6 +50,7 @@ class LobbyMapPreview extends StatelessWidget {
     required this.objectives,
     required this.agentStartZone,
     required this.rogueStartZone,
+    this.rogueStartZonePlayable = false,
     required this.objectiveZoneRadiusMeters,
     this.streetNetwork = const <List<GeoPoint>>[],
     this.inactiveObjectives = const <GeoPoint>[],
@@ -88,6 +89,7 @@ class LobbyMapPreview extends StatelessWidget {
   final List<GeoPoint> objectives;
   final GeoPoint? agentStartZone;
   final GeoPoint? rogueStartZone;
+  final bool rogueStartZonePlayable;
   final int objectiveZoneRadiusMeters;
   final List<List<GeoPoint>> streetNetwork;
   final List<GeoPoint> inactiveObjectives;
@@ -294,9 +296,13 @@ class LobbyMapPreview extends StatelessWidget {
                           point: rogueLatLng,
                           radius: startZoneRadiusMeters.toDouble(),
                           useRadiusInMeter: true,
-                          color: Colors.green.withValues(alpha: 0.1),
-                          borderStrokeWidth: 1.5,
-                          borderColor: Colors.green,
+                          color: Colors.green.withValues(
+                            alpha: rogueStartZonePlayable ? 0.18 : 0.1,
+                          ),
+                          borderStrokeWidth: rogueStartZonePlayable ? 2.5 : 1.5,
+                          borderColor: rogueStartZonePlayable
+                              ? Colors.blue
+                              : Colors.green,
                         ),
                     ],
                   ),

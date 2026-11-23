@@ -53,6 +53,8 @@ class CreateLobbyController extends ChangeNotifier {
   List<GeoPoint> objectives = <GeoPoint>[];
   GeoPoint? agentStartZone;
   GeoPoint? rogueStartZone;
+  bool get rogueStartZonePlayable =>
+      rogueStartZone != null && !isManualPlacement;
   List<List<GeoPoint>> streets = <List<GeoPoint>>[];
   List<GeoPoint> outerStreetContour = <GeoPoint>[];
   String? streetsLoadError;
@@ -355,6 +357,7 @@ class CreateLobbyController extends ChangeNotifier {
           'start_zone_longitude': agentStartZone?.longitude.toString(),
           'start_zone_rogue_latitude': rogueStartZone?.latitude.toString(),
           'start_zone_rogue_longitude': rogueStartZone?.longitude.toString(),
+          'rogue_start_zone_playable': rogueStartZonePlayable,
           'objective_points': objectives
               .map((p) => <double>[p.latitude, p.longitude])
               .toList(growable: false),

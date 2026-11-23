@@ -747,6 +747,10 @@ void main() {
           find.byTooltip('Quitter la partie').hitTestable(),
           findsOneWidget,
         );
+        expect(
+          find.widgetWithText(TextButton, 'Quitter la partie').hitTestable(),
+          findsOneWidget,
+        );
         expect(tester.takeException(), isNull);
         await _capture(tester, 'game-finished-small-$theme');
       },

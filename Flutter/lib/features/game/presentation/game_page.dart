@@ -98,6 +98,7 @@ class _GamePageState extends State<GamePage>
   bool _wasGameFinished = false;
   int _lastReadCount = 0;
   bool _isActionFabOpen = false;
+  bool _leaveConfirmationVisible = false;
   final VibrationService _vibrationService = VibrationService();
   final TtsService _ttsService = TtsService.instance;
   final PlayerSessionStore _playerSessionStore = PlayerSessionStore();
@@ -233,6 +234,35 @@ class _GamePageState extends State<GamePage>
     if (mounted) context.go('/');
   }
 
+  Future<void> _confirmFinishedGameExit() async {
+    if (_leaveConfirmationVisible) return;
+    _leaveConfirmationVisible = true;
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Quitter la partie ?'),
+          content: const Text('Vous allez revenir à l’accueil.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Quitter'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true && mounted) {
+        await _quitGame(clearSavedLobbyCode: true);
+      }
+    } finally {
+      _leaveConfirmationVisible = false;
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _appIsResumed = state == AppLifecycleState.resumed;
@@ -322,7 +352,7 @@ class _GamePageState extends State<GamePage>
                 IconButton(
                   tooltip: 'Informations de la partie',
                   onPressed: _openGameInfo,
-                  icon: const Icon(Icons.info_outline),
+                  icon: const Icon(Icons.headset_mic_outlined),
                 ),
               ],
             ),
@@ -456,8 +486,9 @@ class _GamePageState extends State<GamePage>
               ),
               IconButton(
                 tooltip: 'Quitter la partie',
-                onPressed: () =>
-                    _quitGame(clearSavedLobbyCode: winnerType != null),
+                onPressed: winnerType == null
+                    ? () => _quitGame(clearSavedLobbyCode: false)
+                    : _confirmFinishedGameExit,
                 icon: const Icon(Icons.logout),
               ),
             ],
@@ -471,12 +502,14 @@ class _GamePageState extends State<GamePage>
             children: [
               FloatingActionButton(
                 heroTag: 'game-chat-fab',
-                tooltip: 'Chat équipe',
+                tooltip: winnerType == null
+                    ? 'Chat équipe'
+                    : 'Chat de fin de partie',
                 onPressed: _openChat,
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    const Icon(Icons.chat_bubble_outline),
+                    const Icon(Icons.forum_outlined),
                     if (unread > 0)
                       Positioned(
                         right: -8,
@@ -500,7 +533,7 @@ class _GamePageState extends State<GamePage>
                 heroTag: 'game-info-fab',
                 tooltip: 'Informations de la partie',
                 onPressed: _openGameInfo,
-                child: const Icon(Icons.info_outline),
+                child: const Icon(Icons.headset_mic_outlined),
               ),
               if (_controller.voiceMode ==
                   VoiceTransmissionMode.pushToTalk) ...[
@@ -537,6 +570,9 @@ class _GamePageState extends State<GamePage>
                             rogueStartZone:
                                 effectiveGameConfig?.rogueStartZone ??
                                 widget.bootstrap.lobby.rogueStartZone,
+                            rogueStartZonePlayable:
+                                effectiveGameConfig?.rogueStartZonePlayable ??
+                                widget.bootstrap.lobby.rogueStartZonePlayable,
                             objectiveZoneRadiusMeters: objectiveZoneRadius,
                             streetNetwork:
                                 effectiveGameConfig?.mapStreetNetwork ??
@@ -1242,10 +1278,12 @@ class _GamePageState extends State<GamePage>
 
   Widget _buildActionFabMenu() {
     final role = (_controller.playerRole ?? '').toUpperCase();
-    final roleActionIcon = role == 'ROGUE' ? Icons.terminal : Icons.gps_fixed;
+    final roleActionIcon = role == 'ROGUE'
+        ? Icons.terminal
+        : Icons.center_focus_strong;
     final roleActionLabel = role == 'ROGUE'
-        ? 'Hacker objectif'
-        : 'Ciblage rogue';
+        ? 'Pirater un objectif'
+        : 'Cibler un Rogue';
     final rogueActionReady = _rogueActionReady;
     return SizedBox(
       width: 280,
@@ -1258,8 +1296,8 @@ class _GamePageState extends State<GamePage>
               left: 36,
               bottom: 78,
               child: _miniActionFab(
-                icon: Icons.favorite,
-                tooltip: 'Vitalité',
+                icon: Icons.qr_code_2,
+                tooltip: 'QR de vitalité',
                 onTap: _openVitalityQr,
               ),
             ),
@@ -1269,8 +1307,8 @@ class _GamePageState extends State<GamePage>
               bottom: 126,
               child: _miniActionFab(
                 icon: _controller.isMicrophoneEnabled
-                    ? Icons.mic
-                    : Icons.mic_off,
+                    ? Icons.mic_outlined
+                    : Icons.mic_off_outlined,
                 tooltip: _controller.isMicrophoneEnabled
                     ? 'Couper le micro'
                     : 'Activer le micro',
@@ -1286,7 +1324,7 @@ class _GamePageState extends State<GamePage>
               bottom: 126,
               child: _miniActionFab(
                 icon: Icons.my_location,
-                tooltip: 'Recentrer carte',
+                tooltip: 'Recentrer sur ma position',
                 onTap: _recenterMapOnPlayer,
               ),
             ),
@@ -1334,9 +1372,16 @@ class _GamePageState extends State<GamePage>
               child: FloatingActionButton(
                 heroTag: 'game-action-menu',
                 mini: true,
+                tooltip: _isActionFabOpen
+                    ? 'Fermer les actions'
+                    : 'Ouvrir les actions',
                 onPressed: () =>
                     setState(() => _isActionFabOpen = !_isActionFabOpen),
-                child: const Icon(Icons.adjust),
+                child: Icon(
+                  _isActionFabOpen
+                      ? Icons.close_rounded
+                      : Icons.grid_view_rounded,
+                ),
               ),
             ),
           ),
@@ -1366,7 +1411,9 @@ class _GamePageState extends State<GamePage>
         onPressed: () {},
         backgroundColor: enabled ? Colors.orangeAccent : Colors.grey,
         foregroundColor: Colors.black87,
-        child: const Icon(Icons.record_voice_over),
+        child: Icon(
+          enabled ? Icons.record_voice_over_outlined : Icons.mic_off_outlined,
+        ),
       ),
     );
   }
@@ -2010,27 +2057,45 @@ class _GamePageState extends State<GamePage>
         ? 'Victoire des Agents'
         : 'Victoire des Rogues';
     return Card(
-      child: ListTile(
-        leading: const Icon(Icons.location_on),
-        title: Text(point == null ? 'Fin de partie' : 'Point de rendez-vous'),
-        subtitle: Text(
-          '$winner · ${_winnerReasonMessage(winnerType: winnerType, winnerReason: winnerReason)}',
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: point == null
-            ? null
-            : IconButton(
-                onPressed: () {
-                  if (_compassModeEnabled) _toggleCompassMode();
-                  _mapController.move(
-                    LatLng(point.latitude, point.longitude),
-                    _kDefaultGameMapZoom,
-                  );
-                },
-                tooltip: 'Centrer sur le rendez-vous',
-                icon: const Icon(Icons.my_location),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.place_outlined),
+            title: Text(
+              point == null ? 'Fin de partie' : 'Point de rendez-vous',
+            ),
+            subtitle: Text(
+              '$winner · ${_winnerReasonMessage(winnerType: winnerType, winnerReason: winnerReason)}',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: point == null
+                ? null
+                : IconButton(
+                    onPressed: () {
+                      if (_compassModeEnabled) _toggleCompassMode();
+                      _mapController.move(
+                        LatLng(point.latitude, point.longitude),
+                        _kDefaultGameMapZoom,
+                      );
+                    },
+                    tooltip: 'Centrer sur le rendez-vous',
+                    icon: const Icon(Icons.location_searching),
+                  ),
+          ),
+          Padding(
+            padding: const EdgeInsetsDirectional.only(end: 12, bottom: 4),
+            child: Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: TextButton.icon(
+                onPressed: _confirmFinishedGameExit,
+                icon: const Icon(Icons.logout),
+                label: const Text('Quitter la partie'),
               ),
+            ),
+          ),
+        ],
       ),
     );
   }
