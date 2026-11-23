@@ -3,6 +3,7 @@ import 'package:broken_veil_protocol/features/game/application/game_controller.d
 import 'package:broken_veil_protocol/features/game/domain/game_models.dart';
 import 'package:broken_veil_protocol/features/game/presentation/game_page.dart';
 import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
+import 'package:broken_veil_protocol/features/lobby/presentation/widgets/lobby_map_preview.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -111,6 +112,81 @@ void main() {
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(compassChannel, null);
+  });
+
+  testWidgets('Shows a selected player name and bearings relative to the map', (
+    tester,
+  ) async {
+    final controller = await _pumpGame(tester);
+    controller
+      ..myPosition = const GeoPoint(latitude: 45.764, longitude: 4.835)
+      ..playerRole = 'AGENT'
+      ..players.addAll(const [
+        GamePlayer(
+          id: 'player-1',
+          name: 'Camille',
+          isHost: true,
+          role: 'AGENT',
+          latitude: 45.764,
+          longitude: 4.835,
+        ),
+        GamePlayer(
+          id: 'ally',
+          name: 'Nora',
+          isHost: false,
+          role: 'AGENT',
+          latitude: 45.764,
+          longitude: 4.838,
+          headingDegrees: 90,
+        ),
+        GamePlayer(
+          id: 'opponent',
+          name: 'Malo',
+          isHost: false,
+          role: 'ROGUE',
+          latitude: 45.764,
+          longitude: 4.841,
+          headingDegrees: 270,
+        ),
+      ]);
+    controller.notifyListeners();
+    await tester.pumpAndSettle();
+
+    final ownArrow = find.byKey(const ValueKey('player-heading-player-1'));
+    final allyArrow = find.byKey(const ValueKey('player-heading-ally'));
+    expect(ownArrow, findsNothing);
+    expect(allyArrow, findsOneWidget);
+    expect(find.byKey(const ValueKey('player-marker-opponent')), findsNothing);
+    await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+      compassChannel.name,
+      const StandardMethodCodec().encodeSuccessEnvelope([0.0, 0.0, 10.0]),
+      null,
+    );
+    await tester.pump();
+    expect(tester.widget<Transform>(ownArrow).transform.entry(0, 0), 1);
+    expect(tester.widget<Transform>(allyArrow).transform.entry(1, 0), 1);
+
+    await tester.tap(find.byKey(const ValueKey('player-marker-ally')));
+    await tester.pump();
+    expect(find.text('Nora'), findsOneWidget);
+    expect(find.text('Camille'), findsNothing);
+
+    final map = find.byType(LobbyMapPreview);
+    final mapController = tester.widget<LobbyMapPreview>(map).mapController!;
+    mapController.rotate(-90);
+    await tester.pump();
+    expect(tester.widget<Transform>(allyArrow).transform.entry(0, 0), 1);
+    expect(tester.widget<Transform>(ownArrow).transform.entry(1, 0), -1);
+    expect(find.text('Nora'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('player-marker-player-1')));
+    await tester.pump();
+    expect(find.text('Camille'), findsOneWidget);
+    expect(find.text('Nora'), findsNothing);
+
+    await tester.tapAt(tester.getCenter(map) + const Offset(135, 60));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Camille'), findsNothing);
   });
 
   testWidgets('Opens and reopens team chat at the latest messages', (

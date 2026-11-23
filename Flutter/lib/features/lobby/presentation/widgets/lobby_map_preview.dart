@@ -1,6 +1,7 @@
 import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
 import 'package:broken_veil_protocol/features/game/domain/objective_hint_zone.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -9,6 +10,7 @@ const double _kOsmMaxZoom = 19;
 const int _kOsmMaxNativeZoom = 19;
 const double _kPingMinRadiusMeters = 6;
 const double _kPingMaxRadiusMeters = 19;
+const double _kPlayerMarkerSize = 56;
 
 enum PlayerMarkerAura { none, selfBlue, allyGreen }
 
@@ -17,11 +19,19 @@ class PlayerMapMarker {
     required this.point,
     required this.isAgent,
     this.aura = PlayerMarkerAura.none,
+    this.id,
+    this.name,
+    this.headingDegrees,
+    this.liveHeadingDegrees,
   });
 
   final GeoPoint point;
   final bool isAgent;
   final PlayerMarkerAura aura;
+  final String? id;
+  final String? name;
+  final double? headingDegrees;
+  final ValueListenable<double?>? liveHeadingDegrees;
 }
 
 class MapPingMarker {
@@ -63,6 +73,8 @@ class LobbyMapPreview extends StatelessWidget {
     this.objectiveMarkerSize = 18,
     this.playerPositions = const <GeoPoint>[],
     this.playerMarkers = const <PlayerMapMarker>[],
+    this.selectedPlayerId,
+    this.onPlayerTap,
     this.guidancePath = const <GeoPoint>[],
     this.guidancePathColor = Colors.deepPurple,
     this.guidancePathDotted = false,
@@ -73,6 +85,7 @@ class LobbyMapPreview extends StatelessWidget {
     this.highlightObjectivePulse = 0,
     this.showCenterMarker = true,
     this.pingMarkers = const <MapPingMarker>[],
+    this.onMapTap,
     this.onMapLongPress,
     this.onMapPointerDown,
     this.onMapPointerMove,
@@ -102,6 +115,8 @@ class LobbyMapPreview extends StatelessWidget {
   final double objectiveMarkerSize;
   final List<GeoPoint> playerPositions;
   final List<PlayerMapMarker> playerMarkers;
+  final String? selectedPlayerId;
+  final ValueChanged<String>? onPlayerTap;
   final List<GeoPoint> guidancePath;
   final Color guidancePathColor;
   final bool guidancePathDotted;
@@ -114,6 +129,7 @@ class LobbyMapPreview extends StatelessWidget {
   final double highlightObjectivePulse;
   final bool showCenterMarker;
   final List<MapPingMarker> pingMarkers;
+  final TapCallback? onMapTap;
   final LongPressCallback? onMapLongPress;
   final PointerDownCallback? onMapPointerDown;
   final PointerMoveCallback? onMapPointerMove;
@@ -143,6 +159,11 @@ class LobbyMapPreview extends StatelessWidget {
                 ),
               )
               .toList(growable: false);
+    final selectedPlayer = selectedPlayerId == null
+        ? null
+        : effectivePlayerMarkers
+              .where((player) => player.id == selectedPlayerId)
+              .firstOrNull;
     final guidanceLatLng = guidancePath
         .map((p) => LatLng(p.latitude, p.longitude))
         .toList(growable: false);
@@ -220,6 +241,7 @@ class LobbyMapPreview extends StatelessWidget {
             ),
             initialZoom: 15.5,
             maxZoom: _kOsmMaxZoom,
+            onTap: onMapTap,
             onLongPress: onMapLongPress,
             onPointerDown: onMapPointerDown,
             onPointerMove: onMapPointerMove,
@@ -509,20 +531,22 @@ class LobbyMapPreview extends StatelessWidget {
                         size: 20,
                       ),
                     ),
-                  ...effectivePlayerMarkers.map(
-                    (player) => Marker(
-                      width: 56,
-                      height: 56,
+                  for (final player in effectivePlayerMarkers)
+                    Marker(
+                      width: _kPlayerMarkerSize,
+                      height: _kPlayerMarkerSize,
+                      rotate: true,
                       point: LatLng(
                         player.point.latitude,
                         player.point.longitude,
                       ),
                       child: _PlayerGpsPin(
-                        isAgent: player.isAgent,
-                        aura: player.aura,
+                        player: player,
+                        onTap: player.id != null && onPlayerTap != null
+                            ? () => onPlayerTap!(player.id!)
+                            : null,
                       ),
                     ),
-                  ),
                   ...pingMarkers.map(
                     (ping) => Marker(
                       width: 180,
@@ -533,6 +557,18 @@ class LobbyMapPreview extends StatelessWidget {
                       child: _RolePingMarkerWidget(ping: ping),
                     ),
                   ),
+                  if (selectedPlayer != null && selectedPlayer.name != null)
+                    Marker(
+                      width: 176,
+                      height: 84,
+                      point: LatLng(
+                        selectedPlayer.point.latitude,
+                        selectedPlayer.point.longitude,
+                      ),
+                      alignment: Alignment.topCenter,
+                      rotate: true,
+                      child: _PlayerNameLabel(name: selectedPlayer.name!),
+                    ),
                 ],
               ),
             ),
@@ -544,28 +580,28 @@ class LobbyMapPreview extends StatelessWidget {
 }
 
 class _PlayerGpsPin extends StatelessWidget {
-  const _PlayerGpsPin({required this.isAgent, required this.aura});
+  const _PlayerGpsPin({required this.player, this.onTap});
 
-  final bool isAgent;
-  final PlayerMarkerAura aura;
+  final PlayerMapMarker player;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    final auraColor = switch (aura) {
+    final auraColor = switch (player.aura) {
       PlayerMarkerAura.selfBlue => const Color(0xFF2EA8FF),
       PlayerMarkerAura.allyGreen => const Color(0xFF22C55E),
       PlayerMarkerAura.none => Colors.transparent,
     };
-    final markerAsset = isAgent
+    final markerAsset = player.isAgent
         ? 'assets/images/agent_marker.png'
         : 'assets/images/rogue_marker.png';
-    return SizedBox(
-      width: 56,
-      height: 56,
+    final liveHeading = player.liveHeadingDegrees;
+    final pin = SizedBox.square(
+      dimension: _kPlayerMarkerSize,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          if (aura != PlayerMarkerAura.none)
+          if (player.aura != PlayerMarkerAura.none)
             Positioned(
               left: 10,
               right: 10,
@@ -595,12 +631,95 @@ class _PlayerGpsPin extends StatelessWidget {
               filterQuality: FilterQuality.high,
               errorBuilder: (_, _, _) => Icon(
                 Icons.location_on,
-                color: isAgent ? Colors.cyanAccent : Colors.deepOrangeAccent,
+                color: player.isAgent
+                    ? Colors.cyanAccent
+                    : Colors.deepOrangeAccent,
                 size: 34,
               ),
             ),
           ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: liveHeading == null
+                  ? _buildHeadingArrow(context, player.headingDegrees)
+                  : ValueListenableBuilder<double?>(
+                      valueListenable: liveHeading,
+                      builder: (context, heading, _) => _buildHeadingArrow(
+                        context,
+                        heading ?? player.headingDegrees,
+                      ),
+                    ),
+            ),
+          ),
         ],
+      ),
+    );
+    if (onTap == null) return pin;
+    return Semantics(
+      button: true,
+      label: player.name,
+      child: GestureDetector(
+        key: ValueKey('player-marker-${player.id}'),
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: pin,
+      ),
+    );
+  }
+
+  Widget _buildHeadingArrow(BuildContext context, double? heading) {
+    if (heading == null) return const SizedBox.shrink();
+    // The pin stays upright, so the bearing must include the camera rotation.
+    final angle = degToRadian(heading) + MapCamera.of(context).rotationRad;
+    return Transform.rotate(
+      key: ValueKey('player-heading-${player.id}'),
+      angle: angle,
+      child: const Align(
+        alignment: Alignment.topCenter,
+        child: CircleAvatar(
+          radius: 9,
+          backgroundColor: Color(0xFF131B27),
+          foregroundColor: Colors.white,
+          child: Icon(Icons.navigation, size: 13),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlayerNameLabel extends StatelessWidget {
+  const _PlayerNameLabel({required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return IgnorePointer(
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: _kPlayerMarkerSize / 2 + 4),
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.inverseSurface,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colors.onInverseSurface,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

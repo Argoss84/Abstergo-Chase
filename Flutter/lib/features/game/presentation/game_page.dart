@@ -92,6 +92,7 @@ class _GamePageState extends State<GamePage>
   bool _appIsResumed = true;
   late final MapController _mapController;
   final ValueNotifier<double?> _headingDeg = ValueNotifier<double?>(null);
+  String? _selectedMapPlayerId;
   StreamSubscription<CompassEvent>? _compassSub;
   final TextEditingController _chatController = TextEditingController();
   bool _chatOpen = false;
@@ -180,10 +181,10 @@ class _GamePageState extends State<GamePage>
     _controller = (widget.controllerFactory?.call() ?? GameController())
       ..initialize(widget.bootstrap);
     _compassSub = FlutterCompass.events?.listen((event) {
-      // heading is degrees, clockwise from north
-      final heading = event.heading;
-      if (heading == null || !heading.isFinite) return;
+      final heading = normalizeHeadingDegrees(event.heading);
+      if (heading == null) return;
       _headingDeg.value = heading;
+      _controller.updateHeadingDegrees(heading);
       _applyCompassRotation(heading);
     });
   }
@@ -634,6 +635,9 @@ class _GamePageState extends State<GamePage>
                                     ),
                                 ])
                                 .toList(growable: false),
+                            selectedPlayerId: _selectedMapPlayerId,
+                            onPlayerTap: _selectMapPlayer,
+                            onMapTap: (_, _) => _selectMapPlayer(null),
                             onMapPointerDown: _onMapPointerDown,
                             onMapPointerMove: _onMapPointerMove,
                             onMapPointerUp: _onMapPointerUp,
@@ -641,12 +645,19 @@ class _GamePageState extends State<GamePage>
                             playerMarkers: _controller.mapMarkerPlayers
                                 .map(
                                   (p) => PlayerMapMarker(
+                                    id: p.id,
+                                    name: p.name,
                                     point: GeoPoint(
                                       latitude: p.latitude!,
                                       longitude: p.longitude!,
                                     ),
                                     isAgent:
                                         (p.role ?? '').toUpperCase() == 'AGENT',
+                                    headingDegrees: p.headingDegrees,
+                                    liveHeadingDegrees:
+                                        p.id == _controller.playerId
+                                        ? _headingDeg
+                                        : null,
                                     aura: p.id == _controller.playerId
                                         ? PlayerMarkerAura.selfBlue
                                         : ((p.role ?? '').toUpperCase() ==
@@ -1782,6 +1793,12 @@ class _GamePageState extends State<GamePage>
       ...widget.bootstrap.lobby.outerStreetContour,
       _controller.myPosition,
     ].whereType<GeoPoint>().where((point) => point.isValid).firstOrNull;
+  }
+
+  void _selectMapPlayer(String? id) {
+    final selected = id == _selectedMapPlayerId ? null : id;
+    if (selected == _selectedMapPlayerId) return;
+    setState(() => _selectedMapPlayerId = selected);
   }
 
   void _onMapPointerDown(PointerDownEvent event, LatLng point) {

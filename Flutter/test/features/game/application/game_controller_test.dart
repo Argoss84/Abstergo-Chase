@@ -11,6 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 class _NoopGameSocketService extends GameSocketService {
   final StreamController<Map<String, dynamic>> _messagesController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final actions = <Map<String, dynamic>>[];
+  final snapshots = <Map<String, dynamic>>[];
   String? sentGlobalChat;
   String? sentRoleChat;
 
@@ -43,7 +45,7 @@ class _NoopGameSocketService extends GameSocketService {
   void requestGameSync() {}
 
   @override
-  void sendGameAction(Map<String, dynamic> action) {}
+  void sendGameAction(Map<String, dynamic> action) => actions.add(action);
 
   @override
   void sendGlobalChat(String text) {
@@ -56,10 +58,8 @@ class _NoopGameSocketService extends GameSocketService {
   }
 
   @override
-  void pushState({
-    required Map<String, dynamic> state,
-    String? targetId,
-  }) {}
+  void pushState({required Map<String, dynamic> state, String? targetId}) =>
+      snapshots.add(state);
 
   @override
   void dispose() {
@@ -614,8 +614,83 @@ void main() {
     controller.dispose();
   });
 
+  test('sends the latest compass heading while a guest stays still', () async {
+    final socket = _NoopGameSocketService();
+    final controller = GameController(socketService: socket);
+    addTearDown(controller.dispose);
+    await controller.initialize(_minimalGameBootstrap());
+    controller.myPosition = const GeoPoint(latitude: 45.76, longitude: 4.835);
+    controller.updateHeadingDegrees(-10);
+    socket.emit({
+      'type': 'game:joined',
+      'payload': {'playerId': 'host-1', 'hostId': 'another-player'},
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(socket.actions.single['heading_degrees'], 350);
+    controller.updateHeadingDegrees(70);
+    controller.updateHeadingDegrees(450);
+    controller.updateHeadingDegrees(double.nan);
+    expect(socket.actions, hasLength(1));
+
+    await Future<void>.delayed(
+      Duration(milliseconds: controller.realtimeRefreshIntervalMs + 50),
+    );
+    expect(socket.actions, hasLength(2));
+    expect(socket.actions.last, containsPair('heading_degrees', 90));
+    expect(socket.actions.last, containsPair('latitude', 45.76));
+    expect(socket.actions.last, containsPair('longitude', 4.835));
+  });
+
+  test('relays the latest player heading through the host snapshot', () async {
+    final socket = _NoopGameSocketService();
+    final controller = GameController(socketService: socket);
+    addTearDown(controller.dispose);
+    await controller.initialize(_minimalGameBootstrap());
+    controller.players.add(
+      const GamePlayer(
+        id: 'guest',
+        name: 'Guest',
+        isHost: false,
+        role: 'AGENT',
+      ),
+    );
+    socket.emit({
+      'type': 'game:joined',
+      'payload': {'playerId': 'host-1', 'hostId': 'host-1'},
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    void updateGuestHeading(Object? heading) {
+      socket.emit({
+        'type': 'game:action-relay',
+        'payload': {
+          'fromId': 'guest',
+          'action': {
+            'type': 'position-update',
+            'latitude': 45.76,
+            'longitude': 4.835,
+            'heading_degrees': heading,
+          },
+        },
+      });
+    }
+
+    updateGuestHeading(180);
+    updateGuestHeading(-90);
+    updateGuestHeading(null);
+    await Future<void>.delayed(
+      Duration(milliseconds: controller.realtimeRefreshIntervalMs + 50),
+    );
+    final roster = socket.snapshots.last['players'] as List;
+    final guest = roster.whereType<Map>().singleWhere(
+      (p) => p['id_player'] == 'guest',
+    );
+    expect(guest['heading_degrees'], 270);
+  });
+
   test(
-    'Rogue allies update live while Agent markers keep their sampled positions',
+    'Rogue allies update live while Agent markers keep their sampled positions and bearings',
     () async {
       final socket = _NoopGameSocketService();
       final controller = GameController(socketService: socket);
@@ -624,7 +699,7 @@ void main() {
       controller.liveGameConfig = LobbyGameConfig.fromMap({
         'rogue_agent_position_interval_seconds': 30,
       });
-      void sendPositions(double longitude) {
+      void sendPositions(double longitude, double headingDegrees) {
         socket.emit({
           'type': 'state:sync',
           'payload': {
@@ -637,28 +712,30 @@ void main() {
                 'displayName': 'Rogue',
                 'latitude': 45.76,
                 'longitude': longitude,
+                'heading_degrees': headingDegrees,
               },
               {
                 'id_player': 'opponent',
                 'role': 'AGENT',
                 'latitude': 45.76,
                 'longitude': longitude,
+                'heading_degrees': headingDegrees,
               },
             ],
           },
         });
       }
 
-      sendPositions(4.835);
+      sendPositions(4.835, 90);
       await Future<void>.delayed(Duration.zero);
-      sendPositions(4.836);
+      sendPositions(4.836, 180);
       await Future<void>.delayed(Duration.zero);
 
-      final positions = {
+      final orientations = {
         for (final player in controller.mapMarkerPlayers)
-          player.id: player.longitude,
+          player.id: (player.longitude, player.headingDegrees),
       };
-      expect(positions, {'ally': 4.836, 'opponent': 4.835});
+      expect(orientations, {'ally': (4.836, 180.0), 'opponent': (4.835, 90.0)});
       expect(
         controller.players.firstWhere((p) => p.id == 'opponent').longitude,
         4.836,

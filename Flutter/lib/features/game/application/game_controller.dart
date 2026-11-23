@@ -86,6 +86,8 @@ class GameController extends ChangeNotifier {
   Timer? _joinWatchdogTimer;
   Timer? _voiceActivityTimer;
   Timer? _rogueCaptureInterruptedTimer;
+  Timer? _positionPublishTimer;
+  Timer? _snapshotPushTimer;
   bool _backgroundVoiceActive = false;
   bool _alertPermissionRequested = false;
 
@@ -122,7 +124,7 @@ class GameController extends ChangeNotifier {
   PlayerZone? _myZone;
   final _playerZones = <String, PlayerZone>{};
   GeoPoint? get reentryPoint => _myZone?.reentryPoint;
-  final _agentMapPositions = <String, GeoPoint>{};
+  final _agentMapSamples = <String, GamePlayer>{};
   DateTime? _agentMapUpdatedAt;
   Set<String> _objectiveIntrusions = {};
   Set<String> get objectiveIntrusions => Set.unmodifiable(_objectiveIntrusions);
@@ -133,6 +135,7 @@ class GameController extends ChangeNotifier {
   final List<GameChatMessage> globalChat = <GameChatMessage>[];
   LobbyGameConfig? liveGameConfig;
   GeoPoint? myPosition;
+  double? _myHeadingDegrees;
   final int realtimeRefreshIntervalMs =
       AppRuntimeConfig.gameRealtimeRefreshIntervalMs;
   int _lastPositionPublishMs = 0;
@@ -507,8 +510,6 @@ class GameController extends ChangeNotifier {
     _trackMyZone();
     final playerPositionChanged = _syncSelfMarkerFromMyPosition();
     _publishPositionIfDue(
-      position.latitude,
-      position.longitude,
       force: forcePublish || previousOutside != _myZone?.outside,
     );
     if (isHost) _tickObjectiveCapturesIfHost();
@@ -522,6 +523,15 @@ class GameController extends ChangeNotifier {
     }
   }
 
+  void updateHeadingDegrees(double heading) {
+    final degrees = normalizeHeadingDegrees(heading);
+    if (degrees == null) return;
+    final previous = _myHeadingDegrees;
+    if (previous != null && _absAngleDeltaDeg(previous, degrees) < 3) return;
+    _myHeadingDegrees = degrees;
+    _publishPositionIfDue(queueIfThrottled: true);
+  }
+
   bool _syncSelfMarkerFromMyPosition() {
     final pos = myPosition;
     final id = playerId;
@@ -530,11 +540,14 @@ class GameController extends ChangeNotifier {
     if (idx == -1) return false;
     final changed =
         players[idx].latitude != pos.latitude ||
-        players[idx].longitude != pos.longitude;
+        players[idx].longitude != pos.longitude ||
+        (_myHeadingDegrees != null &&
+            players[idx].headingDegrees != _myHeadingDegrees);
     if (!changed) return false;
     players[idx] = players[idx].copyWith(
       latitude: pos.latitude,
       longitude: pos.longitude,
+      headingDegrees: _myHeadingDegrees,
     );
     _rememberKnownPosition(players[idx]);
     return true;
@@ -573,8 +586,8 @@ class GameController extends ChangeNotifier {
     if (fromId.isEmpty || toId.isEmpty || fromId == toId) return;
     final zone = _playerZones.remove(fromId);
     if (zone != null) _playerZones[toId] = zone;
-    final displayed = _agentMapPositions.remove(fromId);
-    if (displayed != null) _agentMapPositions[toId] = displayed;
+    final displayed = _agentMapSamples.remove(fromId);
+    if (displayed != null) _agentMapSamples[toId] = displayed;
     for (final entry in _objectiveCaptureRogueByObjectiveId.entries.toList()) {
       if (entry.value == fromId) {
         _objectiveCaptureRogueByObjectiveId[entry.key] = toId;
@@ -774,17 +787,28 @@ class GameController extends ChangeNotifier {
     _objectiveIntrusions = active;
   }
 
-  void _publishPositionIfDue(
-    double latitude,
-    double longitude, {
+  void _publishPositionIfDue({
     bool force = false,
+    bool queueIfThrottled = false,
   }) {
     if (!_hasJoinedGame || connectionStatus != 'connected') return;
+    final position = myPosition;
+    if (position == null) return;
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (!force && now - _lastPositionPublishMs < realtimeRefreshIntervalMs) {
+    final waitMs = realtimeRefreshIntervalMs - (now - _lastPositionPublishMs);
+    if (!force && waitMs > 0) {
+      if (queueIfThrottled) {
+        _positionPublishTimer ??= Timer(Duration(milliseconds: waitMs), () {
+          _positionPublishTimer = null;
+          _publishPositionIfDue(queueIfThrottled: true);
+        });
+      }
       return;
     }
+    _positionPublishTimer?.cancel();
+    _positionPublishTimer = null;
     _lastPositionPublishMs = now;
+    _syncSelfMarkerFromMyPosition();
     if (isHost) {
       if (force) {
         _pushSnapshot();
@@ -795,8 +819,9 @@ class GameController extends ChangeNotifier {
     }
     _socketService.sendGameAction(<String, dynamic>{
       'type': 'position-update',
-      'latitude': latitude,
-      'longitude': longitude,
+      'latitude': position.latitude,
+      'longitude': position.longitude,
+      'heading_degrees': ?_myHeadingDegrees,
       'timestamp': now,
     });
   }
@@ -1003,6 +1028,7 @@ class GameController extends ChangeNotifier {
               status: status,
               latitude: previous?.latitude,
               longitude: previous?.longitude,
+              headingDegrees: previous?.headingDegrees,
             );
             if (idx == -1) {
               players.add(_withLastKnownPosition(restored));
@@ -1248,10 +1274,7 @@ class GameController extends ChangeNotifier {
     _refreshAgentMapPositions();
     _syncObjectiveIntrusions();
     _syncSelfMarkerFromMyPosition();
-    final pos = myPosition;
-    if (pos != null) {
-      _publishPositionIfDue(pos.latitude, pos.longitude, force: true);
-    }
+    _publishPositionIfDue(force: true);
     if (!_requestedInitialSync) {
       _requestedInitialSync = true;
       _socketService.requestGameSync();
@@ -1359,6 +1382,7 @@ class GameController extends ChangeNotifier {
         final point = GeoPoint.tryParse(raw['latitude'], raw['longitude']);
         final lat = point?.latitude;
         final lng = point?.longitude;
+        final heading = normalizeHeadingDegrees(raw['heading_degrees']);
         final outside = raw['zone_outside'];
         if (point != null && outside is bool) {
           final zone = PlayerZone(
@@ -1384,6 +1408,7 @@ class GameController extends ChangeNotifier {
             role: role ?? players[idx].role,
             latitude: lat,
             longitude: lng,
+            headingDegrees: heading,
             status: status,
           );
           continue;
@@ -1397,6 +1422,7 @@ class GameController extends ChangeNotifier {
             status: status ?? 'active',
             latitude: lat,
             longitude: lng,
+            headingDegrees: heading,
           ),
         );
       }
@@ -1435,6 +1461,9 @@ class GameController extends ChangeNotifier {
       status: raw['status']?.toString() ?? previous?.status ?? 'active',
       latitude: position?.latitude ?? previous?.latitude,
       longitude: position?.longitude ?? previous?.longitude,
+      headingDegrees:
+          normalizeHeadingDegrees(raw['heading_degrees']) ??
+          previous?.headingDegrees,
     );
   }
 
@@ -1450,6 +1479,11 @@ class GameController extends ChangeNotifier {
 
   void _pushSnapshot({String? targetId}) {
     if (!isHost || connectionStatus != 'connected') return;
+    if (targetId == null) {
+      _snapshotPushTimer?.cancel();
+      _snapshotPushTimer = null;
+      _lastSnapshotPushMs = DateTime.now().millisecondsSinceEpoch;
+    }
     final payload = <String, dynamic>{
       'started': gameStarted,
       'countdown_started': gameStarted,
@@ -1476,6 +1510,7 @@ class GameController extends ChangeNotifier {
           'status': p.status,
           'latitude': p.latitude,
           'longitude': p.longitude,
+          'heading_degrees': ?p.headingDegrees,
           'displayName': p.name,
           'zone_outside': ?zone?.outside,
           if (reentry != null)
@@ -1523,14 +1558,18 @@ class GameController extends ChangeNotifier {
     return null;
   }
 
-  void _pushSnapshotThrottled({String? targetId}) {
+  void _pushSnapshotThrottled() {
+    if (!isHost || connectionStatus != 'connected') return;
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (targetId == null &&
-        now - _lastSnapshotPushMs < realtimeRefreshIntervalMs) {
+    final waitMs = realtimeRefreshIntervalMs - (now - _lastSnapshotPushMs);
+    if (waitMs > 0) {
+      _snapshotPushTimer ??= Timer(Duration(milliseconds: waitMs), () {
+        _snapshotPushTimer = null;
+        _pushSnapshotThrottled();
+      });
       return;
     }
-    _lastSnapshotPushMs = now;
-    _pushSnapshot(targetId: targetId);
+    _pushSnapshot();
   }
 
   void _handleGameActionRelay(Map payload) {
@@ -1556,6 +1595,7 @@ class GameController extends ChangeNotifier {
     players[idx] = players[idx].copyWith(
       latitude: point.latitude,
       longitude: point.longitude,
+      headingDegrees: normalizeHeadingDegrees(action['heading_degrees']),
     );
     final area = _playArea;
     if (area != null) {
@@ -2012,7 +2052,7 @@ class GameController extends ChangeNotifier {
         !isGameFinished &&
         player.id != playerId &&
         (player.role ?? '').toUpperCase() == 'AGENT') {
-      final sampled = _agentMapPositions[player.id];
+      final sampled = _agentMapSamples[player.id];
       return GamePlayer(
         id: player.id,
         name: player.name,
@@ -2021,6 +2061,7 @@ class GameController extends ChangeNotifier {
         status: player.status,
         latitude: sampled?.latitude,
         longitude: sampled?.longitude,
+        headingDegrees: sampled?.headingDegrees,
       );
     }
     return _withLastKnownPosition(player);
@@ -2039,14 +2080,14 @@ class GameController extends ChangeNotifier {
     if (last != null && now.difference(last) < Duration(seconds: seconds)) {
       return;
     }
-    _agentMapPositions.clear();
+    _agentMapSamples.clear();
     for (final player in players) {
       if ((player.role ?? '').toUpperCase() != 'AGENT') continue;
       final known = _withLastKnownPosition(player);
       final point = GeoPoint.tryParse(known.latitude, known.longitude);
-      if (point != null) _agentMapPositions[player.id] = point;
+      if (point != null) _agentMapSamples[player.id] = known;
     }
-    if (_agentMapPositions.isNotEmpty) _agentMapUpdatedAt = now;
+    if (_agentMapSamples.isNotEmpty) _agentMapUpdatedAt = now;
   }
 
   List<GamePlayer> get mapMarkerPlayers {
@@ -2668,6 +2709,8 @@ class GameController extends ChangeNotifier {
     _countdownTimer?.cancel();
     _joinWatchdogTimer?.cancel();
     _voiceActivityTimer?.cancel();
+    _positionPublishTimer?.cancel();
+    _snapshotPushTimer?.cancel();
     _messagesSub?.cancel();
     _positionSub?.cancel();
     _rogueCaptureInterruptedTimer?.cancel();
