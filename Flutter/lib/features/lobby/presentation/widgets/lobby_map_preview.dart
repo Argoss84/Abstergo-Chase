@@ -676,11 +676,16 @@ class _PlayerGpsPin extends StatelessWidget {
       angle: angle,
       child: const Align(
         alignment: Alignment.topCenter,
-        child: CircleAvatar(
-          radius: 9,
-          backgroundColor: Color(0xFF131B27),
-          foregroundColor: Colors.white,
-          child: Icon(Icons.navigation, size: 13),
+        child: SizedBox.square(
+          dimension: 18,
+          child: Center(
+            child: Icon(
+              Icons.navigation,
+              size: 13,
+              color: Colors.white,
+              shadows: [Shadow(color: Colors.black54, blurRadius: 2)],
+            ),
+          ),
         ),
       ),
     );
