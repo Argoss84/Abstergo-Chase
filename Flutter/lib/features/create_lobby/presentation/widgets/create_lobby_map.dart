@@ -21,6 +21,7 @@ class CreateLobbyMap extends StatelessWidget {
     required this.objectives,
     required this.agentStartZone,
     required this.rogueStartZone,
+    this.rogueStartZonePlayable = false,
     required this.onTap,
   });
 
@@ -34,6 +35,7 @@ class CreateLobbyMap extends StatelessWidget {
   final List<GeoPoint> objectives;
   final GeoPoint? agentStartZone;
   final GeoPoint? rogueStartZone;
+  final bool rogueStartZonePlayable;
   final ValueChanged<GeoPoint> onTap;
 
   @override
@@ -203,9 +205,13 @@ class CreateLobbyMap extends StatelessWidget {
                       rogueStartZone!.longitude,
                     ),
                     radius: startZoneRadiusMeters.toDouble(),
-                    color: Colors.green.withValues(alpha: 0.1),
-                    borderStrokeWidth: 1.5,
-                    borderColor: Colors.green,
+                    color: Colors.green.withValues(
+                      alpha: rogueStartZonePlayable ? 0.18 : 0.1,
+                    ),
+                    borderStrokeWidth: rogueStartZonePlayable ? 2.5 : 1.5,
+                    borderColor: rogueStartZonePlayable
+                        ? Colors.blue
+                        : Colors.green,
                     useRadiusInMeter: true,
                   ),
               ],

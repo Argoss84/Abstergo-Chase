@@ -1,25 +1,36 @@
+import 'package:broken_veil_protocol/core/logging/app_logger.dart';
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:broken_veil_protocol/app/config/app_runtime_config.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 typedef VoiceSignalSender =
     Future<void> Function(String targetId, Map<String, dynamic> signal);
 
+enum VoicePeerStatus { connecting, connected, disconnected }
+
 class VoiceChatService {
   VoiceChatService({
     required VoiceSignalSender signalSender,
     void Function(String peerId, bool active)? onVoiceActivity,
+    VoidCallback? onConnectionChanged,
   }) : _signalSender = signalSender,
-       _onVoiceActivity = onVoiceActivity;
+       _onVoiceActivity = onVoiceActivity,
+       _onConnectionChanged = onConnectionChanged;
 
   final VoiceSignalSender _signalSender;
   final void Function(String peerId, bool active)? _onVoiceActivity;
+  final VoidCallback? _onConnectionChanged;
 
   String? _selfId;
   final Map<String, RTCPeerConnection> _peers = <String, RTCPeerConnection>{};
   final Map<String, Future<RTCPeerConnection>> _peerInitFutures = {};
+  final Map<String, Future<void>> _peerOperations = {};
+  final Set<String> _awaitingAnswer = {};
+  final Map<String, ({String offer, String? answer})> _offerReplies = {};
+  final List<({String peerId, Map<String, dynamic> signal})> _earlySignals = [];
   final Map<String, List<RTCIceCandidate>> _pendingCandidates = {};
   final Set<String> _remoteDescriptionSet = {};
   final Map<String, RTCDataChannel> _metaChannels = <String, RTCDataChannel>{};
@@ -30,6 +41,17 @@ class VoiceChatService {
   bool _disposed = false;
   int _generation = 0;
   bool get isEnabled => _enabled;
+  VoicePeerStatus peerStatus(String id) =>
+      switch (_peers[id]?.connectionState) {
+        RTCPeerConnectionState.RTCPeerConnectionStateConnected =>
+          VoicePeerStatus.connected,
+        RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
+        RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
+        RTCPeerConnectionState.RTCPeerConnectionStateClosed =>
+          VoicePeerStatus.disconnected,
+        _ =>
+          _enabled ? VoicePeerStatus.connecting : VoicePeerStatus.disconnected,
+      };
   bool _transmissionActive = true;
   DateTime? _lastLocalStreamFailureAt;
   List<Map<String, dynamic>> _iceServers = <Map<String, dynamic>>[
@@ -50,6 +72,7 @@ class VoiceChatService {
     if (identityChanged) {
       _generation++;
       _peerInitFutures.clear();
+      _peerOperations.clear();
     }
     final generation = _generation;
     try {
@@ -68,6 +91,11 @@ class VoiceChatService {
       _enabled = true;
       await _setLocalAudioEnabled(_transmissionActive);
       await _syncPeers();
+      final earlySignals = [..._earlySignals];
+      _earlySignals.clear();
+      for (final entry in earlySignals) {
+        await handleSignal(fromId: entry.peerId, signal: entry.signal);
+      }
     } catch (_) {
       if (_disposed || generation != _generation) return;
       // Never crash gameplay/lobby because of voice stack failures.
@@ -89,24 +117,28 @@ class VoiceChatService {
     if (inFlight != null) {
       return inFlight;
     }
-    final future = navigator.mediaDevices
-        .getUserMedia(<String, dynamic>{
+    final future = () async {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+        await Helper.setAppleAudioIOMode(AppleAudioIOMode.localAndRemote);
+      }
+      final stream = await navigator.mediaDevices.getUserMedia(
+        <String, dynamic>{
           'audio': <String, dynamic>{
             'echoCancellation': true,
             'noiseSuppression': true,
             'autoGainControl': true,
           },
           'video': false,
-        })
-        .then((stream) async {
-          if (_disposed) {
-            await _disposeLocalStream(stream);
-            throw StateError('Voice service disposed.');
-          }
-          _localStream = stream;
-          _lastLocalStreamFailureAt = null;
-          return stream;
-        });
+        },
+      );
+      if (_disposed) {
+        await _disposeLocalStream(stream);
+        throw StateError('Voice service disposed.');
+      }
+      _localStream = stream;
+      _lastLocalStreamFailureAt = null;
+      return stream;
+    }();
     _localStreamInitFuture = future;
     try {
       return await future;
@@ -121,6 +153,8 @@ class VoiceChatService {
   Future<void> disable() async {
     _generation++;
     _peerInitFutures.clear();
+    _peerOperations.clear();
+    _earlySignals.clear();
     _enabled = false;
     _wantedPeers.clear();
     await _disposeAllPeers();
@@ -170,19 +204,40 @@ class VoiceChatService {
   Future<void> handleSignal({
     required String fromId,
     required Map<String, dynamic> signal,
-  }) async {
-    try {
-      if (_disposed || !_enabled) return;
-      final type = signal['type']?.toString();
-      if (type == null || fromId.isEmpty) return;
+  }) {
+    if (_disposed || fromId.isEmpty) return Future.value();
+    if (!_enabled) {
+      if (_earlySignals.length < 128) {
+        _earlySignals.add((peerId: fromId, signal: signal));
+      }
+      return Future.value();
+    }
+    return _queuePeerOperation(fromId, () async {
+      final type = signal['type'];
+      if (type == 'restart') {
+        if (!_wantedPeers.contains(fromId)) return;
+        await _disposePeer(fromId);
+        await _connectPeer(fromId);
+        return;
+      }
       final pc = await _ensurePeer(fromId);
       if (type == 'offer') {
         final sdp = signal['sdp']?.toString();
-        if (sdp == null || sdp.isEmpty) return;
+        if (sdp == null ||
+            sdp.isEmpty ||
+            (_selfId ?? '').compareTo(fromId) < 0) {
+          return;
+        }
+        final cached = _offerReplies[fromId];
+        if (cached != null && cached.offer == sdp) {
+          await _signalSender(fromId, {'type': 'answer', 'sdp': cached.answer});
+          return;
+        }
         await pc.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
         await _flushCandidates(fromId, pc);
         final answer = await pc.createAnswer(<String, dynamic>{});
         await pc.setLocalDescription(answer);
+        _offerReplies[fromId] = (offer: sdp, answer: answer.sdp);
         await _signalSender(fromId, <String, dynamic>{
           'type': 'answer',
           'sdp': answer.sdp,
@@ -191,8 +246,11 @@ class VoiceChatService {
       }
       if (type == 'answer') {
         final sdp = signal['sdp']?.toString();
-        if (sdp == null || sdp.isEmpty) return;
+        if (sdp == null || sdp.isEmpty || !_awaitingAnswer.contains(fromId)) {
+          return;
+        }
         await pc.setRemoteDescription(RTCSessionDescription(sdp, 'answer'));
+        _awaitingAnswer.remove(fromId);
         await _flushCandidates(fromId, pc);
         return;
       }
@@ -211,9 +269,45 @@ class VoiceChatService {
           if (pending.length < 64) pending.add(iceCandidate);
         }
       }
-    } catch (_) {
-      return;
-    }
+    }).catchError(_logNegotiationError);
+  }
+
+  Future<void> reconnect() async {
+    if (!_enabled) return;
+    await Future.wait([
+      for (final id in _wantedPeers.toList())
+        _queuePeerOperation(id, () async {
+          if (!_wantedPeers.contains(id)) return;
+          await _disposePeer(id);
+          await _signalSender(id, {'type': 'restart'});
+          await _connectPeer(id);
+        }).catchError(_logNegotiationError),
+    ]);
+    _onConnectionChanged?.call();
+  }
+
+  Future<void> _queuePeerOperation(String id, Future<void> Function() work) {
+    final generation = _generation;
+    final previous = _peerOperations[id] ?? Future<void>.value();
+    late final Future<void> next;
+    next = previous
+        .then<void>((_) {}, onError: (Object _, StackTrace _) {})
+        .then((_) async {
+          if (!_disposed && _enabled && generation == _generation) await work();
+        })
+        .whenComplete(() {
+          if (identical(_peerOperations[id], next)) _peerOperations.remove(id);
+        });
+    return _peerOperations[id] = next;
+  }
+
+  void _logNegotiationError(Object error, StackTrace stackTrace) {
+    if (_disposed || !_enabled) return;
+    AppLogger.error(
+      'Erreur de connexion au vocal',
+      error: error,
+      stackTrace: stackTrace,
+    );
   }
 
   Future<void> _flushCandidates(String peerId, RTCPeerConnection pc) async {
@@ -252,25 +346,34 @@ class VoiceChatService {
         .where((id) => !_wantedPeers.contains(id))
         .toList();
     for (final peerId in toRemove) {
-      await _disposePeer(peerId);
+      await _queuePeerOperation(peerId, () => _disposePeer(peerId));
     }
-    final self = _selfId ?? '';
     for (final peerId in _wantedPeers.toList(growable: false)) {
-      if (_disposed || !_enabled || !_wantedPeers.contains(peerId)) continue;
       if (_peers.containsKey(peerId)) continue;
-      final pc = await _ensurePeer(peerId, requireWanted: true);
-      if (_disposed || !_enabled || !_wantedPeers.contains(peerId)) continue;
-      final amInitiator = self.compareTo(peerId) < 0;
-      if (amInitiator) {
-        await _ensureMetaChannel(peerId, pc);
-        final offer = await pc.createOffer(<String, dynamic>{});
-        await pc.setLocalDescription(offer);
-        await _signalSender(peerId, <String, dynamic>{
-          'type': 'offer',
-          'sdp': offer.sdp,
-        });
-      }
+      await _queuePeerOperation(peerId, () => _connectPeer(peerId));
     }
+  }
+
+  Future<void> _connectPeer(String peerId) async {
+    if (!_enabled ||
+        !_wantedPeers.contains(peerId) ||
+        _peers.containsKey(peerId)) {
+      return;
+    }
+    final pc = await _ensurePeer(peerId, requireWanted: true);
+    if (!_enabled || _peers[peerId] != pc || !_wantedPeers.contains(peerId)) {
+      return;
+    }
+    if ((_selfId ?? '').compareTo(peerId) >= 0) return;
+    await _ensureMetaChannel(peerId, pc);
+    final offer = await pc.createOffer(<String, dynamic>{});
+    await pc.setLocalDescription(offer);
+    if (_peers[peerId] != pc) return;
+    _awaitingAnswer.add(peerId);
+    await _signalSender(peerId, <String, dynamic>{
+      'type': 'offer',
+      'sdp': offer.sdp,
+    });
   }
 
   Future<RTCPeerConnection> _ensurePeer(
@@ -310,6 +413,9 @@ class VoiceChatService {
       throw StateError('Peer initialization cancelled.');
     }
     _peers[peerId] = pc;
+    pc.onConnectionState = (_) {
+      if (_peers[peerId] == pc) _onConnectionChanged?.call();
+    };
     final local = _localStream;
     if (local != null) {
       for (final track in local.getAudioTracks()) {
@@ -371,6 +477,8 @@ class VoiceChatService {
   Future<void> _disposePeer(String peerId) async {
     final channel = _metaChannels.remove(peerId);
     final pc = _peers.remove(peerId);
+    _awaitingAnswer.remove(peerId);
+    _offerReplies.remove(peerId);
     _pendingCandidates.remove(peerId);
     _remoteDescriptionSet.remove(peerId);
     try {

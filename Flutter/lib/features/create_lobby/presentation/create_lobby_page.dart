@@ -151,6 +151,7 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
       objectives: _controller.objectives,
       agentStartZone: _controller.agentStartZone,
       rogueStartZone: _controller.rogueStartZone,
+      rogueStartZonePlayable: _controller.rogueStartZonePlayable,
       outerStreetContour: _controller.outerStreetContour,
     );
     _controller.releaseSignalingSocket();
@@ -605,6 +606,7 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
               objectives: _controller.objectives,
               agentStartZone: _controller.agentStartZone,
               rogueStartZone: _controller.rogueStartZone,
+              rogueStartZonePlayable: _controller.rogueStartZonePlayable,
               onTap: _controller.handleMapTap,
             ),
           )

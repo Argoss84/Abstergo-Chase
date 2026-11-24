@@ -1,6 +1,13 @@
 import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
 import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
 
+double? normalizeHeadingDegrees(Object? value) {
+  final heading = value is num
+      ? value.toDouble()
+      : double.tryParse(value?.toString() ?? '');
+  return heading != null && heading.isFinite ? heading % 360 : null;
+}
+
 class GamePlayer {
   const GamePlayer({
     required this.id,
@@ -10,6 +17,7 @@ class GamePlayer {
     this.status = 'active',
     this.latitude,
     this.longitude,
+    this.headingDegrees,
   });
 
   final String id;
@@ -19,6 +27,7 @@ class GamePlayer {
   final String status;
   final double? latitude;
   final double? longitude;
+  final double? headingDegrees;
 
   GamePlayer copyWith({
     String? name,
@@ -27,6 +36,7 @@ class GamePlayer {
     String? status,
     double? latitude,
     double? longitude,
+    double? headingDegrees,
   }) {
     return GamePlayer(
       id: id,
@@ -36,6 +46,7 @@ class GamePlayer {
       status: status ?? this.status,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
+      headingDegrees: headingDegrees ?? this.headingDegrees,
     );
   }
 
@@ -57,10 +68,7 @@ class GameObjective {
 
   bool get captured => state.toUpperCase() == 'CAPTURED';
 
-  GameObjective copyWith({
-    String? name,
-    String? state,
-  }) {
+  GameObjective copyWith({String? name, String? state}) {
     return GameObjective(
       id: id,
       point: point,

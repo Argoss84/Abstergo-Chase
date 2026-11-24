@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_form_data.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -30,11 +31,14 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
       'hack',
       'rogue',
       'agent',
+      'capture-bonus',
+      'agent-position-interval',
     ])
       id: GlobalKey<FormFieldState<String>>(),
   };
   bool _showTerrain = false;
   bool _showRoles = false;
+  bool _showGameRules = false;
   bool _didApply = false;
 
   @override
@@ -72,6 +76,12 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
         'agent',
       ].any((id) => invalid.contains(_numberKeys[id]!.currentState))) {
         _showRoles = true;
+      }
+      if ([
+        'capture-bonus',
+        'agent-position-interval',
+      ].any((id) => invalid.contains(_numberKeys[id]!.currentState))) {
+        _showGameRules = true;
       }
     });
     final firstError = invalid.first;
@@ -251,6 +261,16 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
                             ),
                           ],
                         ),
+                        _group(
+                          title: 'Règles de terrain',
+                          description:
+                              'Temps bonus, alertes et positions des Agents.',
+                          icon: Icons.tune,
+                          expanded: _showGameRules,
+                          onToggle: () =>
+                              setState(() => _showGameRules = !_showGameRules),
+                          children: _gameRulesFields(),
+                        ),
                       ],
                     ),
                   ),
@@ -364,6 +384,70 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
         suffixText: unit,
       );
 
+  List<Widget> _gameRulesFields() {
+    final bonusEnabled = _form.captureTimeBonusSeconds > 0;
+    final livePositions = _form.rogueAgentPositionIntervalSeconds == 0;
+    return [
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Temps bonus par capture Rogue'),
+        value: bonusEnabled,
+        onChanged: (enabled) => setState(() {
+          _form = _form.copyWith(
+            captureTimeBonusSeconds: enabled
+                ? CreateLobbyDefaults.suggestedCaptureTimeBonusSeconds
+                : 0,
+          );
+        }),
+      ),
+      if (bonusEnabled)
+        _numberField(
+          id: 'capture-bonus',
+          label: 'Temps ajouté',
+          helper: 'Secondes ajoutées pour chaque objectif capturé.',
+          unit: 's',
+          maximum: 3600,
+          value: _form.captureTimeBonusSeconds,
+          onChanged: (value) =>
+              _form = _form.copyWith(captureTimeBonusSeconds: max(1, value)),
+        ),
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Alerter les Agents sur les objectifs'),
+        subtitle: const Text(
+          'Quand un Rogue est dans la même zone de capture.',
+        ),
+        value: _form.objectiveIntrusionAlertsEnabled,
+        onChanged: (enabled) => setState(() {
+          _form = _form.copyWith(objectiveIntrusionAlertsEnabled: enabled);
+        }),
+      ),
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Positions des Agents en temps réel'),
+        subtitle: const Text('Sur la carte des Rogues.'),
+        value: livePositions,
+        onChanged: (live) => setState(() {
+          _form = _form.copyWith(
+            rogueAgentPositionIntervalSeconds: live ? 0 : 10,
+          );
+        }),
+      ),
+      if (!livePositions)
+        _numberField(
+          id: 'agent-position-interval',
+          label: 'Intervalle de rafraîchissement',
+          helper: 'Entre deux mises à jour sur la carte des Rogues.',
+          unit: 's',
+          maximum: 3600,
+          value: _form.rogueAgentPositionIntervalSeconds,
+          onChanged: (value) => _form = _form.copyWith(
+            rogueAgentPositionIntervalSeconds: max(1, value),
+          ),
+        ),
+    ];
+  }
+
   Widget _numberField({
     required String id,
     required String label,
@@ -371,6 +455,7 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
     required int value,
     required ValueChanged<int> onChanged,
     String? unit,
+    int? maximum,
   }) => Padding(
     padding: const EdgeInsets.only(bottom: 16),
     child: TextFormField(
@@ -384,6 +469,9 @@ class _CreateLobbyDetailsSheetState extends State<CreateLobbyDetailsSheet> {
         final number = int.tryParse(raw ?? '');
         if (number == null || number <= 0) {
           return 'Saisissez un nombre supérieur à zéro.';
+        }
+        if (maximum != null && number > maximum) {
+          return 'Saisissez une valeur inférieure ou égale à $maximum.';
         }
         final objectiveCount = int.tryParse(
           _numberKeys['objectives']!.currentState?.value ?? '',

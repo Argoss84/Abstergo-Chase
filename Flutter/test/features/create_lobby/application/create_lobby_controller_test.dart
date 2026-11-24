@@ -1,6 +1,7 @@
 import 'package:broken_veil_protocol/features/create_lobby/application/create_lobby_controller.dart';
 import 'package:broken_veil_protocol/features/create_lobby/data/create_lobby_service.dart';
 import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
+import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _RecordingCreateLobbyService extends CreateLobbyService {
@@ -43,9 +44,7 @@ void main() {
           GeoPoint(latitude: 45.75, longitude: 4.86),
         ],
       ];
-      controller.updateForm(
-        controller.form.copyWith(objectiveNumber: 2),
-      );
+      controller.updateForm(controller.form.copyWith(objectiveNumber: 2));
       controller.beginManualPlacement();
     });
 
@@ -68,10 +67,7 @@ void main() {
       expect(controller.rogueStartZone?.latitude, 45.75);
       expect(controller.rogueStartZone?.longitude, closeTo(4.852, 0.0000001));
       expect(controller.objectives.single.latitude, 45.75);
-      expect(
-        controller.objectives.single.longitude,
-        closeTo(4.853, 0.0000001),
-      );
+      expect(controller.objectives.single.longitude, closeTo(4.853, 0.0000001));
       expect(controller.objectivesGenerated, isFalse);
       expect(controller.canCreateLobby, isFalse);
 
@@ -79,10 +75,7 @@ void main() {
 
       expect(controller.objectives, hasLength(2));
       expect(controller.objectives.last.latitude, 45.75);
-      expect(
-        controller.objectives.last.longitude,
-        closeTo(4.854, 0.0000001),
-      );
+      expect(controller.objectives.last.longitude, closeTo(4.854, 0.0000001));
       expect(controller.objectivesGenerated, isTrue);
       expect(controller.canCreateLobby, isTrue);
       expect(
@@ -128,9 +121,7 @@ void main() {
         const GeoPoint(latitude: 45.751, longitude: 4.851),
       );
 
-      controller.updateForm(
-        controller.form.copyWith(objectiveNumber: 3),
-      );
+      controller.updateForm(controller.form.copyWith(objectiveNumber: 3));
 
       expect(controller.agentStartZone, isNull);
       expect(controller.rogueStartZone, isNull);
@@ -157,6 +148,10 @@ void main() {
       await controller.createLobby();
 
       expect(service.gameConfig, isNot(contains('objectiv_zone_radius')));
+      expect(
+        LobbyGameConfig.fromMap(service.gameConfig!).rogueStartZonePlayable,
+        isFalse,
+      );
       expect(service.gameConfig?['start_zone_latitude'], '45.75');
       expect(
         double.parse(service.gameConfig?['start_zone_longitude'] as String),
@@ -177,5 +172,18 @@ void main() {
       expect(objectives[1][0], 45.75);
       expect(objectives[1][1], closeTo(4.854, 0.0000001));
     });
+
+    test(
+      'includes the Rogue start in the terrain after generating the points',
+      () async {
+        controller.generateObjectives();
+        expect(controller.canCreateLobby, isTrue);
+        await controller.createLobby();
+
+        final config = LobbyGameConfig.fromMap(service.gameConfig!);
+        expect(config.rogueStartZonePlayable, isTrue);
+        expect(config.rogueStartZone, isNotNull);
+      },
+    );
   });
 }

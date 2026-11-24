@@ -11,6 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 class _NoopGameSocketService extends GameSocketService {
   final StreamController<Map<String, dynamic>> _messagesController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final actions = <Map<String, dynamic>>[];
+  final snapshots = <Map<String, dynamic>>[];
   String? sentGlobalChat;
   String? sentRoleChat;
 
@@ -43,7 +45,7 @@ class _NoopGameSocketService extends GameSocketService {
   void requestGameSync() {}
 
   @override
-  void sendGameAction(Map<String, dynamic> action) {}
+  void sendGameAction(Map<String, dynamic> action) => actions.add(action);
 
   @override
   void sendGlobalChat(String text) {
@@ -56,10 +58,8 @@ class _NoopGameSocketService extends GameSocketService {
   }
 
   @override
-  void pushState({
-    required Map<String, dynamic> state,
-    String? targetId,
-  }) {}
+  void pushState({required Map<String, dynamic> state, String? targetId}) =>
+      snapshots.add(state);
 
   @override
   void dispose() {
@@ -612,6 +612,225 @@ void main() {
     expect(controller.rallyPoint?.latitude, 45.7642);
 
     controller.dispose();
+  });
+
+  test('sends the latest compass heading while a guest stays still', () async {
+    final socket = _NoopGameSocketService();
+    final controller = GameController(socketService: socket);
+    addTearDown(controller.dispose);
+    await controller.initialize(_minimalGameBootstrap());
+    controller.myPosition = const GeoPoint(latitude: 45.76, longitude: 4.835);
+    controller.updateHeadingDegrees(-10);
+    socket.emit({
+      'type': 'game:joined',
+      'payload': {'playerId': 'host-1', 'hostId': 'another-player'},
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(socket.actions.single['heading_degrees'], 350);
+    controller.updateHeadingDegrees(70);
+    controller.updateHeadingDegrees(450);
+    controller.updateHeadingDegrees(double.nan);
+    expect(socket.actions, hasLength(1));
+
+    await Future<void>.delayed(
+      Duration(milliseconds: controller.realtimeRefreshIntervalMs + 50),
+    );
+    expect(socket.actions, hasLength(2));
+    expect(socket.actions.last, containsPair('heading_degrees', 90));
+    expect(socket.actions.last, containsPair('latitude', 45.76));
+    expect(socket.actions.last, containsPair('longitude', 4.835));
+  });
+
+  test('relays the latest player heading through the host snapshot', () async {
+    final socket = _NoopGameSocketService();
+    final controller = GameController(socketService: socket);
+    addTearDown(controller.dispose);
+    await controller.initialize(_minimalGameBootstrap());
+    controller.players.add(
+      const GamePlayer(
+        id: 'guest',
+        name: 'Guest',
+        isHost: false,
+        role: 'AGENT',
+      ),
+    );
+    socket.emit({
+      'type': 'game:joined',
+      'payload': {'playerId': 'host-1', 'hostId': 'host-1'},
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    void updateGuestHeading(Object? heading) {
+      socket.emit({
+        'type': 'game:action-relay',
+        'payload': {
+          'fromId': 'guest',
+          'action': {
+            'type': 'position-update',
+            'latitude': 45.76,
+            'longitude': 4.835,
+            'heading_degrees': heading,
+          },
+        },
+      });
+    }
+
+    updateGuestHeading(180);
+    updateGuestHeading(-90);
+    updateGuestHeading(null);
+    await Future<void>.delayed(
+      Duration(milliseconds: controller.realtimeRefreshIntervalMs + 50),
+    );
+    final roster = socket.snapshots.last['players'] as List;
+    final guest = roster.whereType<Map>().singleWhere(
+      (p) => p['id_player'] == 'guest',
+    );
+    expect(guest['heading_degrees'], 270);
+  });
+
+  test(
+    'Rogue allies update live while Agent markers keep their sampled positions and bearings',
+    () async {
+      final socket = _NoopGameSocketService();
+      final controller = GameController(socketService: socket);
+      addTearDown(controller.dispose);
+      await controller.initialize(_minimalGameBootstrap());
+      controller.liveGameConfig = LobbyGameConfig.fromMap({
+        'rogue_agent_position_interval_seconds': 30,
+      });
+      void sendPositions(double longitude, double headingDegrees) {
+        socket.emit({
+          'type': 'state:sync',
+          'payload': {
+            'started': true,
+            'players': [
+              {'id_player': 'host-1', 'role': 'ROGUE', 'displayName': 'Rogue'},
+              {
+                'id_player': 'ally',
+                'role': 'ROGUE',
+                'displayName': 'Rogue',
+                'latitude': 45.76,
+                'longitude': longitude,
+                'heading_degrees': headingDegrees,
+              },
+              {
+                'id_player': 'opponent',
+                'role': 'AGENT',
+                'latitude': 45.76,
+                'longitude': longitude,
+                'heading_degrees': headingDegrees,
+              },
+            ],
+          },
+        });
+      }
+
+      sendPositions(4.835, 90);
+      await Future<void>.delayed(Duration.zero);
+      sendPositions(4.836, 180);
+      await Future<void>.delayed(Duration.zero);
+
+      final orientations = {
+        for (final player in controller.mapMarkerPlayers)
+          player.id: (player.longitude, player.headingDegrees),
+      };
+      expect(orientations, {'ally': (4.836, 180.0), 'opponent': (4.835, 90.0)});
+      expect(
+        controller.players.firstWhere((p) => p.id == 'opponent').longitude,
+        4.836,
+      );
+    },
+  );
+
+  test(
+    'applies the playable Rogue starting zone from the server configuration',
+    () async {
+      SharedPreferences.setMockInitialValues({'voice.enabled': false});
+      final socket = _NoopGameSocketService();
+      final controller = GameController(socketService: socket);
+      addTearDown(controller.dispose);
+      final game = _minimalGameBootstrap();
+      final config = {
+        'map_center_latitude': 0.0,
+        'map_center_longitude': 0.0,
+        'map_radius': 125,
+        'start_zone_radius': 25,
+        'start_zone_rogue_latitude': 0.0,
+        'start_zone_rogue_longitude': 115 / 111195,
+      };
+      await controller.initialize(
+        GameBootstrapData(
+          lobby: game.lobby,
+          playerId: game.playerId,
+          players: game.players,
+          gameConfig: LobbyGameConfig.fromMap(config),
+          initialPlayerPosition: GeoPoint(latitude: 0, longitude: 135 / 111195),
+        ),
+      );
+      expect(controller.isOutOfGameZone, isTrue);
+
+      socket.emit({
+        'type': 'game:joined',
+        'payload': {
+          'code': 'ABC123',
+          'playerId': game.playerId,
+          'game': {
+            'config': {...config, 'rogue_start_zone_playable': true},
+          },
+        },
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.isOutOfGameZone, isFalse);
+    },
+  );
+
+  test('awards the time bonus once when a Rogue completes a capture', () async {
+    SharedPreferences.setMockInitialValues({'voice.enabled': false});
+    final socket = _NoopGameSocketService();
+    final controller = GameController(socketService: socket);
+    addTearDown(controller.dispose);
+    await controller.initialize(_minimalGameBootstrap());
+    controller.liveGameConfig = LobbyGameConfig.fromMap({
+      'capture_time_bonus_seconds': 30,
+      'victory_condition_nb_objectivs': 2,
+      'hack_duration_ms': 1,
+    });
+    controller
+      ..gameStarted = true
+      ..remainingSeconds = 120
+      ..players.add(
+        const GamePlayer(
+          id: 'rogue',
+          name: 'Rogue',
+          isHost: false,
+          role: 'ROGUE',
+          latitude: 45.764043,
+          longitude: 4.835659,
+        ),
+      );
+    void relay(Map<String, dynamic> action) {
+      socket.emit({
+        'type': 'game:action-relay',
+        'payload': {'fromId': 'rogue', 'action': action},
+      });
+    }
+
+    relay({'type': 'rogue-capture-request'});
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.objectives.single.state, 'CAPTURING');
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    for (var i = 0; i < 2; i++) {
+      relay({
+        'type': 'position-update',
+        'latitude': 45.764043,
+        'longitude': 4.835659,
+      });
+    }
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.objectives.single.captured, isTrue);
+    expect(controller.remainingSeconds, 150);
+    expect(controller.isGameFinished, isFalse);
   });
 }
 

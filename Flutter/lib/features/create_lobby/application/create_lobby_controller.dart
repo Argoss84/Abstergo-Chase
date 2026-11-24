@@ -53,6 +53,8 @@ class CreateLobbyController extends ChangeNotifier {
   List<GeoPoint> objectives = <GeoPoint>[];
   GeoPoint? agentStartZone;
   GeoPoint? rogueStartZone;
+  bool get rogueStartZonePlayable =>
+      rogueStartZone != null && !isManualPlacement;
   List<List<GeoPoint>> streets = <List<GeoPoint>>[];
   List<GeoPoint> outerStreetContour = <GeoPoint>[];
   String? streetsLoadError;
@@ -340,7 +342,6 @@ class CreateLobbyController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final safeDuration = form.duration > 0 ? form.duration : 900;
       final session = await _service.createLobby(
         playerName: displayName.trim(),
         serverUrl: uri,
@@ -349,20 +350,14 @@ class CreateLobbyController extends ChangeNotifier {
             : socketPath.trim(),
         cognitoSub: cognitoSub,
         gameConfig: <String, dynamic>{
-          'objectif_number': form.objectiveNumber,
-          'duration': safeDuration,
-          'victory_condition_nb_objectivs': form.victoryConditionObjectives,
-          'hack_duration_ms': form.hackDurationMs,
-          'start_zone_radius': form.startZoneRadius,
-          'rogue_range': form.rogueRange,
-          'agent_range': form.agentRange,
+          ...form.toGameSettings(),
           'map_center_latitude': selectedPosition?.latitude.toString() ?? '',
           'map_center_longitude': selectedPosition?.longitude.toString() ?? '',
-          'map_radius': form.mapRadius,
           'start_zone_latitude': agentStartZone?.latitude.toString(),
           'start_zone_longitude': agentStartZone?.longitude.toString(),
           'start_zone_rogue_latitude': rogueStartZone?.latitude.toString(),
           'start_zone_rogue_longitude': rogueStartZone?.longitude.toString(),
+          'rogue_start_zone_playable': rogueStartZonePlayable,
           'objective_points': objectives
               .map((p) => <double>[p.latitude, p.longitude])
               .toList(growable: false),

@@ -278,8 +278,8 @@ class LobbyController extends ChangeNotifier {
             final nextConfig = Map<String, dynamic>.from(
               rawConfig.map((k, v) => MapEntry(k.toString(), v)),
             );
-            gameConfig = LobbyGameConfig.fromMap(nextConfig);
-            final nextForm = _formFromConfigMap(nextConfig);
+            final settings = gameConfig = LobbyGameConfig.fromMap(nextConfig);
+            final nextForm = _formFromConfigMap(nextConfig, settings);
             bootstrapData = bootstrapData?.copyWith(form: nextForm);
             _regenerateObjectiveNames();
             notifyListeners();
@@ -372,20 +372,7 @@ class LobbyController extends ChangeNotifier {
     final bootstrap = bootstrapData;
     if (!isHost || bootstrap == null) return;
     bootstrapData = bootstrap.copyWith(form: form);
-    _socketService.sendLobbyConfigUpdate(
-      gameConfig: <String, dynamic>{
-        'objectif_number': form.objectiveNumber,
-        'duration': form.duration,
-        'victory_condition_nb_objectivs': form.victoryConditionObjectives,
-        'hack_duration_ms': form.hackDurationMs,
-        'start_zone_radius': form.startZoneRadius,
-        'rogue_range': form.rogueRange,
-        'agent_range': form.agentRange,
-        'map_center_latitude': form.mapCenterLatitude,
-        'map_center_longitude': form.mapCenterLongitude,
-        'map_radius': form.mapRadius,
-      },
-    );
+    _socketService.sendLobbyConfigUpdate(gameConfig: form.toGameSettings());
     notifyListeners();
   }
 
@@ -529,9 +516,9 @@ class LobbyController extends ChangeNotifier {
         final configMap = Map<String, dynamic>.from(
           config.map((k, v) => MapEntry(k.toString(), v)),
         );
-        gameConfig = LobbyGameConfig.fromMap(configMap);
+        final settings = gameConfig = LobbyGameConfig.fromMap(configMap);
         bootstrapData = bootstrapData?.copyWith(
-          form: _formFromConfigMap(configMap),
+          form: _formFromConfigMap(configMap, settings),
         );
       }
       final lobbyChatMessages = lobby['chatMessages'];
@@ -768,7 +755,10 @@ class LobbyController extends ChangeNotifier {
     }
   }
 
-  CreateLobbyFormData _formFromConfigMap(Map<String, dynamic> config) {
+  CreateLobbyFormData _formFromConfigMap(
+    Map<String, dynamic> config,
+    LobbyGameConfig settings,
+  ) {
     final current = bootstrapData?.form ?? CreateLobbyFormData.initial();
     return current.copyWith(
       objectiveNumber:
@@ -809,6 +799,10 @@ class LobbyController extends ChangeNotifier {
       mapRadius:
           int.tryParse(config['map_radius']?.toString() ?? '') ??
           current.mapRadius,
+      captureTimeBonusSeconds: settings.captureTimeBonusSeconds,
+      objectiveIntrusionAlertsEnabled: settings.objectiveIntrusionAlertsEnabled,
+      rogueAgentPositionIntervalSeconds:
+          settings.rogueAgentPositionIntervalSeconds,
     );
   }
 

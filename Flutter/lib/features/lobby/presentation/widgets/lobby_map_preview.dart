@@ -1,6 +1,7 @@
 import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_defaults.dart';
 import 'package:broken_veil_protocol/features/create_lobby/domain/geo_point.dart';
 import 'package:broken_veil_protocol/features/game/domain/objective_hint_zone.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -9,6 +10,7 @@ const double _kOsmMaxZoom = 19;
 const int _kOsmMaxNativeZoom = 19;
 const double _kPingMinRadiusMeters = 6;
 const double _kPingMaxRadiusMeters = 19;
+const double _kPlayerMarkerSize = 56;
 
 enum PlayerMarkerAura { none, selfBlue, allyGreen }
 
@@ -17,11 +19,19 @@ class PlayerMapMarker {
     required this.point,
     required this.isAgent,
     this.aura = PlayerMarkerAura.none,
+    this.id,
+    this.name,
+    this.headingDegrees,
+    this.liveHeadingDegrees,
   });
 
   final GeoPoint point;
   final bool isAgent;
   final PlayerMarkerAura aura;
+  final String? id;
+  final String? name;
+  final double? headingDegrees;
+  final ValueListenable<double?>? liveHeadingDegrees;
 }
 
 class MapPingMarker {
@@ -44,11 +54,13 @@ class LobbyMapPreview extends StatelessWidget {
   const LobbyMapPreview({
     super.key,
     required this.center,
+    this.initialCameraCenter,
     required this.mapRadiusMeters,
     required this.outerStreetContour,
     required this.objectives,
     required this.agentStartZone,
     required this.rogueStartZone,
+    this.rogueStartZonePlayable = false,
     required this.objectiveZoneRadiusMeters,
     this.streetNetwork = const <List<GeoPoint>>[],
     this.inactiveObjectives = const <GeoPoint>[],
@@ -61,6 +73,8 @@ class LobbyMapPreview extends StatelessWidget {
     this.objectiveMarkerSize = 18,
     this.playerPositions = const <GeoPoint>[],
     this.playerMarkers = const <PlayerMapMarker>[],
+    this.selectedPlayerId,
+    this.onPlayerTap,
     this.guidancePath = const <GeoPoint>[],
     this.guidancePathColor = Colors.deepPurple,
     this.guidancePathDotted = false,
@@ -71,6 +85,7 @@ class LobbyMapPreview extends StatelessWidget {
     this.highlightObjectivePulse = 0,
     this.showCenterMarker = true,
     this.pingMarkers = const <MapPingMarker>[],
+    this.onMapTap,
     this.onMapLongPress,
     this.onMapPointerDown,
     this.onMapPointerMove,
@@ -81,11 +96,13 @@ class LobbyMapPreview extends StatelessWidget {
   });
 
   final GeoPoint center;
+  final GeoPoint? initialCameraCenter;
   final int mapRadiusMeters;
   final List<GeoPoint> outerStreetContour;
   final List<GeoPoint> objectives;
   final GeoPoint? agentStartZone;
   final GeoPoint? rogueStartZone;
+  final bool rogueStartZonePlayable;
   final int objectiveZoneRadiusMeters;
   final List<List<GeoPoint>> streetNetwork;
   final List<GeoPoint> inactiveObjectives;
@@ -98,6 +115,8 @@ class LobbyMapPreview extends StatelessWidget {
   final double objectiveMarkerSize;
   final List<GeoPoint> playerPositions;
   final List<PlayerMapMarker> playerMarkers;
+  final String? selectedPlayerId;
+  final ValueChanged<String>? onPlayerTap;
   final List<GeoPoint> guidancePath;
   final Color guidancePathColor;
   final bool guidancePathDotted;
@@ -110,6 +129,7 @@ class LobbyMapPreview extends StatelessWidget {
   final double highlightObjectivePulse;
   final bool showCenterMarker;
   final List<MapPingMarker> pingMarkers;
+  final TapCallback? onMapTap;
   final LongPressCallback? onMapLongPress;
   final PointerDownCallback? onMapPointerDown;
   final PointerMoveCallback? onMapPointerMove;
@@ -121,6 +141,7 @@ class LobbyMapPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final centerLatLng = LatLng(center.latitude, center.longitude);
+    final cameraCenter = initialCameraCenter ?? center;
     final objectiveLatLng = objectives
         .map((p) => LatLng(p.latitude, p.longitude))
         .toList(growable: false);
@@ -138,10 +159,16 @@ class LobbyMapPreview extends StatelessWidget {
                 ),
               )
               .toList(growable: false);
+    final selectedPlayer = selectedPlayerId == null
+        ? null
+        : effectivePlayerMarkers
+              .where((player) => player.id == selectedPlayerId)
+              .firstOrNull;
     final guidanceLatLng = guidancePath
         .map((p) => LatLng(p.latitude, p.longitude))
         .toList(growable: false);
     final contourLatLng = outerStreetContour
+        .where((point) => point.isValid)
         .map((p) => LatLng(p.latitude, p.longitude))
         .toList(growable: false);
     const zoneCalculator = ObjectiveHintZoneCalculator();
@@ -168,9 +195,7 @@ class LobbyMapPreview extends StatelessWidget {
             )
             .toList(growable: false);
     final highlightZones =
-        (showObjectives && showObjectiveZones
-                ? highlightObjectiveZones
-                : const <GeoPoint>[])
+        (showObjectives ? highlightObjectiveZones : const <GeoPoint>[])
             .map(
               (point) => zoneCalculator.calculate(
                 objective: point,
@@ -210,9 +235,13 @@ class LobbyMapPreview extends StatelessWidget {
         child: FlutterMap(
           mapController: mapController,
           options: MapOptions(
-            initialCenter: centerLatLng,
+            initialCenter: LatLng(
+              cameraCenter.latitude,
+              cameraCenter.longitude,
+            ),
             initialZoom: 15.5,
             maxZoom: _kOsmMaxZoom,
+            onTap: onMapTap,
             onLongPress: onMapLongPress,
             onPointerDown: onMapPointerDown,
             onPointerMove: onMapPointerMove,
@@ -234,7 +263,7 @@ class LobbyMapPreview extends StatelessWidget {
                 children: [
                   CircleLayer(
                     circles: [
-                      if (outerStreetContour.length < 3)
+                      if (contourLatLng.length < 3)
                         CircleMarker(
                           point: centerLatLng,
                           radius: mapRadiusMeters.toDouble(),
@@ -289,9 +318,13 @@ class LobbyMapPreview extends StatelessWidget {
                           point: rogueLatLng,
                           radius: startZoneRadiusMeters.toDouble(),
                           useRadiusInMeter: true,
-                          color: Colors.green.withValues(alpha: 0.1),
-                          borderStrokeWidth: 1.5,
-                          borderColor: Colors.green,
+                          color: Colors.green.withValues(
+                            alpha: rogueStartZonePlayable ? 0.18 : 0.1,
+                          ),
+                          borderStrokeWidth: rogueStartZonePlayable ? 2.5 : 1.5,
+                          borderColor: rogueStartZonePlayable
+                              ? Colors.blue
+                              : Colors.green,
                         ),
                     ],
                   ),
@@ -328,9 +361,7 @@ class LobbyMapPreview extends StatelessWidget {
                       children: [
                         CircleLayer(
                           circles: [
-                            if (showObjectives &&
-                                showObjectiveZones &&
-                                highlightObjectiveZoneRadiusMeters > 0)
+                            if (highlightObjectiveZoneRadiusMeters > 0)
                               ...highlightZones
                                   .where((zone) => !zone.hugsStreets)
                                   .map(
@@ -342,20 +373,18 @@ class LobbyMapPreview extends StatelessWidget {
                                       radius: zone.radiusMeters,
                                       useRadiusInMeter: true,
                                       color: Colors.orange.withValues(
-                                        alpha: 0.18 + (highlightPulse * 0.30),
+                                        alpha: 0.16 + (highlightPulse * 0.60),
                                       ),
                                       borderStrokeWidth:
-                                          2 + (highlightPulse * 1.4),
-                                      borderColor: Colors.deepOrangeAccent
-                                          .withValues(
-                                            alpha:
-                                                0.65 + (highlightPulse * 0.35),
-                                          ),
+                                          3 + (highlightPulse * 3.0),
+                                      borderColor: Color.lerp(
+                                        Colors.deepOrange,
+                                        Colors.amberAccent,
+                                        highlightPulse,
+                                      )!,
                                     ),
                                   ),
-                            if (showObjectives &&
-                                showObjectiveZones &&
-                                highlightObjectiveZoneRadiusMeters > 0)
+                            if (highlightObjectiveZoneRadiusMeters > 0)
                               ...highlightZones
                                   .where((zone) => !zone.hugsStreets)
                                   .map(
@@ -366,11 +395,11 @@ class LobbyMapPreview extends StatelessWidget {
                                       ),
                                       radius:
                                           zone.radiusMeters +
-                                          (18 + (highlightPulse * 55)),
+                                          (5 + (highlightPulse * 14)),
                                       useRadiusInMeter: true,
                                       color: Colors.transparent,
                                       borderStrokeWidth:
-                                          1.8 - (highlightPulse * 1.0),
+                                          3.5 - (highlightPulse * 2.0),
                                       borderColor: Colors.deepOrangeAccent
                                           .withValues(
                                             alpha:
@@ -406,26 +435,23 @@ class LobbyMapPreview extends StatelessWidget {
                             ),
                           ],
                         ),
-                        if (showObjectives &&
-                            showObjectiveZones &&
-                            highlightZones.isNotEmpty)
+                        if (highlightZones.isNotEmpty)
                           PolygonLayer(
                             polygons: [
-                              if (showObjectives &&
-                                  showObjectiveZones &&
-                                  highlightObjectiveZoneRadiusMeters > 0)
+                              if (highlightObjectiveZoneRadiusMeters > 0)
                                 ..._hintPolygons(
                                   highlightZones.where(
                                     (zone) => zone.hugsStreets,
                                   ),
                                   fillColor: Colors.deepOrangeAccent.withValues(
-                                    alpha: 0.18 + (highlightPulse * 0.30),
+                                    alpha: 0.16 + (highlightPulse * 0.60),
                                   ),
-                                  borderColor: Colors.deepOrangeAccent
-                                      .withValues(
-                                        alpha: 0.65 + (highlightPulse * 0.35),
-                                      ),
-                                  strokeWidth: 2 + (highlightPulse * 1.4),
+                                  borderColor: Color.lerp(
+                                    Colors.deepOrange,
+                                    Colors.amberAccent,
+                                    highlightPulse,
+                                  )!,
+                                  strokeWidth: 3 + (highlightPulse * 3.0),
                                 ),
                             ],
                           ),
@@ -505,20 +531,22 @@ class LobbyMapPreview extends StatelessWidget {
                         size: 20,
                       ),
                     ),
-                  ...effectivePlayerMarkers.map(
-                    (player) => Marker(
-                      width: 56,
-                      height: 56,
+                  for (final player in effectivePlayerMarkers)
+                    Marker(
+                      width: _kPlayerMarkerSize,
+                      height: _kPlayerMarkerSize,
+                      rotate: true,
                       point: LatLng(
                         player.point.latitude,
                         player.point.longitude,
                       ),
                       child: _PlayerGpsPin(
-                        isAgent: player.isAgent,
-                        aura: player.aura,
+                        player: player,
+                        onTap: player.id != null && onPlayerTap != null
+                            ? () => onPlayerTap!(player.id!)
+                            : null,
                       ),
                     ),
-                  ),
                   ...pingMarkers.map(
                     (ping) => Marker(
                       width: 180,
@@ -529,6 +557,18 @@ class LobbyMapPreview extends StatelessWidget {
                       child: _RolePingMarkerWidget(ping: ping),
                     ),
                   ),
+                  if (selectedPlayer != null && selectedPlayer.name != null)
+                    Marker(
+                      width: 176,
+                      height: 84,
+                      point: LatLng(
+                        selectedPlayer.point.latitude,
+                        selectedPlayer.point.longitude,
+                      ),
+                      alignment: Alignment.topCenter,
+                      rotate: true,
+                      child: _PlayerNameLabel(name: selectedPlayer.name!),
+                    ),
                 ],
               ),
             ),
@@ -540,28 +580,28 @@ class LobbyMapPreview extends StatelessWidget {
 }
 
 class _PlayerGpsPin extends StatelessWidget {
-  const _PlayerGpsPin({required this.isAgent, required this.aura});
+  const _PlayerGpsPin({required this.player, this.onTap});
 
-  final bool isAgent;
-  final PlayerMarkerAura aura;
+  final PlayerMapMarker player;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    final auraColor = switch (aura) {
+    final auraColor = switch (player.aura) {
       PlayerMarkerAura.selfBlue => const Color(0xFF2EA8FF),
       PlayerMarkerAura.allyGreen => const Color(0xFF22C55E),
       PlayerMarkerAura.none => Colors.transparent,
     };
-    final markerAsset = isAgent
+    final markerAsset = player.isAgent
         ? 'assets/images/agent_marker.png'
         : 'assets/images/rogue_marker.png';
-    return SizedBox(
-      width: 56,
-      height: 56,
+    final liveHeading = player.liveHeadingDegrees;
+    final pin = SizedBox.square(
+      dimension: _kPlayerMarkerSize,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          if (aura != PlayerMarkerAura.none)
+          if (player.aura != PlayerMarkerAura.none)
             Positioned(
               left: 10,
               right: 10,
@@ -591,12 +631,100 @@ class _PlayerGpsPin extends StatelessWidget {
               filterQuality: FilterQuality.high,
               errorBuilder: (_, _, _) => Icon(
                 Icons.location_on,
-                color: isAgent ? Colors.cyanAccent : Colors.deepOrangeAccent,
+                color: player.isAgent
+                    ? Colors.cyanAccent
+                    : Colors.deepOrangeAccent,
                 size: 34,
               ),
             ),
           ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: liveHeading == null
+                  ? _buildHeadingArrow(context, player.headingDegrees)
+                  : ValueListenableBuilder<double?>(
+                      valueListenable: liveHeading,
+                      builder: (context, heading, _) => _buildHeadingArrow(
+                        context,
+                        heading ?? player.headingDegrees,
+                      ),
+                    ),
+            ),
+          ),
         ],
+      ),
+    );
+    if (onTap == null) return pin;
+    return Semantics(
+      button: true,
+      label: player.name,
+      child: GestureDetector(
+        key: ValueKey('player-marker-${player.id}'),
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: pin,
+      ),
+    );
+  }
+
+  Widget _buildHeadingArrow(BuildContext context, double? heading) {
+    if (heading == null) return const SizedBox.shrink();
+    // The pin stays upright, so the bearing must include the camera rotation.
+    final angle = degToRadian(heading) + MapCamera.of(context).rotationRad;
+    return Transform.rotate(
+      key: ValueKey('player-heading-${player.id}'),
+      angle: angle,
+      child: const Align(
+        alignment: Alignment.topCenter,
+        child: SizedBox.square(
+          dimension: 18,
+          child: Center(
+            child: Icon(
+              Icons.navigation,
+              size: 13,
+              color: Colors.white,
+              shadows: [Shadow(color: Colors.black54, blurRadius: 2)],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlayerNameLabel extends StatelessWidget {
+  const _PlayerNameLabel({required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return IgnorePointer(
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: _kPlayerMarkerSize / 2 + 4),
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.inverseSurface,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colors.onInverseSurface,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -637,14 +765,15 @@ class _RolePingMarkerWidget extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                Text(
-                  ping.message,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
+                if (ping.message.isNotEmpty)
+                  Text(
+                    ping.message,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
               ],
             ),
           ),

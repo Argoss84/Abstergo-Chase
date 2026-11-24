@@ -20,6 +20,11 @@ class GameSocketService {
 
   bool get isConnected => _socket?.connected == true;
 
+  void reconnect() {
+    final socket = _socket;
+    if (!_disposed && socket != null && !socket.connected) socket.connect();
+  }
+
   Future<void> connect({
     required Uri serverUrl,
     required String socketPath,
@@ -256,7 +261,11 @@ class GameSocketService {
   }
 
   void _emit(Map<String, dynamic> message) {
-    _socket?.emit('message', <String, dynamic>{
+    final socket = _socket;
+    // A new Socket.IO connection must rejoin the game before sending updates.
+    // Replaying a queued action would apply positions or time from the old link.
+    if (socket == null || !socket.connected) return;
+    socket.emit('message', <String, dynamic>{
       ...message,
       'meta': <String, dynamic>{
         ...((message['meta'] is Map)

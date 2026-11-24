@@ -181,7 +181,29 @@ void main() {
       expectConnectionRetained();
     }
     expect(signals, hasLength(3));
+    expect(callsFor('setRemoteDescription'), hasLength(1));
   });
+
+  test(
+    'reconnecting rebuilds the voice peer and keeps the microphone stream',
+    () async {
+      final signals = <Map<String, dynamic>>[];
+      final service = VoiceChatService(
+        signalSender: (_, signal) async => signals.add(signal),
+      );
+      addTearDown(service.dispose);
+      await service.enable(selfId: 'self-z', peerIds: ['peer-a']);
+      await service.reconnect();
+      await service.handleSignal(
+        fromId: 'peer-a',
+        signal: {'type': 'offer', 'sdp': 'new-offer'},
+      );
+      expect(signals.map((signal) => signal['type']), ['restart', 'answer']);
+      expect(callsFor('getUserMedia'), hasLength(1));
+      expect(callsFor('createPeerConnection'), hasLength(2));
+      expect(callsFor('peerConnectionDispose'), hasLength(1));
+    },
+  );
 
   test(
     'concurrent voice initialization shares microphone and peer creation',

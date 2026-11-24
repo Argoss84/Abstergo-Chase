@@ -334,6 +334,10 @@ class _LobbyPageState extends ConsumerState<LobbyPage>
                               rogueStartZone:
                                   config?.rogueStartZone ??
                                   bootstrap?.rogueStartZone,
+                              rogueStartZonePlayable:
+                                  config?.rogueStartZonePlayable ??
+                                  bootstrap?.rogueStartZonePlayable ??
+                                  false,
                               objectiveZoneRadiusMeters:
                                   config?.objectiveZoneRadius ??
                                   bootstrap!.form!.objectiveZoneRadius,
