@@ -1,6 +1,8 @@
+import 'dart:async';
+
+import 'package:broken_veil_protocol/features/account/application/account_settings_sync.dart';
 import 'package:broken_veil_protocol/features/account/data/account_api_service.dart';
 import 'package:broken_veil_protocol/features/auth/data/cognito_auth_service.dart';
-import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 class CognitoAuthController extends ChangeNotifier {
@@ -8,12 +10,13 @@ class CognitoAuthController extends ChangeNotifier {
     CognitoAuthService? authService,
     AccountApiService? accountApiService,
   }) : _authService = authService ?? CognitoAuthService(),
-       _accountApiService = accountApiService ?? AccountApiService();
+       accountApi = accountApiService ?? AccountApiService();
 
   final CognitoAuthService _authService;
-  final AccountApiService _accountApiService;
+  final AccountApiService accountApi;
+  Timer? _guard;
+  bool _guardInFlight = false;
   bool _disposed = false;
-  Timer? _sessionGuardTimer;
 
   bool isInitializing = true;
   bool isAuthenticated = false;
@@ -27,164 +30,155 @@ class CognitoAuthController extends ChangeNotifier {
   Future<void> initialize() async {
     if (_disposed) return;
     isInitializing = true;
-    error = null;
     notifyListeners();
     try {
-      final session = await _authService.restoreSession();
-      if (_disposed) return;
-      if (session != null) {
-        isAuthenticated = true;
-        username = session.username;
-        _startSessionGuard();
-      } else {
-        isAuthenticated = false;
-        username = null;
-        _stopSessionGuard();
+      final restored = await _authService.restoreSession();
+      if (restored != null && !_disposed) {
+        await _activate(restored, fresh: false);
       }
-    } catch (e) {
-      isAuthenticated = false;
-      username = null;
-      error = e.toString();
+    } on SessionInvalidatedException catch (failure) {
+      await handleSessionInvalidated(failure.message);
+    } catch (failure) {
+      error = failure.toString();
     } finally {
       isInitializing = false;
       notifyListeners();
     }
   }
 
-  Future<bool> signIn({
-    required String username,
-    required String password,
-  }) async {
+  Future<bool> signIn({required String username, required String password}) =>
+      _signIn(
+        () => _authService.signIn(username: username, password: password),
+      );
+
+  Future<bool> signInWithGoogle() => _signIn(_authService.signInWithGoogle);
+
+  Future<bool> _signIn(
+    Future<CognitoAuthSession> Function() authenticate,
+  ) async {
     if (_disposed || isSubmitting) return false;
     isSubmitting = true;
     error = null;
     notifyListeners();
     try {
-      final session = await _authService.signIn(
-        username: username,
-        password: password,
-      );
+      final session = await authenticate();
       if (_disposed) return false;
-      this.username = session.username;
-      isAuthenticated = true;
-      _startSessionGuard();
-      unawaited(
-        _syncUserBestEffort(
-          accessToken: session.accessToken,
-          username: session.username,
-        ).catchError(_handleBackgroundSyncError),
-      );
-      return true;
-    } catch (e) {
-      error = e.toString();
+      await _activate(session, fresh: true);
+      return isAuthenticated;
+    } catch (failure) {
+      error = failure.toString();
       isAuthenticated = false;
-      _stopSessionGuard();
       return false;
     } finally {
       isSubmitting = false;
       notifyListeners();
+    }
+  }
+
+  Future<void> _activate(
+    CognitoAuthSession session, {
+    required bool fresh,
+  }) async {
+    PlayerAccountProfile? profile;
+    try {
+      if (fresh) {
+        await accountApi.syncUser(
+          session.accessToken,
+          username: session.username,
+        );
+      }
+      profile = await accountApi.getMyProfile(session.accessToken);
+    } on BackendUnavailableException {
+      if (kReleaseMode) rethrow;
+    }
+    if (_disposed) return;
+    username = session.username;
+    if (profile != null) {
+      await AccountSettingsSync.instance
+          .bind(profile.id, accountApi, getAccessToken)
+          .catchError((Object _) {});
+      if (_disposed) return;
+    }
+    isAuthenticated = true;
+    _guard?.cancel();
+    _guard = Timer.periodic(
+      const Duration(seconds: 25),
+      (_) => unawaited(_checkSession()),
+    );
+  }
+
+  Future<void> _checkSession() async {
+    if (_guardInFlight || _disposed || !isAuthenticated) return;
+    _guardInFlight = true;
+    try {
+      final token = await getAccessToken();
+      if (token == null || token.isEmpty) {
+        await handleSessionInvalidated('Session expirée. Reconnecte-toi.');
+        return;
+      }
+      await accountApi.getMyProfile(token);
+      await AccountSettingsSync.instance.flush();
+    } on SessionInvalidatedException catch (failure) {
+      await handleSessionInvalidated(failure.message);
+    } catch (_) {
+      // A temporary outage leaves existing local preferences available.
+    } finally {
+      _guardInFlight = false;
+    }
+  }
+
+  Future<String?> getAccessToken() => _authService.getAccessToken();
+
+  Future<String?> getCurrentUserSub() => _authService.getCurrentUserSub();
+
+  Future<String?> signalingTicket() async {
+    if (!isAuthenticated) return null;
+    final token = await getAccessToken();
+    if (token == null) return null;
+    try {
+      final response = await accountApi.request(
+        token,
+        '/auth/signaling-ticket',
+        method: 'POST',
+        body: {},
+      );
+      return response['ticket'] as String?;
+    } on SessionInvalidatedException catch (failure) {
+      await handleSessionInvalidated(failure.message);
+      return null;
     }
   }
 
   Future<void> signOut() async {
     if (_disposed) return;
-    final token = await _authService.getAccessToken();
-    await _authService.clearSession();
-    if (_disposed) return;
-    isAuthenticated = false;
-    username = null;
-    error = null;
-    _stopSessionGuard();
-    notifyListeners();
-
-    if (token == null || token.isEmpty) {
-      return;
+    final token = await getAccessToken();
+    await _clearState();
+    if (token != null && token.isNotEmpty) {
+      unawaited(accountApi.logout(token).catchError((Object _) {}));
     }
-    unawaited(
-      _accountApiService.logout(token).catchError((Object _) {
-        // Logout API is best-effort and must not block UI navigation.
-      }),
-    );
   }
 
-  Future<void> handleSessionInvalidated(String message) async {
+  Future<void> deleteAccount() async {
+    final token = await getAccessToken();
+    if (token == null) {
+      throw const SessionInvalidatedException('Session expirée.');
+    }
+    await accountApi.request(token, '/users/me', method: 'DELETE');
+    await _clearState();
+  }
+
+  Future<void> handleSessionInvalidated(String message) => _clearState(message);
+
+  Future<void> _clearState([String? message]) async {
+    _guard?.cancel();
+    _guard = null;
+    AccountSettingsSync.instance.unbind();
     await _authService.clearSession();
     if (_disposed) return;
     isAuthenticated = false;
     username = null;
     error = message;
-    _stopSessionGuard();
     notifyListeners();
-  }
-
-  Future<bool> signInWithGoogle() async {
-    if (_disposed || isSubmitting) return false;
-    isSubmitting = true;
-    error = null;
-    notifyListeners();
-    try {
-      final session = await _authService.signInWithGoogle();
-      if (_disposed) return false;
-      username = session.username;
-      isAuthenticated = true;
-      _startSessionGuard();
-      unawaited(
-        _syncUserBestEffort(
-          accessToken: session.accessToken,
-          username: session.username,
-        ).catchError(_handleBackgroundSyncError),
-      );
-      return true;
-    } catch (e) {
-      error = e.toString();
-      isAuthenticated = false;
-      _stopSessionGuard();
-      return false;
-    } finally {
-      isSubmitting = false;
-      notifyListeners();
-    }
-  }
-
-  Future<String?> getAccessToken() {
-    return _authService.getAccessToken();
-  }
-
-  Future<String?> getCurrentUserSub() {
-    return _authService.getCurrentUserSub();
-  }
-
-  Future<void> _syncUserBestEffort({
-    required String accessToken,
-    required String username,
-  }) async {
-    try {
-      await _accountApiService.syncUser(accessToken, username: username);
-    } on BackendUnavailableException {
-      // Allow Cognito login when ServerBDD is temporarily unreachable.
-      return;
-    } catch (_) {
-      // Do not reject Cognito authentication on backend sync errors.
-      return;
-    }
-  }
-
-  void _startSessionGuard() {
-    // Session guard volontairement désactivé: on ne force plus de déconnexion
-    // automatique en arrière-plan (multi-appareils / réponse backend).
-    _sessionGuardTimer?.cancel();
-    _sessionGuardTimer = null;
-  }
-
-  void _stopSessionGuard() {
-    _sessionGuardTimer?.cancel();
-    _sessionGuardTimer = null;
-  }
-
-  Future<void> _handleBackgroundSyncError(Object error) async {
-    if (error is SessionInvalidatedException) {
-      await handleSessionInvalidated(error.message);
-    }
   }
 
   @override
@@ -195,7 +189,8 @@ class CognitoAuthController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    _stopSessionGuard();
+    _guard?.cancel();
+    AccountSettingsSync.instance.unbind();
     super.dispose();
   }
 }

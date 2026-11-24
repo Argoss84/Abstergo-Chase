@@ -4,6 +4,8 @@ import 'dart:convert';
 
 import 'package:broken_veil_protocol/app/config/app_runtime_config.dart';
 import 'package:flutter/foundation.dart';
+import 'package:broken_veil_protocol/core/logging/error_journal.dart';
+import 'package:broken_veil_protocol/shared/services/voice_route_meter.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 typedef VoiceSignalSender =
@@ -16,13 +18,79 @@ class VoiceChatService {
     required VoiceSignalSender signalSender,
     void Function(String peerId, bool active)? onVoiceActivity,
     VoidCallback? onConnectionChanged,
+    String phase = 'unknown',
   }) : _signalSender = signalSender,
        _onVoiceActivity = onVoiceActivity,
-       _onConnectionChanged = onConnectionChanged;
+       _onConnectionChanged = onConnectionChanged,
+       _phase = phase;
 
   final VoiceSignalSender _signalSender;
   final void Function(String peerId, bool active)? _onVoiceActivity;
   final VoidCallback? _onConnectionChanged;
+
+  final String _phase;
+  final _routeMeters = <String, VoiceRouteMeter>{};
+  final _ownedTurnHosts = AppRuntimeConfig.ownedTurnHosts
+      .split(',')
+      .map((host) => host.trim())
+      .where((host) => host.isNotEmpty)
+      .toSet();
+  Timer? _voiceRouteTimer;
+  bool _samplingVoiceRoutes = false;
+  DateTime _lastVoiceReport = DateTime.now();
+  VoiceRouteCounts _voiceRouteCounts = VoiceRouteCounts();
+
+  Future<void> _sampleVoiceRoutes() async {
+    if (_samplingVoiceRoutes) return;
+    _samplingVoiceRoutes = true;
+    try {
+      await Future.wait(
+        _peers.entries.toList().map((entry) async {
+          final meter = _routeMeters.putIfAbsent(
+            entry.key,
+            () => VoiceRouteMeter(_ownedTurnHosts),
+          );
+          try {
+            final stats = await entry.value.getStats().timeout(
+              const Duration(seconds: 3),
+            );
+            if (_peers[entry.key] == entry.value) {
+              _voiceRouteCounts.merge(meter.observe(stats));
+            }
+          } catch (_) {
+            if (_peers[entry.key] == entry.value) {
+              _voiceRouteCounts.unmeasurableIntervals++;
+            }
+          }
+        }),
+      );
+      if (DateTime.now().difference(_lastVoiceReport) >=
+          const Duration(minutes: 1)) {
+        await _flushVoiceRoutes();
+      }
+    } finally {
+      _samplingVoiceRoutes = false;
+    }
+  }
+
+  Future<void> _flushVoiceRoutes() async {
+    if (!_voiceRouteCounts.hasIntervals) return;
+    final sampled = _voiceRouteCounts;
+    _voiceRouteCounts = VoiceRouteCounts();
+    try {
+      await ErrorJournal.instance.recordVoice(
+        sessionId: AppLogger.sessionId,
+        phase: _phase,
+        counters: sampled.toJson(),
+      );
+      _lastVoiceReport = DateTime.now();
+    } catch (_) {
+      if (_voiceRouteCounts.measuredIntervals + sampled.measuredIntervals <
+          1000) {
+        _voiceRouteCounts.merge(sampled);
+      }
+    }
+  }
 
   String? _selfId;
   final Map<String, RTCPeerConnection> _peers = <String, RTCPeerConnection>{};
@@ -413,6 +481,12 @@ class VoiceChatService {
       throw StateError('Peer initialization cancelled.');
     }
     _peers[peerId] = pc;
+    if (ErrorJournal.instance.isCollectorConfigured) {
+      _voiceRouteTimer ??= Timer.periodic(
+        const Duration(seconds: 15),
+        (_) => unawaited(_sampleVoiceRoutes()),
+      );
+    }
     pc.onConnectionState = (_) {
       if (_peers[peerId] == pc) _onConnectionChanged?.call();
     };
@@ -477,6 +551,12 @@ class VoiceChatService {
   Future<void> _disposePeer(String peerId) async {
     final channel = _metaChannels.remove(peerId);
     final pc = _peers.remove(peerId);
+    _routeMeters.remove(peerId);
+    if (_peers.isEmpty) {
+      _voiceRouteTimer?.cancel();
+      _voiceRouteTimer = null;
+      unawaited(_flushVoiceRoutes());
+    }
     _awaitingAnswer.remove(peerId);
     _offerReplies.remove(peerId);
     _pendingCandidates.remove(peerId);

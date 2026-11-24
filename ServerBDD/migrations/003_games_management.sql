@@ -1,76 +1,102 @@
-CREATE TYPE game_status AS ENUM ('lobby', 'running', 'ended', 'cancelled');
-CREATE TYPE game_player_status AS ENUM ('active', 'left', 'disconnected', 'kicked');
+CREATE TABLE IF NOT EXISTS app_config_versions (
+  config_key VARCHAR(64) NOT NULL,
+  version INT UNSIGNED NOT NULL,
+  value_json JSON NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (config_key, version)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE games (
-  id BIGSERIAL PRIMARY KEY,
-  code TEXT NOT NULL UNIQUE,
-  status game_status NOT NULL DEFAULT 'lobby',
-  host_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-  host_player_id TEXT,
-  config_json JSONB,
-  winner_side TEXT,
-  end_reason TEXT,
-  started_at TIMESTAMPTZ,
-  ended_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+INSERT IGNORE INTO app_config_versions (config_key, version, value_json)
+VALUES ('progression', 1, JSON_OBJECT('win_xp', 150)),
+       ('hosting', 1, JSON_OBJECT('free_daily_rounds', NULL, 'premium_daily_rounds', NULL, 'premium_settings', JSON_OBJECT()));
 
-CREATE TABLE game_players (
-  id BIGSERIAL PRIMARY KEY,
-  game_id BIGINT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-  user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-  player_external_id TEXT NOT NULL,
-  display_name_snapshot TEXT NOT NULL,
-  role TEXT,
-  team TEXT,
-  is_host BOOLEAN NOT NULL DEFAULT false,
-  status game_player_status NOT NULL DEFAULT 'active',
-  joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  left_at TIMESTAMPTZ,
-  UNIQUE (game_id, player_external_id)
-);
+CREATE TABLE IF NOT EXISTS lobbies (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  lobby_key CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
+  code VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE game_events (
-  id BIGSERIAL PRIMARY KEY,
-  game_id BIGINT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-  event_type TEXT NOT NULL,
-  actor_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-  actor_external_id TEXT,
-  payload_json JSONB,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  sequence_no BIGINT NOT NULL,
-  UNIQUE (game_id, sequence_no)
-);
+CREATE TABLE IF NOT EXISTS games (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  round_key CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
+  lobby_id BIGINT UNSIGNED NOT NULL,
+  round_number INT UNSIGNED NOT NULL,
+  status ENUM('running', 'ended', 'cancelled') NOT NULL DEFAULT 'running',
+  host_user_id BIGINT UNSIGNED NULL,
+  host_player_id VARCHAR(128) NULL,
+  config_json JSON NOT NULL,
+  hosting_config_version INT UNSIGNED NULL,
+  progression_config_version INT UNSIGNED NULL,
+  winner_side VARCHAR(32) NULL,
+  end_reason VARCHAR(255) NULL,
+  started_at DATETIME(3) NOT NULL,
+  ended_at DATETIME(3) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY lobby_round_number (lobby_id, round_number),
+  KEY game_host_time (host_user_id, started_at),
+  KEY game_status_time (status, ended_at),
+  FOREIGN KEY (lobby_id) REFERENCES lobbies(id),
+  FOREIGN KEY (host_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE game_results (
-  game_id BIGINT PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
-  winning_side TEXT,
-  end_reason TEXT,
-  duration_seconds INTEGER,
-  summary_json JSONB,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+CREATE TABLE IF NOT EXISTS game_players (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  game_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  player_external_id VARCHAR(128) NOT NULL,
+  display_name_snapshot VARCHAR(64) NOT NULL,
+  role VARCHAR(32) NULL,
+  team VARCHAR(32) NULL,
+  is_host BOOLEAN NOT NULL DEFAULT FALSE,
+  status ENUM('active', 'left', 'disconnected', 'kicked') NOT NULL DEFAULT 'active',
+  joined_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  left_at DATETIME(3) NULL,
+  UNIQUE KEY game_account (game_id, user_id),
+  KEY player_history (user_id, game_id),
+  FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE game_player_results (
-  id BIGSERIAL PRIMARY KEY,
-  game_id BIGINT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-  user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-  player_external_id TEXT NOT NULL,
-  display_name_snapshot TEXT NOT NULL,
-  role TEXT,
-  team TEXT,
-  score INTEGER NOT NULL DEFAULT 0,
-  kills INTEGER NOT NULL DEFAULT 0,
-  deaths INTEGER NOT NULL DEFAULT 0,
-  objectives_completed INTEGER NOT NULL DEFAULT 0,
-  reward_xp INTEGER NOT NULL DEFAULT 0,
-  is_winner BOOLEAN NOT NULL DEFAULT false,
-  UNIQUE (game_id, player_external_id)
-);
+CREATE TABLE IF NOT EXISTS game_events (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  game_id BIGINT UNSIGNED NOT NULL,
+  sequence_no BIGINT UNSIGNED NOT NULL,
+  event_key VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  event_type VARCHAR(80) NOT NULL,
+  actor_user_id BIGINT UNSIGNED NULL,
+  payload_json JSON NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY game_event_order (game_id, sequence_no),
+  UNIQUE KEY game_event_deduplication (game_id, event_key),
+  FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+  FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE INDEX idx_games_status_created_at ON games (status, created_at DESC);
-CREATE INDEX idx_game_players_game_id ON game_players (game_id);
-CREATE INDEX idx_game_players_user_id ON game_players (user_id);
-CREATE INDEX idx_game_events_game_seq ON game_events (game_id, sequence_no DESC);
-CREATE INDEX idx_game_results_created_at ON game_results (created_at DESC);
+CREATE TABLE IF NOT EXISTS game_results (
+  game_id BIGINT UNSIGNED PRIMARY KEY,
+  winning_side VARCHAR(32) NULL,
+  end_reason VARCHAR(255) NULL,
+  duration_seconds INT UNSIGNED NULL,
+  summary_json JSON NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS game_player_results (
+  game_player_id BIGINT UNSIGNED PRIMARY KEY,
+  score INT NOT NULL DEFAULT 0,
+  objectives_completed INT UNSIGNED NOT NULL DEFAULT 0,
+  reward_xp INT UNSIGNED NOT NULL DEFAULT 0,
+  is_winner BOOLEAN NOT NULL DEFAULT FALSE,
+  FOREIGN KEY (game_player_id) REFERENCES game_players(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS runtime_snapshots (
+  scope VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+  owner_key CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  state_json JSON NULL,
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

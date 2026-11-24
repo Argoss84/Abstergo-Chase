@@ -1,0 +1,4 @@
+{
+  "ERROR_COLLECTOR_URL": "http://10.0.2.2:5180/api/errors",
+  "ERROR_REPORTING_ENVIRONMENT": "development"
+}

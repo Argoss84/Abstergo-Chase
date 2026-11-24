@@ -2,6 +2,8 @@ import 'package:broken_veil_protocol/shared/widgets/app_page_body.dart';
 import 'package:broken_veil_protocol/app/providers.dart';
 import 'package:broken_veil_protocol/features/account/data/account_api_service.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:broken_veil_protocol/features/account/presentation/player_platform_page.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class AccountPage extends ConsumerStatefulWidget {
@@ -57,7 +59,6 @@ class _AccountPageState extends ConsumerState<AccountPage> {
         throw Exception('Session invalide, reconnectez-vous.');
       }
 
-      await _accountApi.syncUser(token, username: auth.username);
       final profile = await _accountApi.getMyProfile(token);
 
       if (!mounted) return;
@@ -133,6 +134,37 @@ class _AccountPageState extends ConsumerState<AccountPage> {
     }
   }
 
+  Future<void> _deleteAccount() async {
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Supprimer mon compte ?'),
+        content: const Text(
+          'La suppression est définitive. Ton pseudo restera dans les anciennes parties.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true || !mounted) return;
+    setState(() => _isSaving = true);
+    try {
+      await ref.read(authControllerProvider).deleteAccount();
+    } catch (failure) {
+      if (mounted) setState(() => _error = failure.toString());
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -145,6 +177,19 @@ class _AccountPageState extends ConsumerState<AccountPage> {
                 keyboardDismissBehavior:
                     ScrollViewKeyboardDismissBehavior.onDrag,
                 children: [
+                  for (final entry in const [
+                    ('history', 'Mes parties', Icons.history),
+                    ('friends', 'Amis', Icons.people_outline),
+                    ('premium', 'Abonnement', Icons.workspace_premium_outlined),
+                  ])
+                    ListTile(
+                      leading: Icon(entry.$3),
+                      title: Text(entry.$2),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => context.push(
+                        '${PlayerPlatformPage.routePath}/${entry.$1}',
+                      ),
+                    ),
                   const AppSectionHeading(
                     title: 'Votre profil',
                     subtitle:
@@ -218,6 +263,10 @@ class _AccountPageState extends ConsumerState<AccountPage> {
                         label: const Text('Actualiser'),
                       ),
                     ],
+                  ),
+                  TextButton(
+                    onPressed: _isSaving ? null : _deleteAccount,
+                    child: const Text('Supprimer mon compte'),
                   ),
                 ],
               ),

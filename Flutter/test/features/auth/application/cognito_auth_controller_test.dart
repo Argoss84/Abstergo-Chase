@@ -39,6 +39,10 @@ class _FailingAccountApi extends AccountApiService {
   Future<void> syncUser(String accessToken, {String? username}) async {}
 
   @override
+  Future<PlayerAccountProfile> getMyProfile(String accessToken) async =>
+      const PlayerAccountProfile(id: 'test-user', cognitoSub: 'subject');
+
+  @override
   Future<void> logout(String accessToken) async {
     logoutCalls++;
     throw StateError('offline');

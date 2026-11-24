@@ -1,0 +1,5 @@
+{
+  "ERROR_COLLECTOR_URL": "https://errors.example.com/api/errors",
+  "ERROR_REPORTING_ENVIRONMENT": "production",
+  "VOICE_OWN_TURN_HOSTS": "turn.example.com,203.0.113.11"
+}

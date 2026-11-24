@@ -1,0 +1,30 @@
+services:
+  errors-db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${DATABASE_NAME:-abstergo_errors}
+      MYSQL_USER: ${DATABASE_USER:-abstergo_errors}
+      MYSQL_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${ERRORS_DB_ROOT_PASSWORD:?Set ERRORS_DB_ROOT_PASSWORD}
+    volumes:
+      - errors_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  error-collector:
+    build: ../ErrorCollector
+    env_file: ../ErrorCollector/.env
+    environment:
+      DATABASE_HOST: errors-db
+      DATABASE_PORT: 3306
+      PORT: 5180
+    ports:
+      - "127.0.0.1:5180:5180"
+    depends_on:
+      errors-db:
+        condition: service_healthy
+    command: ["sh", "-c", "npm run migrate && npm start"]
+volumes:
+  errors_db_data:

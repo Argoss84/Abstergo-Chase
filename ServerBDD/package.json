@@ -1,17 +1,17 @@
 {
   "name": "broken-veil-protocol-serverbdd",
   "version": "1.0.0",
-  "description": "Serveur API PostgreSQL privé pour application Android (Broken Veil Protocol)",
+  "description": "API MySQL et Cognito de Broken Veil Protocol",
   "type": "module",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "node app.cjs",
     "dev": "node --watch src/server.js",
     "migrate": "node src/db/run-migrations.js",
     "test": "node --test test/*.test.mjs"
   },
   "keywords": [
-    "postgresql",
+    "mysql",
     "cognito",
     "api",
     "database"
@@ -23,9 +23,9 @@
     "express": "^4.21.0",
     "joi": "^17.13.3",
     "jose": "^5.9.6",
-    "pg": "^8.16.3"
+    "mysql2": "^3.14.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20"
   }
 }

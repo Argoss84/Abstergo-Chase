@@ -5,6 +5,7 @@ import 'package:broken_veil_protocol/features/create_lobby/presentation/create_l
 import 'package:broken_veil_protocol/features/home/presentation/home_menu_page.dart';
 import 'package:broken_veil_protocol/shared/widgets/app_page_body.dart';
 import 'package:flutter/material.dart';
+import 'package:broken_veil_protocol/features/account/presentation/free_player_banner.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -103,6 +104,7 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage>
         _permissionsStatus ==
         BootstrapPermissionsStatus.locationServiceDisabled;
     return Scaffold(
+      bottomNavigationBar: const FreePlayerBanner(),
       appBar: AppBar(
         title: const Text(
           'Broken Veil Protocol',

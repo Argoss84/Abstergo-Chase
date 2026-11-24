@@ -68,6 +68,34 @@ class CreateLobbyFormData {
     'rogue_agent_position_interval_seconds': rogueAgentPositionIntervalSeconds,
   };
 
+  Map<String, dynamic> toPreset() => {
+    ...toGameSettings()
+      ..remove('map_center_latitude')
+      ..remove('map_center_longitude'),
+    'objective_zone_radius': objectiveZoneRadius,
+  };
+
+  CreateLobbyFormData withPreset(Map<String, dynamic> values) {
+    int? read(String key) => (values[key] as num?)?.toInt();
+    return copyWith(
+      objectiveNumber: read('objectif_number'),
+      duration: read('duration'),
+      victoryConditionObjectives: read('victory_condition_nb_objectivs'),
+      hackDurationMs: read('hack_duration_ms'),
+      objectiveZoneRadius: read('objective_zone_radius'),
+      startZoneRadius: read('start_zone_radius'),
+      rogueRange: read('rogue_range'),
+      agentRange: read('agent_range'),
+      mapRadius: read('map_radius'),
+      captureTimeBonusSeconds: read('capture_time_bonus_seconds'),
+      objectiveIntrusionAlertsEnabled:
+          values['objective_intrusion_alerts_enabled'] as bool?,
+      rogueAgentPositionIntervalSeconds: read(
+        'rogue_agent_position_interval_seconds',
+      ),
+    );
+  }
+
   CreateLobbyFormData copyWith({
     int? objectiveNumber,
     int? duration,

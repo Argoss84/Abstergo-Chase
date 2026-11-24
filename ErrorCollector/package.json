@@ -1,0 +1,20 @@
+{
+  "name": "broken-veil-error-collector",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node app.cjs",
+    "dev": "node --watch app.cjs",
+    "migrate": "node src/migrate.js",
+    "retention": "node src/retention.js",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "jose": "^5.10.0",
+    "mysql2": "^3.14.0"
+  }
+}

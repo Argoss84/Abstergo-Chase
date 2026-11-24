@@ -17,6 +17,7 @@ class LobbyController extends ChangeNotifier {
   }) : _socketService = socketService ?? LobbySocketService(),
        _playerSessionStore = playerSessionStore ?? PlayerSessionStore() {
     _voiceChatService = VoiceChatService(
+      phase: 'lobby',
       signalSender: (targetId, signal) {
         return _socketService.sendWebRtcSignal(
           targetId: targetId,

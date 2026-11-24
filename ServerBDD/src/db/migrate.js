@@ -1,70 +1,39 @@
-import { readdir } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { Readable } from 'node:stream';
+import { readdir, readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { pool } from './pool.js';
+import { env } from '../config/env.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const migrationsDir = path.resolve(__dirname, '../../migrations');
+const migrations = new URL('../../migrations/', import.meta.url);
 
-async function ensureMigrationsTable() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      id BIGSERIAL PRIMARY KEY,
-      filename TEXT NOT NULL UNIQUE,
-      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-}
+export async function runMigrations(database = pool) {
+  const lockName = createHash('sha256').update('abstergo-migrations:' + env.database.name).digest('hex');
+  const connection = await database.getConnection();
+  let locked = false;
+  try {
+    const [[lock]] = await connection.query('SELECT GET_LOCK(?, 30) AS acquired', [lockName]);
+    locked = Number(lock.acquired) === 1;
+    if (!locked) throw new Error('Could not lock schema migrations');
 
-function splitSqlStatements(sqlText) {
-  return sqlText
-    .split(/;\s*$/gm)
-    .map((statement) => statement.trim())
-    .filter(Boolean);
-}
-
-async function readSqlFile(absolutePath) {
-  const { createReadStream } = await import('node:fs');
-  const stream = createReadStream(absolutePath, { encoding: 'utf8' });
-  const chunks = [];
-  for await (const chunk of Readable.from(stream)) {
-    chunks.push(chunk);
-  }
-  return chunks.join('');
-}
-
-export async function runMigrations() {
-  await ensureMigrationsTable();
-
-  const files = (await readdir(migrationsDir))
-    .filter((name) => name.endsWith('.sql'))
-    .sort();
-
-  for (const file of files) {
-    const existing = await pool.query('SELECT 1 FROM schema_migrations WHERE filename = $1', [file]);
-    if (existing.rowCount > 0) {
-      continue;
+    await connection.query(
+      'CREATE TABLE IF NOT EXISTS schema_migrations (' +
+      'filename VARCHAR(255) PRIMARY KEY, applied_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)' +
+      ') ENGINE=InnoDB'
+    );
+    const filenames = (await readdir(migrations)).filter((name) => name.endsWith('.sql')).sort();
+    for (const filename of filenames) {
+      const [existing] = await connection.query('SELECT 1 FROM schema_migrations WHERE filename = ?', [filename]);
+      if (existing.length) continue;
+      const sql = await readFile(new URL(filename, migrations), 'utf8');
+      // MySQL DDL commits implicitly. A partially applied migration can safely be replayed.
+      const statements = sql.split(/;\s*$/gm).map((statement) => statement.trim()).filter(Boolean);
+      for (const statement of statements) await connection.query(statement);
+      await connection.query('INSERT INTO schema_migrations (filename) VALUES (?)', [filename]);
     }
-
-    const fullPath = path.join(migrationsDir, file);
-    const sql = await readSqlFile(fullPath);
-    const statements = splitSqlStatements(sql);
-    const client = await pool.connect();
+  } finally {
     try {
-      await client.query('BEGIN');
-      for (const statement of statements) {
-        await client.query(statement);
-      }
-      await client.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [file]);
-      await client.query('COMMIT');
-      console.log(`Applied migration: ${file}`);
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
+      if (locked) await connection.query('SELECT RELEASE_LOCK(?)', [lockName]);
     } finally {
-      client.release();
+      connection.release();
     }
   }
 }

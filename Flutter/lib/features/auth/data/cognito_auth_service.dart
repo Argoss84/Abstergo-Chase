@@ -126,7 +126,12 @@ class CognitoAuthService {
         issuer:
             'https://cognito-idp.${AppRuntimeConfig.cognitoRegion}.amazonaws.com/'
             '${AppRuntimeConfig.cognitoUserPoolId}',
-        scopes: const ['openid', 'email', 'profile'],
+        scopes: const [
+          'openid',
+          'email',
+          'profile',
+          'aws.cognito.signin.user.admin',
+        ],
         additionalParameters: const {'identity_provider': 'Google'},
         serviceConfiguration: AuthorizationServiceConfiguration(
           authorizationEndpoint: '$normalizedDomain/oauth2/authorize',

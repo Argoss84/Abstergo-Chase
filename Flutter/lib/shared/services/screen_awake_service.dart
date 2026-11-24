@@ -1,5 +1,8 @@
 import 'package:keep_screen_on/keep_screen_on.dart';
+import 'dart:async';
+
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:broken_veil_protocol/features/account/application/account_settings_sync.dart';
 
 class ScreenAwakeService {
   ScreenAwakeService._();
@@ -15,6 +18,9 @@ class ScreenAwakeService {
   Future<void> setPreventLockEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_preventLockKey, enabled);
+    unawaited(
+      AccountSettingsSync.instance.record('preventScreenLock', enabled),
+    );
     await _apply(enabled);
   }
 

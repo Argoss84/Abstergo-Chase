@@ -1,5 +1,6 @@
 import 'package:broken_veil_protocol/features/auth/application/cognito_auth_controller.dart';
 import 'package:broken_veil_protocol/features/account/presentation/account_page.dart';
+import 'package:broken_veil_protocol/features/account/presentation/player_platform_page.dart';
 import 'package:broken_veil_protocol/features/auth/presentation/login_page.dart';
 import 'package:broken_veil_protocol/features/bootstrap/presentation/bootstrap_page.dart';
 import 'package:broken_veil_protocol/features/create_lobby/presentation/create_lobby_page.dart';
@@ -11,12 +12,16 @@ import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
 import 'package:broken_veil_protocol/features/lobby/presentation/lobby_page.dart';
 import 'package:broken_veil_protocol/features/settings/presentation/vibration_settings_page.dart';
 import 'package:go_router/go_router.dart';
+import 'package:broken_veil_protocol/core/logging/app_logger.dart';
+import 'package:broken_veil_protocol/features/diagnostics/presentation/error_journal_page.dart';
 
 GoRouter buildAppRouter(CognitoAuthController authController) {
   return GoRouter(
     initialLocation: BootstrapPage.routePath,
     refreshListenable: authController,
     redirect: (context, state) {
+      AppLogger.currentRoute = state.uri.path;
+      if (state.uri.path == ErrorJournalPage.routePath) return null;
       final isLoggingIn = state.uri.path == LoginPage.routePath;
       if (authController.isInitializing) {
         return null;
@@ -30,6 +35,16 @@ GoRouter buildAppRouter(CognitoAuthController authController) {
       return null;
     },
     routes: <RouteBase>[
+      GoRoute(
+        path: '${PlayerPlatformPage.routePath}/:section',
+        builder: (context, state) => PlayerPlatformPage(
+          section: state.pathParameters['section'] ?? 'history',
+        ),
+      ),
+      GoRoute(
+        path: ErrorJournalPage.routePath,
+        builder: (context, state) => const ErrorJournalPage(),
+      ),
       GoRoute(
         path: LoginPage.routePath,
         name: LoginPage.routeName,
@@ -48,11 +63,10 @@ GoRouter buildAppRouter(CognitoAuthController authController) {
       GoRoute(
         path: HomeMenuPage.joinLobbyPath,
         name: JoinLobbyPage.routeName,
-        builder: (context, state) =>
-            JoinLobbyPage(
-              initialCode: state.uri.queryParameters['code'],
-              initialError: state.uri.queryParameters['error'],
-            ),
+        builder: (context, state) => JoinLobbyPage(
+          initialCode: state.uri.queryParameters['code'],
+          initialError: state.uri.queryParameters['error'],
+        ),
       ),
       GoRoute(
         path: LobbyPage.routePath,

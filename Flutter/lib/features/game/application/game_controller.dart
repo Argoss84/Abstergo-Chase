@@ -56,6 +56,7 @@ class GameController extends ChangeNotifier {
   GameController({GameSocketService? socketService})
     : _socketService = socketService ?? GameSocketService() {
     _voiceChatService = VoiceChatService(
+      phase: 'game',
       signalSender: (targetId, signal) {
         return _socketService.sendGameSignal(
           targetId: targetId,
@@ -1991,6 +1992,11 @@ class GameController extends ChangeNotifier {
       return;
     }
     sendRoleChat(trimmed);
+  }
+
+  Future<String?> prepareNextLobby() async {
+    final code = gameCode;
+    return code == null ? null : _socketService.prepareNextLobby(code);
   }
 
   void leaveGame() {

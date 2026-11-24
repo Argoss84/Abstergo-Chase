@@ -1,12 +1,20 @@
 import express from 'express';
+import { randomUUID } from 'node:crypto';
 import { pool } from './db/pool.js';
 import { notFoundHandler, errorHandler } from './middleware/errors.js';
 import { usersRouter } from './modules/users/users.routes.js';
 import { socialRouter } from './modules/social/social.routes.js';
 import { progressionRouter } from './modules/progression/progression.routes.js';
+import { billingRouter } from './modules/billing/billing.routes.js';
 import { gamesRouter } from './modules/games/games.routes.js';
 
 export const app = express();
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  req.traceId = randomUUID();
+  res.set({ 'Cache-Control': 'no-store', 'X-Request-Id': req.traceId });
+  next();
+});
 
 app.use((req, res, next) => {
   const origin = req.headers.origin ?? '';
@@ -26,7 +34,7 @@ app.use((req, res, next) => {
   return next();
 });
 
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '4mb' }));
 
 app.get('/health', async (_req, res, next) => {
   try {
@@ -41,6 +49,7 @@ app.use('/api', usersRouter);
 app.use('/api', socialRouter);
 app.use('/api', progressionRouter);
 app.use('/api', gamesRouter);
+app.use('/api', billingRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

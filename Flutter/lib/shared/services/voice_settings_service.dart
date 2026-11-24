@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:broken_veil_protocol/features/account/application/account_settings_sync.dart';
 
 enum VoiceTransmissionMode { voiceActivation, pushToTalk }
 
@@ -39,15 +42,19 @@ class VoiceSettingsService {
   Future<void> setEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_enabledKey, enabled);
+    unawaited(AccountSettingsSync.instance.record('voiceEnabled', enabled));
   }
 
   Future<void> setMode(VoiceTransmissionMode mode) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_modeKey, mode.name);
+    unawaited(AccountSettingsSync.instance.record('voiceMode', mode.name));
   }
 
   Future<void> setActivationThreshold(double threshold) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_thresholdKey, threshold.clamp(0.05, 1.0));
+    final value = threshold.clamp(0.05, 1.0).toDouble();
+    await prefs.setDouble(_thresholdKey, value);
+    unawaited(AccountSettingsSync.instance.record('voiceThreshold', value));
   }
 }

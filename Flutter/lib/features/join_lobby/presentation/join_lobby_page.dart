@@ -103,7 +103,6 @@ class _JoinLobbyPageState extends ConsumerState<JoinLobbyPage> {
       if (!mounted || token == null || token.isEmpty) {
         return;
       }
-      await _accountApiService.syncUser(token, username: auth.username);
       if (!mounted) return;
       final profile = await _accountApiService.getMyProfile(token);
       if (!mounted) return;

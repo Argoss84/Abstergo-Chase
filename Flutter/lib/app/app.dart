@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:broken_veil_protocol/app/providers.dart';
+import 'package:broken_veil_protocol/core/logging/app_logger.dart';
+import 'package:broken_veil_protocol/core/logging/error_journal.dart';
 import 'package:broken_veil_protocol/shared/services/screen_awake_service.dart';
 import 'package:broken_veil_protocol/shared/theme/app_theme.dart';
 import 'package:flutter/material.dart';
@@ -8,7 +12,8 @@ class BrokenVeilProtocolApp extends ConsumerStatefulWidget {
   const BrokenVeilProtocolApp({super.key});
 
   @override
-  ConsumerState<BrokenVeilProtocolApp> createState() => _BrokenVeilProtocolAppState();
+  ConsumerState<BrokenVeilProtocolApp> createState() =>
+      _BrokenVeilProtocolAppState();
 }
 
 class _BrokenVeilProtocolAppState extends ConsumerState<BrokenVeilProtocolApp>
@@ -19,6 +24,17 @@ class _BrokenVeilProtocolAppState extends ConsumerState<BrokenVeilProtocolApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    final auth = ref.read(authControllerProvider);
+    ref.read(playBillingProvider);
+    unawaited(
+      ErrorJournal.instance
+          .initialize(
+            accessTokenProvider: () =>
+                auth.isAuthenticated ? auth.getAccessToken() : Future.value(),
+            isAuthenticated: () => auth.isAuthenticated,
+          )
+          .catchError((Object _) {}),
+    );
     _screenAwakeService.applySavedSetting();
   }
 
@@ -30,7 +46,10 @@ class _BrokenVeilProtocolAppState extends ConsumerState<BrokenVeilProtocolApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    AppLogger.appState = state.name;
     if (state == AppLifecycleState.resumed) {
+      ErrorJournal.instance.scheduleUpload();
+      unawaited(ref.read(playBillingProvider).refresh());
       _screenAwakeService.applySavedSetting();
     }
   }

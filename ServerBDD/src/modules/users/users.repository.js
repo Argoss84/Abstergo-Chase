@@ -1,140 +1,107 @@
-import { pool } from '../../db/pool.js';
+import { randomUUID } from 'node:crypto';
+import { pool, readJson, transaction } from '../../db/pool.js';
+import { HttpError } from '../../utils/http-error.js';
 
-export async function upsertFromCognito({ cognitoSub, email, username }) {
-  const result = await pool.query(
-    `
-    INSERT INTO users (cognito_sub, email, username, status)
-    VALUES ($1, $2, $3, 'active')
-    ON CONFLICT (cognito_sub)
-    DO UPDATE SET
-      email = COALESCE(EXCLUDED.email, users.email),
-      username = COALESCE(EXCLUDED.username, users.username),
-      updated_at = NOW()
-    RETURNING id, cognito_sub, email, username, status, created_at, updated_at
-    `,
-    [cognitoSub, email, username]
-  );
-
-  return result.rows[0];
-}
-
-export async function getByCognitoSub(cognitoSub) {
-  const result = await pool.query(
-    `
-    SELECT u.id, u.cognito_sub, u.email, u.username, u.status,
-           p.display_name, p.avatar_url, p.bio, p.region, p.preferences_json,
-           u.created_at, u.updated_at
-    FROM users u
-    LEFT JOIN player_profiles p ON p.user_id = u.id
-    WHERE u.cognito_sub = $1
-    `,
-    [cognitoSub]
-  );
-  return result.rows[0] ?? null;
-}
-
-export async function activateSessionIfAvailable(cognitoSub, accessTokenHash) {
-  const result = await pool.query(
-    `
-    WITH target_user AS (
-      SELECT id FROM users WHERE cognito_sub = $1
-    )
-    INSERT INTO user_active_sessions (user_id, access_token_hash)
-    SELECT id, $2 FROM target_user
-    ON CONFLICT (user_id)
-    DO UPDATE SET
-      access_token_hash = EXCLUDED.access_token_hash,
-      updated_at = NOW()
-    RETURNING user_id, updated_at
-    `,
-    [cognitoSub, accessTokenHash]
-  );
-
-  return result.rowCount > 0;
-}
-
-export async function listConnectedUsers() {
-  const result = await pool.query(
-    `
-    SELECT
-      u.id,
-      u.username,
-      u.email,
-      s.updated_at AS last_seen_at
-    FROM user_active_sessions s
-    JOIN users u ON u.id = s.user_id
-    ORDER BY s.updated_at DESC
-    `
-  );
-  return result.rows;
-}
-
-export async function disconnectUserSession(userId) {
-  const result = await pool.query(
-    `
-    DELETE FROM user_active_sessions
-    WHERE user_id = $1
-    RETURNING user_id
-    `,
+export async function loadProfile(userId, db = pool) {
+  const [[row]] = await db.query(
+    'SELECT u.id, u.public_id, u.cognito_sub, u.email, u.username, u.status, u.created_at, u.updated_at, ' +
+    'p.display_name, p.avatar_url, p.bio, p.region, s.preferences_json, COALESCE(s.revision, 0) AS settings_revision ' +
+    'FROM users u LEFT JOIN player_profiles p ON p.user_id = u.id ' +
+    'LEFT JOIN user_settings s ON s.user_id = u.id WHERE u.id = ?',
     [userId]
   );
-  return result.rowCount > 0;
+  return row ? { ...row, settings_revision: Number(row.settings_revision), preferences_json: readJson(row.preferences_json, {}) } : null;
 }
 
-export async function disconnectSessionByCognitoSub(cognitoSub, accessTokenHash = null) {
-  const result = await pool.query(
-    `
-    DELETE FROM user_active_sessions s
-    USING users u
-    WHERE u.id = s.user_id
-      AND u.cognito_sub = $1
-      AND ($2::text IS NULL OR s.access_token_hash = $2)
-    RETURNING s.user_id
-    `,
-    [cognitoSub, accessTokenHash]
-  );
-  return result.rowCount > 0;
-}
+export async function signIn(auth, suggestedName) {
+  return transaction(async (db) => {
+    const publicId = randomUUID();
+    const preferredName = typeof suggestedName === 'string' &&
+      /^[\p{L}\p{N}_. -]{3,32}$/u.test(suggestedName) ? suggestedName : null;
 
-export async function upsertProfileByCognitoSub(cognitoSub, payload) {
-  const user = await getByCognitoSub(cognitoSub);
-  if (!user) {
-    return null;
-  }
-
-  if (payload.username != null && payload.username.trim() !== '') {
-    await pool.query(
-      `
-      UPDATE users
-      SET username = $1, updated_at = NOW()
-      WHERE id = $2
-      `,
-      [payload.username.trim(), user.id]
+    await db.query(
+      'INSERT INTO users (public_id, identity_hash, cognito_issuer, cognito_sub, email, username) ' +
+      'VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id',
+      [publicId, auth.identityHash, auth.issuer, auth.sub, auth.email, preferredName]
     );
-  }
+    let [[user]] = await db.query('SELECT id, status FROM users WHERE identity_hash = ? FOR UPDATE', [auth.identityHash]);
+    if (!user) {
+      // A suggested pseudo may already belong to another account.
+      await db.query(
+        'INSERT INTO users (public_id, identity_hash, cognito_issuer, cognito_sub, email) VALUES (?, ?, ?, ?, ?)',
+        [publicId, auth.identityHash, auth.issuer, auth.sub, auth.email]
+      );
+      [[user]] = await db.query('SELECT id, status FROM users WHERE public_id = ?', [publicId]);
+    }
 
+    if (user.status !== 'active') throw new HttpError(403, 'Ce compte est désactivé');
+    await db.query(
+      'INSERT INTO user_active_sessions (user_id, session_hash, expires_at) VALUES (?, ?, ?) ' +
+      'ON DUPLICATE KEY UPDATE session_hash = ?, expires_at = ?',
+      [user.id, auth.sessionHash, auth.expiresAt, auth.sessionHash, auth.expiresAt]
+    );
+    return loadProfile(user.id, db);
+  });
+}
+
+export async function signOut(auth) {
   await pool.query(
-    `
-    INSERT INTO player_profiles (user_id, display_name, avatar_url, bio, region, preferences_json)
-    VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-    ON CONFLICT (user_id)
-    DO UPDATE SET
-      display_name = COALESCE(EXCLUDED.display_name, player_profiles.display_name),
-      avatar_url = COALESCE(EXCLUDED.avatar_url, player_profiles.avatar_url),
-      bio = COALESCE(EXCLUDED.bio, player_profiles.bio),
-      region = COALESCE(EXCLUDED.region, player_profiles.region),
-      preferences_json = COALESCE(EXCLUDED.preferences_json, player_profiles.preferences_json),
-      updated_at = NOW()
-    `,
-    [
-      user.id,
-      payload.display_name ?? null,
-      payload.avatar_url ?? null,
-      payload.bio ?? null,
-      payload.region ?? null,
-      payload.preferences_json ? JSON.stringify(payload.preferences_json) : null,
-    ]
+    'DELETE s FROM user_active_sessions s JOIN users u ON u.id = s.user_id ' +
+    'WHERE u.identity_hash = ? AND s.session_hash = ?',
+    [auth.identityHash, auth.sessionHash]
   );
+}
 
-  return getByCognitoSub(cognitoSub);
+export async function patchSettings(db, userId, preferences, expectedRevision) {
+  await db.query(
+    'INSERT INTO user_settings (user_id, preferences_json) VALUES (?, JSON_OBJECT()) ON DUPLICATE KEY UPDATE user_id = user_id',
+    [userId]
+  );
+  const [[row]] = await db.query('SELECT * FROM user_settings WHERE user_id = ? FOR UPDATE', [userId]);
+  if (expectedRevision != null && Number(row.revision) !== expectedRevision) {
+    throw new HttpError(409, 'Les réglages ont changé. Rechargez-les avant de réessayer.');
+  }
+  const before = readJson(row.preferences_json, {});
+  const merged = { ...before, ...preferences };
+  if (preferences.vibrations) merged.vibrations = { ...before.vibrations, ...preferences.vibrations };
+  const revision = Number(row.revision) + 1;
+  await db.query(
+    'UPDATE user_settings SET preferences_json = ?, revision = ? WHERE user_id = ?',
+    [JSON.stringify(merged), revision, userId]
+  );
+  return { preferences: merged, revision };
+}
+
+export async function saveProfile(userId, payload) {
+  return transaction(async (db) => {
+    if (payload.username) await db.query('UPDATE users SET username = ? WHERE id = ?', [payload.username, userId]);
+    const profile = Object.fromEntries(
+      ['display_name', 'avatar_url', 'bio', 'region'].filter((key) => key in payload).map((key) => [key, payload[key] || null])
+    );
+    if (Object.keys(profile).length) {
+      await db.query('INSERT INTO player_profiles (user_id) VALUES (?) ON DUPLICATE KEY UPDATE user_id = user_id', [userId]);
+      const columns = Object.keys(profile).map((key) => key + ' = ?').join(', ');
+      await db.query('UPDATE player_profiles SET ' + columns + ' WHERE user_id = ?', [...Object.values(profile), userId]);
+    }
+    if (payload.preferences_json) await patchSettings(db, userId, payload.preferences_json);
+    return loadProfile(userId, db);
+  });
+}
+
+export async function decommission(userId) {
+  await transaction(async (db) => {
+    await db.query('SELECT id FROM users WHERE id = ? FOR UPDATE', [userId]);
+    await db.query(
+      'UPDATE users SET cognito_issuer = NULL, cognito_sub = NULL, username = NULL, email = NULL, status = ? WHERE id = ?',
+      ['deleted', userId]
+    );
+    for (const table of [
+      'player_profiles', 'user_active_sessions', 'signaling_tickets', 'user_settings', 'lobby_presets',
+      'player_bonus_unlocks', 'xp_events', 'player_stats',
+    ]) {
+      await db.query('DELETE FROM ' + table + ' WHERE user_id = ?', [userId]);
+    }
+    await db.query('DELETE FROM friendships WHERE user_low_id = ? OR user_high_id = ?', [userId, userId]);
+    await db.query('DELETE FROM blocked_users WHERE blocker_id = ? OR blocked_id = ?', [userId, userId]);
+  });
 }

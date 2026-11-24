@@ -1,6 +1,19 @@
 class AppRuntimeConfig {
   const AppRuntimeConfig._();
 
+  static const String appVersion = String.fromEnvironment('APP_VERSION');
+  static const String errorCollectorUrl = String.fromEnvironment(
+    'ERROR_COLLECTOR_URL',
+  );
+  static const String errorReportingEnvironment = String.fromEnvironment(
+    'ERROR_REPORTING_ENVIRONMENT',
+    defaultValue: 'development',
+  );
+  static const String ownedTurnHosts = String.fromEnvironment(
+    'VOICE_OWN_TURN_HOSTS',
+  );
+  static const String adMobBannerId = String.fromEnvironment('ADMOB_BANNER_ID');
+
   // Intervalle de publication des mises a jour temps reel.
   static const int gameRealtimeRefreshIntervalMs = 1000;
 
@@ -59,7 +72,7 @@ class AppRuntimeConfig {
   // ServerBDD profile API configuration.
   static const String serverBddProductionUrl = String.fromEnvironment(
     'SERVERBDD_PRODUCTION_URL',
-    defaultValue: 'http://35.181.228.185:5175',
+    defaultValue: '',
   );
   static const String serverBddDevelopmentUrl = String.fromEnvironment(
     'SERVERBDD_DEVELOPMENT_URL',
