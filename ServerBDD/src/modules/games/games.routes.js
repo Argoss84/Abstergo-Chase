@@ -1,201 +1,126 @@
 import { Router } from 'express';
 import Joi from 'joi';
+import { pool } from '../../db/pool.js';
+import { requireAuth, redeemSignalingTicket } from '../../middleware/auth-cognito.js';
+import { requireAdmin, requireSignaling } from '../../middleware/auth-service.js';
 import { validate } from '../../middleware/validate.js';
 import { asyncHandler } from '../../utils/async-handler.js';
+import { getProgression } from '../progression/progression.repository.js';
 import {
-  appendEvents,
-  createGame,
-  endGame,
-  fetchGame,
-  fetchRecentGames,
-  finalizeGameWithResults,
-  startGame,
-  upsertGameParticipant,
-} from './games.service.js';
-import {
-  appendEventsSchema,
-  createGameSchema,
-  finalizeGameSchema,
-  gameCodeParamsSchema,
-  updateGameStatusSchema,
-  upsertPlayerSchema,
-} from './games.schemas.js';
-
-const listEventsQuerySchema = Joi.object({
-  limit: Joi.number().integer().min(1).max(500).optional(),
-  offset: Joi.number().integer().min(0).optional(),
-});
-const listGamesQuerySchema = Joi.object({
-  limit: Joi.number().integer().min(1).max(200).optional(),
-});
+  acquireRuntime, appendGameEvent, completeRound, gameByCode, gameDetails, getGameEvents, getHistory,
+  reserveLobby, saveRuntime, startRound,
+} from './games.repository.js';
+import { checkpoint, code, roundEnd, roundStart, scope, userId, uuid } from './games.schemas.js';
 
 export const gamesRouter = Router();
+gamesRouter.use('/internal', requireSignaling);
 
-gamesRouter.post(
-  '/games',
-  validate(createGameSchema),
+gamesRouter.post('/internal/ticket', validate(Joi.object({
+  ticket: Joi.string().hex().length(64).required(),
+})), asyncHandler(async (req, res) => {
+  res.json(await redeemSignalingTicket(req.body.ticket));
+}));
+
+gamesRouter.post('/internal/sessions', validate(Joi.object({
+  sessions: Joi.array().items(Joi.object({
+    user_id: userId.required(),
+    session_hash: Joi.string().hex().length(64).required(),
+  })).min(1).max(200).required(),
+})), asyncHandler(async (req, res) => {
+  const ids = [...new Set(req.body.sessions.map((entry) => entry.user_id))];
+  const [rows] = await pool.query(
+    "SELECT s.user_id, s.session_hash FROM user_active_sessions s JOIN users u ON u.id = s.user_id " +
+    "WHERE s.user_id IN (?) AND s.expires_at > UTC_TIMESTAMP(3) AND u.status = 'active'",
+    [ids]
+  );
+  const active = new Map(rows.map((row) => [row.user_id, row.session_hash]));
+  res.json({ active: req.body.sessions.map((entry) => active.get(entry.user_id) === entry.session_hash) });
+}));
+
+gamesRouter.post('/internal/runtime/acquire', validate(Joi.object({ scope: scope.required() })), asyncHandler(async (req, res) => {
+  res.json(await acquireRuntime(req.body.scope));
+}));
+
+gamesRouter.put('/internal/runtime', validate(checkpoint), asyncHandler(async (req, res) => {
+  await saveRuntime(pool, req.body);
+  res.sendStatus(204);
+}));
+
+gamesRouter.post('/internal/lobbies', validate(Joi.object({ code: code.required(), lobby_key: uuid.required() })),
   asyncHandler(async (req, res) => {
-    const game = await createGame(req.body);
-    res.status(201).json({ game });
+    await reserveLobby(req.body);
+    res.sendStatus(204);
   })
 );
 
-gamesRouter.get(
-  '/games',
-  validate(listGamesQuerySchema, 'query'),
+gamesRouter.post('/internal/rounds/start', validate(roundStart), asyncHandler(async (req, res) => {
+  res.json(await startRound(req.body));
+}));
+
+const roundParams = Joi.object({ round_key: uuid.required() });
+gamesRouter.post('/internal/rounds/:round_key/end', validate(roundParams, 'params'), validate(roundEnd),
   asyncHandler(async (req, res) => {
-    const limit = Number(req.query.limit ?? 30);
-    const games = await fetchRecentGames(limit);
-    res.json({ games });
+    res.json(await completeRound(req.params.round_key, req.body));
   })
 );
 
-gamesRouter.get(
-  '/games/:gameCode',
-  validate(gameCodeParamsSchema, 'params'),
-  asyncHandler(async (req, res) => {
-    const details = await fetchGame(req.params.gameCode);
-    res.json(details);
-  })
-);
+gamesRouter.post('/internal/rounds/:round_key/events', validate(roundParams, 'params'), validate(Joi.object({
+  event_key: Joi.string().max(96).required(),
+  event_type: Joi.string().max(80).required(),
+  actor_user_id: userId.allow(null),
+  payload: Joi.object().unknown(true),
+})), asyncHandler(async (req, res) => {
+  const [[game]] = await pool.query('SELECT id FROM games WHERE round_key = ?', [req.params.round_key]);
+  if (!game) return res.sendStatus(404);
+  await appendGameEvent({
+    gameId: game.id, eventKey: req.body.event_key, eventType: req.body.event_type,
+    actorUserId: req.body.actor_user_id, payloadJson: req.body.payload,
+  });
+  return res.sendStatus(204);
+}));
 
-gamesRouter.post(
-  '/games/:gameCode/start',
-  validate(gameCodeParamsSchema, 'params'),
-  asyncHandler(async (req, res) => {
-    const game = await startGame(req.params.gameCode);
-    res.json({ game });
-  })
-);
+gamesRouter.get('/players/me/history', requireAuth, validate(Joi.object({
+  before: Joi.number().integer().positive(),
+  limit: Joi.number().integer().min(1).max(50).default(20),
+}), 'query'), asyncHandler(async (req, res) => {
+  const games = await getHistory(req.auth.userId, req.query.before, req.query.limit);
+  res.json({
+    stats: await getProgression(req.auth.userId),
+    games,
+    next_before: games.length === req.query.limit ? games.at(-1).id : null,
+  });
+}));
 
-gamesRouter.post(
-  '/games/:gameCode/end',
-  validate(gameCodeParamsSchema, 'params'),
-  validate(updateGameStatusSchema),
-  asyncHandler(async (req, res) => {
-    const game = await endGame(req.params.gameCode, req.body);
-    res.json({ game });
-  })
-);
+gamesRouter.get('/games', requireAdmin, validate(Joi.object({
+  limit: Joi.number().integer().min(1).max(100).default(30),
+}), 'query'), asyncHandler(async (req, res) => {
+  const [games] = await pool.query(
+    'SELECT g.id, g.round_key, g.round_number, l.code, g.status, g.winner_side, g.started_at, g.ended_at ' +
+    'FROM games g JOIN lobbies l ON l.id = g.lobby_id ORDER BY g.id DESC LIMIT ?',
+    [req.query.limit]
+  );
+  res.json({ games });
+}));
 
-gamesRouter.post(
-  '/games/:gameCode/players',
-  validate(gameCodeParamsSchema, 'params'),
-  validate(upsertPlayerSchema),
-  asyncHandler(async (req, res) => {
-    const player = await upsertGameParticipant(req.params.gameCode, req.body);
-    res.status(201).json({ player });
-  })
-);
+const gameCode = Joi.object({ code: code.required() });
+gamesRouter.get('/games/:code', requireAdmin, validate(gameCode, 'params'), asyncHandler(async (req, res) => {
+  res.json(await gameDetails(await gameByCode(req.params.code)));
+}));
 
-gamesRouter.post(
-  '/games/:gameCode/events',
-  validate(gameCodeParamsSchema, 'params'),
-  validate(appendEventsSchema),
-  asyncHandler(async (req, res) => {
-    const events = await appendEvents(req.params.gameCode, req.body.events);
-    res.status(201).json({ events });
-  })
-);
+gamesRouter.get('/games/:code/events', requireAdmin, validate(gameCode, 'params'), validate(Joi.object({
+  limit: Joi.number().integer().min(1).max(500).default(200),
+  offset: Joi.number().integer().min(0).default(0),
+}), 'query'), asyncHandler(async (req, res) => {
+  const game = await gameByCode(req.params.code);
+  res.json({ events: await getGameEvents(game.id, req.query.limit, req.query.offset) });
+}));
 
-gamesRouter.get(
-  '/games/:gameCode/events',
-  validate(gameCodeParamsSchema, 'params'),
-  validate(listEventsQuerySchema, 'query'),
-  asyncHandler(async (req, res) => {
-    const details = await fetchGame(req.params.gameCode);
-    const offset = Number(req.query.offset ?? 0);
-    const limit = Number(req.query.limit ?? 200);
-    res.json({
-      events: details.events.slice(offset, offset + limit),
-    });
-  })
-);
+gamesRouter.get('/games/:code/results', requireAdmin, validate(gameCode, 'params'), asyncHandler(async (req, res) => {
+  const { result, players } = await gameDetails(await gameByCode(req.params.code));
+  res.json({ result, player_results: players });
+}));
 
-gamesRouter.post(
-  '/games/:gameCode/results',
-  validate(gameCodeParamsSchema, 'params'),
-  validate(finalizeGameSchema),
-  asyncHandler(async (req, res) => {
-    const result = await finalizeGameWithResults(req.params.gameCode, req.body);
-    res.status(201).json(result);
-  })
-);
-
-gamesRouter.get(
-  '/games/:gameCode/results',
-  validate(gameCodeParamsSchema, 'params'),
-  asyncHandler(async (req, res) => {
-    const details = await fetchGame(req.params.gameCode);
-    res.json({
-      game: details.game,
-      result: details.result,
-      player_results: details.playerResults,
-    });
-  })
-);
-
-// Compatibility endpoints used by realtime signaling service.
-gamesRouter.post(
-  '/game-sessions',
-  asyncHandler(async (req, res) => {
-    const game = await createGame({
-      game_code: req.body.game_code,
-      config_json: req.body.config_json ?? null,
-      host_player_id: null,
-      host_user_id: null,
-    });
-
-    if (req.body.started_at != null) {
-      await startGame(req.body.game_code);
-    }
-    if (req.body.ended_at != null || req.body.winner_type != null) {
-      await endGame(req.body.game_code, {
-        winner_side: req.body.winner_type ?? null,
-        end_reason: 'legacy-session-end',
-      });
-    }
-    res.status(200).json({ success: true, game });
-  })
-);
-
-gamesRouter.post(
-  '/game-replay/snapshot',
-  asyncHandler(async (req, res) => {
-    await createGame({
-      game_code: req.body.game_code,
-      config_json: null,
-    });
-    const events = await appendEvents(req.body.game_code, [
-      {
-        event_type: 'game:snapshot',
-        payload_json: {
-          snapshot_timestamp: req.body.snapshot_timestamp ?? new Date().toISOString(),
-          remaining_time_seconds: req.body.remaining_time_seconds ?? null,
-          game_phase: req.body.game_phase ?? null,
-          players_json: req.body.players_json ?? [],
-          props_json: req.body.props_json ?? [],
-        },
-      },
-    ]);
-    res.status(201).json({ success: true, event_id: events[0].id });
-  })
-);
-
-gamesRouter.get(
-  '/game-replay/:gameCode',
-  validate(gameCodeParamsSchema, 'params'),
-  asyncHandler(async (req, res) => {
-    const details = await fetchGame(req.params.gameCode);
-    const snapshots = details.events
-      .filter((event) => event.event_type === 'game:snapshot')
-      .map((event) => ({
-        id: event.id,
-        ...event.payload_json,
-      }));
-    res.json({
-      session: details.game,
-      snapshots,
-    });
-  })
-);
+gamesRouter.get('/game-replay/:code', requireAdmin, validate(gameCode, 'params'), asyncHandler(async (req, res) => {
+  const game = await gameByCode(req.params.code);
+  res.json({ ...await gameDetails(game), events: await getGameEvents(game.id, 500) });
+}));

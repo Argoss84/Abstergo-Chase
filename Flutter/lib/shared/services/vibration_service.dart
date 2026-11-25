@@ -1,5 +1,8 @@
 import 'package:flutter/services.dart';
+import 'dart:async';
+
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:broken_veil_protocol/features/account/application/account_settings_sync.dart';
 
 enum VibrationEvent {
   rogueObjectiveInRange,
@@ -21,8 +24,7 @@ class VibrationService {
   };
 
   static const Map<VibrationEvent, String> _labels = <VibrationEvent, String>{
-    VibrationEvent.rogueObjectiveInRange:
-        'Rogue: objectif à portée de hacking',
+    VibrationEvent.rogueObjectiveInRange: 'Rogue: objectif à portée de hacking',
     VibrationEvent.selfEnteredStartZone:
         'Entrée personnelle dans zone de départ',
     VibrationEvent.hostSawPlayerEnterStartZone:
@@ -47,6 +49,9 @@ class VibrationService {
   Future<void> setEnabled(VibrationEvent event, bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyFor(event), enabled);
+    unawaited(
+      AccountSettingsSync.instance.record('vibrations', {event.name: enabled}),
+    );
   }
 
   Future<bool> isEnabled(VibrationEvent event) async {

@@ -1,79 +1,46 @@
 import { Router } from 'express';
-import { pool } from '../../db/pool.js';
+import Joi from 'joi';
+import { pool, transaction } from '../../db/pool.js';
 import { requireAuth } from '../../middleware/auth-cognito.js';
 import { validate } from '../../middleware/validate.js';
 import { asyncHandler } from '../../utils/async-handler.js';
 import { HttpError } from '../../utils/http-error.js';
-import { updateProgressionSchema } from './progression.schemas.js';
-
-async function getCurrentUserId(cognitoSub) {
-  const result = await pool.query('SELECT id FROM users WHERE cognito_sub = $1', [cognitoSub]);
-  return result.rows[0]?.id ?? null;
-}
+import { getProgression, unlockBonuses } from './progression.repository.js';
 
 export const progressionRouter = Router();
+progressionRouter.use('/progression', requireAuth);
 
-progressionRouter.get(
-  '/progression/me',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = await getCurrentUserId(req.auth.sub);
-    if (!userId) {
-      throw new HttpError(404, 'Utilisateur introuvable, appelez /api/auth/sync');
+progressionRouter.get('/progression/me', asyncHandler(async (req, res) => {
+  res.json({ stats: await getProgression(req.auth.userId) });
+}));
+
+progressionRouter.get('/progression/bonuses', asyncHandler(async (req, res) => {
+  const userId = req.auth.userId;
+  await unlockBonuses(pool, userId);
+  const [bonuses] = await pool.query(
+    'SELECT b.id, b.label, b.description, b.minimum_level, b.allowed_role, b.use_type, p.remaining_charges, ' +
+    'p.user_id IS NOT NULL AS unlocked, COALESCE(p.equipped, 0) AS equipped ' +
+    'FROM bonuses b LEFT JOIN player_bonus_unlocks p ON p.bonus_id = b.id AND p.user_id = ? ' +
+    'WHERE b.enabled = 1 ORDER BY b.minimum_level, b.id',
+    [userId]
+  );
+  res.json({ bonuses });
+}));
+
+progressionRouter.put('/progression/bonuses/:id', validate(Joi.object({
+  id: Joi.string().max(48).required(),
+}), 'params'), validate(Joi.object({ equipped: Joi.boolean().required() })), asyncHandler(async (req, res) => {
+  await transaction(async (db) => {
+    const [[bonus]] = await db.query(
+      'SELECT p.equipped, p.remaining_charges, b.enabled FROM player_bonus_unlocks p JOIN bonuses b ON b.id = p.bonus_id ' +
+      'WHERE p.user_id = ? AND p.bonus_id = ? FOR UPDATE',
+      [req.auth.userId, req.params.id]
+    );
+    if (!bonus || (req.body.equipped && (!bonus.enabled || bonus.remaining_charges === 0))) {
+      throw new HttpError(409, 'Ce bonus ne peut pas être équipé');
     }
-
-    const result = await pool.query(
-      `
-      INSERT INTO player_stats (user_id)
-      VALUES ($1)
-      ON CONFLICT (user_id) DO NOTHING
-      `,
-      [userId]
-    );
-    void result;
-
-    const stats = await pool.query(
-      'SELECT user_id, level, xp, rank_tier, wins, losses, updated_at FROM player_stats WHERE user_id = $1',
-      [userId]
-    );
-    res.json({ stats: stats.rows[0] });
-  })
-);
-
-progressionRouter.patch(
-  '/progression/me',
-  requireAuth,
-  validate(updateProgressionSchema),
-  asyncHandler(async (req, res) => {
-    const userId = await getCurrentUserId(req.auth.sub);
-    if (!userId) {
-      throw new HttpError(404, 'Utilisateur introuvable, appelez /api/auth/sync');
-    }
-
-    await pool.query(
-      `
-      INSERT INTO player_stats (user_id)
-      VALUES ($1)
-      ON CONFLICT (user_id) DO NOTHING
-      `,
-      [userId]
-    );
-
-    const updated = await pool.query(
-      `
-      UPDATE player_stats
-      SET
-        xp = GREATEST(0, xp + $2),
-        wins = GREATEST(0, wins + $3),
-        losses = GREATEST(0, losses + $4),
-        level = GREATEST(1, ((GREATEST(0, xp + $2) / 1000) + 1)),
-        updated_at = NOW()
-      WHERE user_id = $1
-      RETURNING user_id, level, xp, rank_tier, wins, losses, updated_at
-      `,
-      [userId, req.body.xp_delta ?? 0, req.body.wins_delta ?? 0, req.body.losses_delta ?? 0]
-    );
-
-    res.json({ stats: updated.rows[0] });
-  })
-);
+    await db.query('UPDATE player_bonus_unlocks SET equipped = ? WHERE user_id = ? AND bonus_id = ?',
+      [req.body.equipped, req.auth.userId, req.params.id]);
+  });
+  res.sendStatus(204);
+}));

@@ -1,103 +1,80 @@
-CREATE TYPE user_status AS ENUM ('active', 'suspended', 'deleted');
-CREATE TYPE friendship_status AS ENUM ('pending', 'accepted', 'declined', 'blocked');
+CREATE TABLE IF NOT EXISTS users (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  public_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
+  identity_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
+  cognito_issuer VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  cognito_sub VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  email VARCHAR(254) NULL,
+  username VARCHAR(32) NULL UNIQUE,
+  status ENUM('active', 'suspended', 'deleted') NOT NULL DEFAULT 'active',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY user_cognito_identity (cognito_issuer, cognito_sub)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE users (
-  id BIGSERIAL PRIMARY KEY,
-  cognito_sub TEXT NOT NULL UNIQUE,
-  email TEXT UNIQUE,
-  username TEXT UNIQUE,
-  status user_status NOT NULL DEFAULT 'active',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+CREATE TABLE IF NOT EXISTS player_profiles (
+  user_id BIGINT UNSIGNED PRIMARY KEY,
+  display_name VARCHAR(40) NULL,
+  avatar_url VARCHAR(1024) NULL,
+  bio VARCHAR(280) NULL,
+  region VARCHAR(40) NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE user_identities (
-  id BIGSERIAL PRIMARY KEY,
-  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  provider TEXT NOT NULL,
-  provider_subject TEXT NOT NULL,
-  metadata_json JSONB,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (provider, provider_subject)
-);
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id BIGINT UNSIGNED PRIMARY KEY,
+  revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  preferences_json JSON NOT NULL,
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE player_profiles (
-  user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  display_name TEXT,
-  avatar_url TEXT,
-  bio TEXT,
-  region TEXT,
-  preferences_json JSONB,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+CREATE TABLE IF NOT EXISTS lobby_presets (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT UNSIGNED NOT NULL,
+  name VARCHAR(60) NOT NULL,
+  config_json JSON NOT NULL,
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY user_preset_name (user_id, name),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE player_stats (
-  user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  level INTEGER NOT NULL DEFAULT 1,
-  xp INTEGER NOT NULL DEFAULT 0,
-  rank_tier TEXT NOT NULL DEFAULT 'unranked',
-  wins INTEGER NOT NULL DEFAULT 0,
-  losses INTEGER NOT NULL DEFAULT 0,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+CREATE TABLE IF NOT EXISTS friendships (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_low_id BIGINT UNSIGNED NOT NULL,
+  user_high_id BIGINT UNSIGNED NOT NULL,
+  requester_id BIGINT UNSIGNED NOT NULL,
+  addressee_id BIGINT UNSIGNED NOT NULL,
+  status ENUM('pending', 'accepted', 'declined') NOT NULL DEFAULT 'pending',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  accepted_at DATETIME(3) NULL,
+  UNIQUE KEY friendship_pair (user_low_id, user_high_id),
+  KEY friendship_recipient (addressee_id, status),
+  KEY friendship_requester (requester_id, status),
+  CHECK (user_low_id < user_high_id),
+  FOREIGN KEY (user_low_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_high_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE roles (
-  id BIGSERIAL PRIMARY KEY,
-  code TEXT NOT NULL UNIQUE,
-  label TEXT NOT NULL
-);
-
-CREATE TABLE user_roles (
-  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  role_id BIGINT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-  assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  PRIMARY KEY (user_id, role_id)
-);
-
-CREATE TABLE friendships (
-  id BIGSERIAL PRIMARY KEY,
-  requester_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  addressee_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  status friendship_status NOT NULL DEFAULT 'pending',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  accepted_at TIMESTAMPTZ,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CHECK (requester_id <> addressee_id),
-  UNIQUE (requester_id, addressee_id)
-);
-
-CREATE TABLE blocked_users (
-  blocker_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  blocked_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+CREATE TABLE IF NOT EXISTS blocked_users (
+  blocker_id BIGINT UNSIGNED NOT NULL,
+  blocked_id BIGINT UNSIGNED NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (blocker_id, blocked_id),
   CHECK (blocker_id <> blocked_id),
-  PRIMARY KEY (blocker_id, blocked_id)
-);
+  FOREIGN KEY (blocker_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (blocked_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE user_presence (
-  user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  status TEXT NOT NULL DEFAULT 'offline',
-  last_seen_at TIMESTAMPTZ
-);
-
-CREATE TABLE audit_logs (
-  id BIGSERIAL PRIMARY KEY,
-  actor_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-  target_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-  action TEXT NOT NULL,
-  payload_json JSONB,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX idx_users_username ON users (username);
-CREATE INDEX idx_users_email ON users (email);
-CREATE INDEX idx_friendships_addressee_status ON friendships (addressee_id, status);
-CREATE INDEX idx_presence_status ON user_presence (status);
-CREATE INDEX idx_audit_logs_actor_created_at ON audit_logs (actor_user_id, created_at DESC);
-
-INSERT INTO roles (code, label)
-VALUES
-  ('player', 'Player'),
-  ('moderator', 'Moderator'),
-  ('admin', 'Administrator')
-ON CONFLICT (code) DO NOTHING;
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  actor_user_id BIGINT UNSIGNED NULL,
+  target_user_id BIGINT UNSIGNED NULL,
+  action VARCHAR(80) NOT NULL,
+  payload_json JSON NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  KEY audit_actor_time (actor_user_id, created_at),
+  FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

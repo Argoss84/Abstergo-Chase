@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Administration · Broken Veil Protocol</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/admin/assets/style.css">
+  <script src="/admin/assets/app.js" defer></script>
+</head>
+<body>
+  <section id="login-screen" class="login-layout">
+    <div class="login-brand">
+      <span class="brand-mark" aria-hidden="true">BV</span>
+      <p class="eyebrow">ADMINISTRATION DU JEU</p>
+      <h1>Broken Veil<br>Protocol</h1>
+    </div>
+    <div class="login-panel">
+      <form id="login-form" class="login-form">
+        <span class="eyebrow">ACCÈS ADMINISTRATEUR</span>
+        <h2>Connexion</h2>
+        <p class="muted">Utilise le compte dédié à l’administration du jeu.</p>
+        <label for="username">Identifiant</label>
+        <input id="username" name="username" autocomplete="username" maxlength="80" required>
+        <label for="password">Mot de passe</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+        <p id="login-error" class="alert error" role="alert" hidden></p>
+        <button id="login-submit" class="button primary" type="submit">Se connecter <span aria-hidden="true">→</span></button>
+      </form>
+    </div>
+  </section>
+
+  <div id="console" class="console" hidden>
+    <aside class="sidebar">
+      <a href="#overview" class="brand"><span class="brand-mark" aria-hidden="true">BV</span><span>Broken Veil<br><strong>Administration</strong></span></a>
+      <nav aria-label="Navigation principale">
+        <a href="#overview" data-page="overview"><span aria-hidden="true">◈</span>Vue d’ensemble</a>
+        <a href="#live" data-page="live"><span aria-hidden="true">◉</span>En direct</a>
+        <a href="#players" data-page="players"><span aria-hidden="true">♙</span>Joueurs</a>
+        <a href="#games" data-page="games"><span aria-hidden="true">⚑</span>Manches</a>
+        <a href="#subscriptions" data-page="subscriptions"><span aria-hidden="true">◇</span>Abonnements</a>
+        <a href="#diagnostics" data-page="diagnostics"><span aria-hidden="true">⌁</span>Diagnostics</a>
+        <a href="#settings" data-page="settings"><span aria-hidden="true">⚙</span>Réglages du jeu</a>
+        <a href="#audit" data-page="audit"><span aria-hidden="true">≡</span>Journal des actions</a>
+      </nav>
+      <div class="sidebar-footer"><span class="status-dot"></span><span>Accès administrateur</span></div>
+    </aside>
+    <main>
+      <header class="topbar">
+        <div><span class="eyebrow">CONSOLE DE GESTION</span><h1 id="page-title">Vue d’ensemble</h1></div>
+        <div class="topbar-actions">
+          <button id="refresh" class="button secondary" type="button">↻ Actualiser</button>
+          <span id="admin-name" class="admin-name"></span>
+          <button id="logout" class="button ghost" type="button">Déconnexion</button>
+        </div>
+      </header>
+      <div id="notice" class="notice" role="status" hidden></div>
+      <section id="view" aria-live="polite" aria-label="Contenu de la console"></section>
+      <footer class="page-footer"><span>Broken Veil Protocol</span><span id="updated-at"></span></footer>
+    </main>
+  </div>
+
+  <dialog id="detail-dialog" class="detail-dialog">
+    <header class="dialog-header"><h2 id="detail-title"></h2><button id="close-detail" class="button secondary" type="button">Fermer</button></header>
+    <div id="detail-body" class="dialog-body"></div>
+  </dialog>
+  <dialog id="action-dialog">
+    <form id="action-form">
+      <header class="dialog-header"><h2 id="action-title"></h2></header>
+      <div id="action-fields" class="dialog-body"></div>
+      <p id="action-error" class="alert error" role="alert" hidden></p>
+      <footer class="dialog-actions"><button id="cancel-action" class="button secondary" type="button">Annuler</button><button id="confirm-action" class="button primary" type="submit">Confirmer</button></footer>
+    </form>
+  </dialog>
+</body>
+</html>

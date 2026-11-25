@@ -1,3 +1,4 @@
+import 'package:broken_veil_protocol/features/create_lobby/domain/create_lobby_form_data.dart';
 import 'dart:async';
 
 import 'package:broken_veil_protocol/app/providers.dart';
@@ -13,6 +14,7 @@ import 'package:broken_veil_protocol/features/lobby/domain/lobby_models.dart';
 import 'package:broken_veil_protocol/features/lobby/presentation/lobby_page.dart';
 import 'package:broken_veil_protocol/shared/services/socket_environment_service.dart';
 import 'package:flutter/material.dart';
+import 'package:broken_veil_protocol/features/create_lobby/presentation/widgets/lobby_presets_sheet.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -54,6 +56,16 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
     super.dispose();
   }
 
+  Future<void> _openPresets() async {
+    final selected = await showModalBottomSheet<CreateLobbyFormData>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => LobbyPresetsSheet(form: _controller.form),
+    );
+    if (mounted && selected != null) _controller.updateForm(selected);
+  }
+
   Future<void> _openDetailsSheet() async {
     final data = await showModalBottomSheet(
       context: context,
@@ -91,7 +103,6 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
       if (!mounted || token == null || token.isEmpty) {
         return;
       }
-      await _accountApiService.syncUser(token, username: auth.username);
       if (!mounted) return;
       final profile = await _accountApiService.getMyProfile(token);
       if (!mounted) return;
@@ -180,6 +191,13 @@ class _CreateLobbyPageState extends ConsumerState<CreateLobbyPage> {
           child: Scaffold(
             appBar: AppBar(
               title: const Text('Créer une partie'),
+              actions: [
+                IconButton(
+                  tooltip: 'Préréglages de salon',
+                  icon: const Icon(Icons.bookmark_outline),
+                  onPressed: _controller.isSubmitting ? null : _openPresets,
+                ),
+              ],
               leading: BackButton(
                 onPressed: _controller.isSubmitting
                     ? null

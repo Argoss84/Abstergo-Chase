@@ -1,12 +1,13 @@
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
-import { randomUUID, createHmac } from 'crypto';
+import { randomUUID, createHmac, createHash, timingSafeEqual } from 'crypto';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { inspect } from 'util';
+import { PlayerPlatform, PlatformError } from './platform.js';
 
 // Charger les variables d'environnement depuis le fichier .env
 dotenv.config();
@@ -81,39 +82,22 @@ const DISCONNECTED_GAME_PLAYER_TTL_MS = Math.max(
   Number.parseInt(process.env.DISCONNECTED_GAME_PLAYER_TTL_MS || '300000', 10) ||
     300_000
 );
-const bddDisabled =
-  process.env.DISABLE_BDD === '1' || /^true$/i.test(process.env.DISABLE_BDD || '');
-const BDD_URL = bddDisabled ? null : (process.env.BDD_URL || 'http://localhost:5175');
-
-// Helper : persister vers ServerBDD (replay)
-const persistToBdd = async (path, method, body) => {
-  if (MEMORY_ONLY_MODE) return;
-  if (!BDD_URL) return;
-  try {
-    const res = await fetch(`${BDD_URL}${path}`, {
-      method: method || 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined
-    });
-    if (!res.ok) {
-      log(`[BDD] ${method} ${path} erreur: ${res.status}`);
-    }
-  } catch (err) {
-    log(`[BDD] Erreur ${path}:`, err.message);
-  }
-};
-
-const persistGamePlayerToBdd = (gameCode, player) => {
-  persistToBdd(`/api/games/${gameCode}/players`, 'POST', {
-    player_external_id: player.id,
-    display_name_snapshot: player.name || 'Joueur',
-    role: player.role ?? null,
-    team: null,
-    is_host: !!player.isHost,
-    status: player.status || 'active'
-  });
-};
-
+const bddDisabled = process.env.DISABLE_BDD === '1' || /^true$/i.test(process.env.DISABLE_BDD || '');
+const playerPlatform = new PlayerPlatform({
+  url: bddDisabled ? null : process.env.BDD_URL,
+  token: bddDisabled ? null : process.env.SIGNALING_INTERNAL_TOKEN,
+  scope: process.env.SIGNALING_PERSISTENCE_SCOPE,
+  diagnosticsUrl: process.env.DIAGNOSTICS_SERVER_URL,
+  diagnosticsToken: process.env.DIAGNOSTICS_SERVER_TOKEN,
+  report: (...args) => logWarn(...args)
+});
+if (process.env.REQUIRE_PLAYER_PLATFORM === 'true' &&
+    (!playerPlatform.enabled || !playerPlatform.url.startsWith('https://'))) {
+  throw new Error('BDD_URL (HTTPS) and SIGNALING_INTERNAL_TOKEN are required');
+}
+const pendingRoundResults = new Map();
+const startingLobbies = new Set();
+const monitorToken = process.env.SIGNALING_ADMIN_TOKEN ?? '';
 const formatRemainingTime = (seconds) => {
   if (seconds === null || seconds === undefined || Number.isNaN(seconds)) {
     return 'n/a';
@@ -209,12 +193,16 @@ const buildCostMetricsSample = () => {
 };
 
 // Fonction pour obtenir les statistiques du serveur
+const playerClientEntries = () => Array.from(clients.entries())
+  .filter(([socketId]) => !io.sockets.sockets.get(socketId)?.data.isMonitor);
+
 const getServerStats = () => ({
-  connectedClients: clients.size,
+  connectedClients: playerClientEntries().length,
+  monitorConnections: clients.size - playerClientEntries().length,
   activeLobbies: lobbies.size,
   activeGames: games.size,
   totalSocketMessages,
-  clients: Array.from(clients.entries()).map(([socketId, info]) => {
+  clients: playerClientEntries().map(([socketId, info]) => {
     const socket = io.sockets.sockets.get(socketId);
     return {
       clientId: info.clientId,
@@ -236,7 +224,7 @@ const getServerStats = () => ({
       players: Array.from(lobby.players.values()).map(player => {
         const socket = socketsById.get(player.id);
         return {
-          ...player,
+          id: player.id, name: player.name, role: player.role, isHost: player.isHost,
           socketConnected: Boolean(socket?.connected),
           status: player.status || 'active' // Inclure le statut du joueur
         };
@@ -256,7 +244,7 @@ const getServerStats = () => ({
     players: Array.from(game.players.values()).map(player => {
       const socket = socketsById.get(player.id);
       return {
-        ...player,
+        id: player.id, name: player.name, role: player.role, isHost: player.isHost,
         socketConnected: Boolean(socket?.connected),
         status: player.status || 'active'
       };
@@ -416,7 +404,8 @@ const rebindLobbySocket = (
       sourceId = bySubCandidate.id;
     }
   }
-  if (!sourceId && oldPlayerId && lobby.players.has(oldPlayerId)) {
+  if (!sourceId && oldPlayerId && lobby.players.has(oldPlayerId) &&
+      (!playerPlatform.enabled || lobby.players.get(oldPlayerId)?.cognitoSub === cognitoSub)) {
     sourceId = oldPlayerId;
   }
   if (!sourceId && lobby.players.has(clientId)) {
@@ -436,7 +425,8 @@ const rebindLobbySocket = (
       role: existingPlayer?.role ?? null,
       status: 'active',
       disconnectedAt: null,
-      cognitoSub: existingPlayer?.cognitoSub || cognitoSub || null
+      cognitoSub: existingPlayer?.cognitoSub || cognitoSub || null,
+      userId: existingPlayer?.userId ?? socket.data.playerIdentity?.user_id ?? null
     });
     if (lobby.hostId === sourceId) {
       lobby.hostId = clientId;
@@ -562,35 +552,36 @@ const closeLobby = (code, reason = 'Lobby expiré', notify = true) => {
 };
 
 const persistGameResults = (game, reason = 'Partie terminée') => {
-  if (!game || game.resultsPersisted) return;
-  game.resultsPersisted = true;
-  const winnerType = game?.lastHostState?.gameDetails?.winner_type || null;
-  const playerResults = Array.from(game.players.values()).map((player) => ({
-    player_external_id: player.id,
-    display_name_snapshot: player.name || 'Joueur',
-    role: player.role ?? null,
-    team: null,
-    score: 0,
-    kills: 0,
-    deaths: 0,
-    objectives_completed: 0,
-    reward_xp: winnerType && String(player.role || '').toUpperCase() === String(winnerType).toUpperCase()
-      ? 150
-      : 50,
-    is_winner: winnerType
-      ? String(player.role || '').toUpperCase() === String(winnerType).toUpperCase()
-      : false
-  }));
+  if (!playerPlatform.enabled || !game?.roundKey || game.resultsPersisted || pendingRoundResults.has(game.roundKey)) return;
+  const details = game.lastHostState?.gameDetails;
+  const winner = String(details?.winner_type || '').toUpperCase();
+  const objectives = Array.isArray(game.lastHostState?.objectives) ? game.lastHostState.objectives : [];
+  pendingRoundResults.set(game.roundKey, {
+    winner_side: winner === 'AGENT' || winner === 'ROGUE' ? winner : null,
+    end_reason: String(details?.winner_reason || reason).slice(0, 255),
+    duration_seconds: Math.min(86_400, Math.max(0, Math.floor(((game.finishedAt ?? Date.now()) - game.createdAt) / 1000))),
+    summary: { objectives: objectives.length },
+    players: Array.from(game.players.values()).filter((player) => player.userId).map((player) => ({
+      user_id: player.userId,
+      status: player.abandoned ? 'left' : player.status === 'disconnected' ? 'disconnected' : 'active'
+    }))
+  });
+  schedulePersist('game:finalize');
+};
 
-  persistToBdd(`/api/games/${game.code}/end`, 'POST', {
-    winner_side: winnerType,
-    end_reason: reason
-  });
-  persistToBdd(`/api/games/${game.code}/results`, 'POST', {
-    winning_side: winnerType,
-    end_reason: reason,
-    player_results: playerResults
-  });
+const flushRoundResults = async (onlyRound = null) => {
+  const keys = onlyRound ? [onlyRound] : [...pendingRoundResults.keys()];
+  for (const key of keys) {
+    const outcome = pendingRoundResults.get(key);
+    if (!outcome) continue;
+    await playerPlatform.request('/rounds/' + key + '/end', 'POST', {
+      ...outcome, runtime_scope: playerPlatform.scope, runtime_owner: playerPlatform.owner
+    });
+    pendingRoundResults.delete(key);
+    for (const game of games.values()) {
+      if (game.roundKey === key) game.resultsPersisted = true;
+    }
+  }
 };
 
 const closeGame = (code, reason = 'Partie expirée', notify = true) => {
@@ -926,23 +917,32 @@ const calculateRallyPoint = (_players, config) => {
 
 const serializeLobby = (lobby) => ({
   code: lobby.code,
+  lobbyKey: lobby.lobbyKey,
+  previousRoles: lobby.previousRoles,
   hostId: lobby.hostId,
   stateVersion: lobby.stateVersion || 1,
   createdAt: lobby.createdAt || Date.now(),
   expiresAt: lobby.expiresAt || Date.now() + LOBBY_TTL_MS,
   config: lobby.config || null,
-  chatMessages: normalizeLobbyChatMessages(lobby.chatMessages),
+  chatMessages: playerPlatform.enabled ? [] : normalizeLobbyChatMessages(lobby.chatMessages),
   players: Array.from(lobby.players.values()).map((p) => ({
     id: p.id,
     name: p.name,
     isHost: !!p.isHost,
     role: p.role ?? null,
-    status: p.status ?? 'active'
+    status: p.status ?? 'active',
+    cognitoSub: p.cognitoSub ?? null,
+    userId: p.userId ?? null,
+    abandoned: Boolean(p.abandoned),
+    bonuses: p.bonuses ?? []
   }))
 });
 
 const serializeGame = (game) => ({
   code: game.code,
+  lobbyKey: game.lobbyKey,
+  roundKey: game.roundKey,
+  roundNumber: game.roundNumber,
   hostId: game.hostId,
   stateVersion: game.stateVersion || 1,
   createdAt: game.createdAt || Date.now(),
@@ -953,7 +953,11 @@ const serializeGame = (game) => ({
     name: p.name,
     isHost: !!p.isHost,
     role: p.role ?? null,
-    status: p.status ?? 'active'
+    status: p.status ?? 'active',
+    cognitoSub: p.cognitoSub ?? null,
+    userId: p.userId ?? null,
+    abandoned: Boolean(p.abandoned),
+    bonuses: p.bonuses ?? []
   })),
   remainingTimeSeconds:
     typeof game.remainingTimeSeconds === 'number' ? game.remainingTimeSeconds : null,
@@ -968,54 +972,61 @@ const serializeGame = (game) => ({
   rallyPoint: game.rallyPoint || null,
   resultsPersisted: !!game.resultsPersisted,
   reconnectedPlayerIds: game.reconnectedPlayerIds || {},
-  agentChatMessages: normalizeGameChatMessages(game.agentChatMessages),
-  rogueChatMessages: normalizeGameChatMessages(game.rogueChatMessages),
-  globalChatMessages: normalizeGameChatMessages(game.globalChatMessages)
+  agentChatMessages: playerPlatform.enabled ? [] : normalizeGameChatMessages(game.agentChatMessages),
+  rogueChatMessages: playerPlatform.enabled ? [] : normalizeGameChatMessages(game.rogueChatMessages),
+  globalChatMessages: playerPlatform.enabled ? [] : normalizeGameChatMessages(game.globalChatMessages)
+});
+
+const runtimeSnapshot = (reason, nextGame = null) => ({
+  version: 2,
+  signalingVersion: SIGNALING_VERSION,
+  savedAt: new Date().toISOString(),
+  reason,
+  lobbies: [...lobbies.values()].filter((lobby) => lobby.code !== nextGame?.code).map(serializeLobby),
+  games: [...games.values()].filter((game) => game.code !== nextGame?.code).concat(nextGame ? [nextGame] : []).map(serializeGame),
+  pendingRoundResults: [...pendingRoundResults],
+  counters: { totalSocketMessages }
 });
 
 const persistRuntimeStateNow = async (reason = 'unspecified') => {
-  if (MEMORY_ONLY_MODE) return;
+  if (MEMORY_ONLY_MODE && !playerPlatform.enabled) return;
   if (persistInFlight) {
     persistQueued = true;
     return;
   }
   persistInFlight = true;
   try {
-    await fs.mkdir(RUNTIME_DATA_DIR, { recursive: true });
-    const snapshot = {
-      version: 1,
-      signalingVersion: SIGNALING_VERSION,
-      savedAt: new Date().toISOString(),
-      reason,
-      lobbies: Array.from(lobbies.values()).map(serializeLobby),
-      games: Array.from(games.values()).map(serializeGame),
-      counters: {
-        totalSocketMessages
-      }
-    };
-    const tempPath = `${SNAPSHOT_FILE}.tmp`;
-    await fs.writeFile(tempPath, JSON.stringify(snapshot), 'utf8');
-    await fs.rename(tempPath, SNAPSHOT_FILE);
+    if (playerPlatform.enabled) {
+      await playerPlatform.ordered(async () => {
+        // Persist pending outcomes before sending them so a restart can retry the same round IDs.
+        await playerPlatform.request('/runtime', 'PUT', playerPlatform.checkpoint(runtimeSnapshot(reason)));
+        await flushRoundResults();
+      });
+    } else {
+      await fs.mkdir(RUNTIME_DATA_DIR, { recursive: true });
+      const tempPath = SNAPSHOT_FILE + '.tmp';
+      await fs.writeFile(tempPath, JSON.stringify(runtimeSnapshot(reason)), 'utf8');
+      await fs.rename(tempPath, SNAPSHOT_FILE);
+    }
   } catch (error) {
     logError('[PERSIST] Erreur snapshot runtime:', error?.message || error);
+    playerPlatform.diagnostic('runtime_persist_failed', { severity: 'error' });
   } finally {
     persistInFlight = false;
     if (persistQueued) {
       persistQueued = false;
-      void persistRuntimeStateNow('queued-followup');
+      schedulePersist('queued-followup');
     }
   }
 };
 
 const schedulePersist = (reason = 'state-change') => {
-  if (MEMORY_ONLY_MODE) return;
-  if (persistTimer) {
-    clearTimeout(persistTimer);
-  }
+  if ((MEMORY_ONLY_MODE && !playerPlatform.enabled) || persistTimer) return;
   persistTimer = setTimeout(() => {
     persistTimer = null;
     void persistRuntimeStateNow(reason);
-  }, 500);
+  }, playerPlatform.enabled ? 2500 : 500);
+  persistTimer.unref();
 };
 
 const flushRuntimeEvents = async () => {
@@ -1043,7 +1054,7 @@ const flushRuntimeEvents = async () => {
 };
 
 const appendRuntimeEvent = (type, payload = {}) => {
-  if (MEMORY_ONLY_MODE) return;
+  if (MEMORY_ONLY_MODE || playerPlatform.enabled) return;
   pendingEventLogLines.push(
     JSON.stringify({
       ts: Date.now(),
@@ -1062,14 +1073,27 @@ const appendRuntimeEvent = (type, payload = {}) => {
 const markStateChanged = (type, payload = {}) => {
   appendRuntimeEvent(type, payload);
   schedulePersist(type);
+  const game = games.get(payload.code);
+  const milestones = ['game:host-transfer', 'game:leave', 'game:finished', 'game:expired-empty'];
+  if (playerPlatform.enabled && game?.roundKey && milestones.includes(type)) {
+    const roundKey = game.roundKey;
+    const eventKey = randomUUID();
+    void playerPlatform.request('/rounds/' + roundKey + '/events', 'POST', {
+      event_key: eventKey, event_type: type, payload: { stateVersion: game.stateVersion }
+    }).catch(() => playerPlatform.diagnostic('round_event_write_failed', { roundKey, traceId: eventKey }));
+  }
 };
 
 const hydrateRuntimeState = async () => {
-  if (MEMORY_ONLY_MODE) return;
+  if (MEMORY_ONLY_MODE && !playerPlatform.enabled) return;
   try {
-    await fs.mkdir(RUNTIME_DATA_DIR, { recursive: true });
-    const raw = await fs.readFile(SNAPSHOT_FILE, 'utf8');
-    const snapshot = JSON.parse(raw);
+    let snapshot;
+    if (playerPlatform.enabled) {
+      snapshot = await playerPlatform.restore();
+    } else {
+      await fs.mkdir(RUNTIME_DATA_DIR, { recursive: true });
+      snapshot = JSON.parse(await fs.readFile(SNAPSHOT_FILE, 'utf8'));
+    }
     if (!snapshot || typeof snapshot !== 'object') {
       return;
     }
@@ -1088,11 +1112,17 @@ const hydrateRuntimeState = async () => {
           name: p.name || 'Joueur',
           isHost: !!p.isHost,
           role: p.role ?? null,
-          status: p.status || 'active'
+          status: p.status || 'active',
+          userId: p.userId ?? null,
+          cognitoSub: p.cognitoSub ?? null,
+          abandoned: Boolean(p.abandoned),
+          bonuses: p.bonuses ?? []
         });
       }
       lobbies.set(lobby.code, {
         code: lobby.code,
+        lobbyKey: lobby.lobbyKey,
+        previousRoles: lobby.previousRoles,
         hostId: lobby.hostId,
         stateVersion:
           typeof lobby.stateVersion === 'number' && lobby.stateVersion > 0
@@ -1121,11 +1151,18 @@ const hydrateRuntimeState = async () => {
           name: p.name || 'Joueur',
           isHost: !!p.isHost,
           role: p.role ?? null,
-          status: p.status || 'active'
+          status: p.status || 'active',
+          userId: p.userId ?? null,
+          cognitoSub: p.cognitoSub ?? null,
+          abandoned: Boolean(p.abandoned),
+          bonuses: p.bonuses ?? []
         });
       }
       games.set(game.code, {
         code: game.code,
+        lobbyKey: game.lobbyKey,
+        roundKey: game.roundKey,
+        roundNumber: game.roundNumber,
         hostId: game.hostId,
         stateVersion:
           typeof game.stateVersion === 'number' && game.stateVersion > 0
@@ -1159,6 +1196,12 @@ const hydrateRuntimeState = async () => {
       });
       gameSocketMessageCounts.set(game.code, 0);
     }
+    for (const [roundKey, outcome] of snapshot.pendingRoundResults ?? []) {
+      pendingRoundResults.set(roundKey, outcome);
+    }
+    for (const game of games.values()) {
+      if (game.finishedAt && !game.resultsPersisted) persistGameResults(game);
+    }
     if (snapshot.counters && typeof snapshot.counters.totalSocketMessages === 'number') {
       totalSocketMessages = snapshot.counters.totalSocketMessages;
     }
@@ -1166,6 +1209,7 @@ const hydrateRuntimeState = async () => {
       `[PERSIST] Etat runtime restaure: ${lobbies.size} lobby(s), ${games.size} game(s)`
     );
   } catch (error) {
+    if (playerPlatform.enabled) throw error;
     if (error?.code !== 'ENOENT') {
       log('[PERSIST] Erreur restauration runtime:', error?.message || error);
     }
@@ -1366,23 +1410,6 @@ const applyLobbyRoleUpdate = ({
   }
   player.role = role;
   lobby.stateVersion = (lobby.stateVersion || 1) + 1;
-  persistToBdd(`/api/games/${lobby.code}/players`, 'POST', {
-    player_external_id: player.id,
-    display_name_snapshot: player.name || 'Joueur',
-    role: role ?? null,
-    team: null,
-    is_host: !!player.isHost,
-    status: player.status || 'active'
-  });
-  persistToBdd(`/api/games/${lobby.code}/events`, 'POST', {
-    events: [
-      {
-        event_type: 'lobby:role-updated',
-        actor_external_id: targetId,
-        payload_json: { role: role ?? null }
-      }
-    ]
-  });
   forEachConnectedLobbyRecipient(lobby, (s) => {
     send(s, {
       type: 'lobby:role-updated',
@@ -1537,7 +1564,7 @@ const applyGameStateSync = ({
   return stateVersion;
 };
 
-const tryStartGameFromLobby = ({
+const tryStartGameFromLobby = async ({
   socket,
   clientId,
   code,
@@ -1597,7 +1624,7 @@ const tryStartGameFromLobby = ({
     }
   }
 
-  if (games.has(code)) {
+  if (games.has(code) && !games.get(code).finishedAt) {
     send(socket, {
       type: 'game:created',
       payload: {
@@ -1610,8 +1637,11 @@ const tryStartGameFromLobby = ({
     return true;
   }
 
+  if (startingLobbies.has(code)) return true;
   const game = {
     code,
+    lobbyKey: lobby.lobbyKey,
+    roundKey: (lobby.pendingRoundKey ??= randomUUID()),
     hostId: lobby.hostId,
     config: lobby.config || null,
     players: new Map(),
@@ -1628,28 +1658,46 @@ const tryStartGameFromLobby = ({
     game.players.set(player.id, { ...player });
   });
 
-  games.set(code, game);
+  if (playerPlatform.enabled) {
+    startingLobbies.add(code);
+    try {
+      await playerPlatform.ordered(async () => {
+        const previous = games.get(code);
+        if (previous?.finishedAt) await flushRoundResults(previous.roundKey);
+        const result = await playerPlatform.request('/rounds/start', 'POST', {
+          round_key: game.roundKey, lobby_key: game.lobbyKey, code,
+          host_user_id: socket.data.playerIdentity.user_id, host_player_id: clientId,
+          config: game.config ?? {},
+          players: [...game.players.values()].map((player) => ({
+            user_id: player.userId, player_external_id: player.id, display_name: player.name || 'Joueur',
+            role: player.role, is_host: Boolean(player.isHost), status: 'active'
+          })),
+          checkpoint: playerPlatform.checkpoint(runtimeSnapshot('round:start', game))
+        });
+        game.roundNumber = result.round_number;
+        for (const player of game.players.values()) player.bonuses = result.bonuses_by_player[player.id] ?? [];
+        games.set(code, game);
+      });
+    } catch (error) {
+      if (error instanceof PlatformError && error.status < 500) lobby.pendingRoundKey = null;
+      playerPlatform.diagnostic('round_start_failed', { roundKey: game.roundKey });
+      send(socket, {
+        type: requestId ? 'lobby:action-rejected' : 'game:error',
+        payload: {
+          action: 'start-game', requestId,
+          reason: error instanceof PlatformError ? error.message : 'Impossible d’enregistrer le démarrage',
+          message: 'Impossible de démarrer la manche'
+        }
+      });
+      return true;
+    } finally {
+      startingLobbies.delete(code);
+    }
+  } else {
+    games.set(code, game);
+  }
   gameSocketMessageCounts.set(code, gameSocketMessageCounts.get(code) || 0);
   markStateChanged('game:create', { code, hostId: clientId });
-  persistToBdd('/api/games', 'POST', {
-    game_code: code,
-    host_player_id: clientId,
-    config_json: lobby.config || null
-  });
-  persistToBdd(`/api/games/${code}/start`, 'POST', {});
-  game.players.forEach((player) => {
-    persistGamePlayerToBdd(code, player);
-  });
-  persistToBdd(`/api/games/${code}/events`, 'POST', {
-    events: [
-      {
-        event_type: 'game:created-from-lobby',
-        actor_external_id: clientId,
-        payload_json: { lobby_code: code }
-      }
-    ]
-  });
-  persistToBdd('/api/game-sessions', 'POST', { game_code: code });
 
   lobby.players.forEach((player) => {
     const playerSocket = socketsById.get(player.id);
@@ -1673,8 +1721,11 @@ const tryStartGameFromLobby = ({
     }
   });
 
-  clients.get(socket.id).gameCode = code;
-  clients.get(socket.id).lobbyCode = null;
+  const hostConnection = clients.get(socket.id);
+  if (hostConnection) {
+    hostConnection.gameCode = code;
+    hostConnection.lobbyCode = null;
+  }
 
   if (requestId) {
     send(socket, {
@@ -1693,6 +1744,59 @@ const tryStartGameFromLobby = ({
   });
   return true;
 };
+
+if (playerPlatform.enabled) {
+  io.use(async (socket, next) => {
+    try {
+      const monitorKey = socket.handshake.auth?.adminToken;
+      if (monitorToken && typeof monitorKey === 'string') {
+        const digest = (value) => createHash('sha256').update(value).digest();
+        if (timingSafeEqual(digest(monitorKey), digest(monitorToken))) {
+          socket.data.isMonitor = true;
+          return next();
+        }
+      }
+      const ticket = socket.handshake.auth?.ticket;
+      if (typeof ticket !== 'string' || !/^[0-9a-f]{64}$/.test(ticket)) {
+        return next(new Error('Connexion Cognito requise'));
+      }
+      const identity = await playerPlatform.request('/ticket', 'POST', { ticket });
+      socket.data.playerIdentity = identity;
+      for (const existing of io.sockets.sockets.values()) {
+        const previous = existing.data.playerIdentity;
+        if (previous?.user_id === identity.user_id && previous.session_hash !== identity.session_hash) {
+          existing.disconnect(true);
+        }
+      }
+      return next();
+    } catch {
+      playerPlatform.diagnostic('signaling_ticket_rejected');
+      return next(new Error('Session de jeu expirée ou indisponible'));
+    }
+  });
+  let validatingSessions = false;
+  setInterval(async () => {
+    if (validatingSessions) return;
+    validatingSessions = true;
+    try {
+      const sockets = [...io.sockets.sockets.values()].filter((entry) => entry.data.playerIdentity);
+      for (let index = 0; index < sockets.length; index += 200) {
+        const batch = sockets.slice(index, index + 200);
+        const sessions = batch.map((entry) => {
+          const { user_id, session_hash } = entry.data.playerIdentity;
+          return { user_id, session_hash };
+        });
+        const { active } = await playerPlatform.request('/sessions', 'POST', { sessions });
+        for (const [i, entry] of batch.entries()) if (!active[i]) entry.disconnect(true);
+      }
+    } catch {
+      playerPlatform.diagnostic('session_check_failed');
+    } finally {
+      validatingSessions = false;
+    }
+  }, 10_000).unref();
+}
+setInterval(() => { void playerPlatform.flushDiagnostics(); }, 15_000).unref();
 
 io.on('connection', (socket) => {
   const clientId = randomUUID();
@@ -1713,12 +1817,19 @@ io.on('connection', (socket) => {
     }
   });
 
+  const monitorAllowed = (ack) => {
+    if (typeof ack !== 'function') return false;
+    if (!playerPlatform.enabled || socket.data.isMonitor) return true;
+    ack({ ok: false, error: 'Accès administrateur requis' });
+    return false;
+  };
+
   socket.on('admin:getStats', (ack) => {
-    if (typeof ack === 'function') ack(getServerStats());
+    if (monitorAllowed(ack)) ack(getServerStats());
   });
 
   socket.on('admin:getGame', (payload, ack) => {
-    if (typeof ack !== 'function') return;
+    if (!monitorAllowed(ack)) return;
     const code = String(payload?.code ?? '').toUpperCase();
     if (!code) {
       ack({ ok: false, error: 'code requis' });
@@ -1755,7 +1866,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('admin:notifyPlayer', (payload, ack) => {
-    if (typeof ack !== 'function') return;
+    if (!monitorAllowed(ack)) return;
     try {
       const targetId = payload?.clientId;
       const message = payload?.message != null ? String(payload.message) : '';
@@ -1778,7 +1889,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('admin:notifyGame', (payload, ack) => {
-    if (typeof ack !== 'function') return;
+    if (!monitorAllowed(ack)) return;
     try {
       const gameCode = payload?.gameCode != null ? String(payload.gameCode).toUpperCase() : '';
       const message = payload?.message != null ? String(payload.message) : '';
@@ -1807,9 +1918,10 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('message', (raw) => {
+  socket.on('message', async (raw) => {
+    if (playerPlatform.enabled && !socket.data.playerIdentity) return;
     incrementTotalSocketMessages();
-    if (Math.random() < MESSAGE_DEBUG_SAMPLE_RATE) {
+    if (!playerPlatform.enabled && Math.random() < MESSAGE_DEBUG_SAMPLE_RATE) {
       const rawPreview = getRawMessagePreview(raw);
       logDebug(
         `[MESSAGE BRUT RECU] client=${clientId} size=${rawPreview.length} preview=${rawPreview}`
@@ -1827,7 +1939,20 @@ io.on('connection', (socket) => {
       }
     }
 
-    const { type, payload } = message || {};
+    const { type } = message || {};
+    let { payload } = message || {};
+    const identity = socket.data.playerIdentity;
+    if (identity && payload && typeof payload === 'object') {
+      payload = { ...payload, cognitoSub: identity.cognito_sub };
+      if (['game:join', 'game:rejoin-host', 'lobby:join', 'lobby:rejoin-host', 'lobby:request-resync'].includes(type)) {
+        const code = String(payload.code ?? payload.gameCode ?? payload.lobbyCode ?? '').toUpperCase();
+        const room = type.startsWith('game:') ? games.get(code) : lobbies.get(code);
+        const ownSlot = [...(room?.players.values() ?? [])].find((player) => player.userId === identity.user_id);
+        payload.oldPlayerId = ownSlot?.id;
+        payload.playerId = ownSlot?.id;
+      }
+      if (type === 'game:leave') payload.playerId = clientId;
+    }
     const clientVersion =
       (message?.meta && typeof message.meta.clientVersion === 'string'
         ? message.meta.clientVersion
@@ -1850,10 +1975,10 @@ io.on('connection', (socket) => {
       const validCode = /^[A-Z0-9]{6}$/.test(code);
       const destination = !validCode
         ? 'notFound'
-        : games.has(code)
-          ? 'game'
-          : lobbies.has(code)
-            ? 'lobby'
+        : lobbies.has(code) && (!games.has(code) || games.get(code).finishedAt)
+          ? 'lobby'
+          : games.has(code)
+            ? 'game'
             : 'notFound';
       send(socket, {
         type: 'session:resolved',
@@ -1885,13 +2010,33 @@ io.on('connection', (socket) => {
     incrementGameSocketMessages(gameCodeForMessage);
 
     if (type === 'lobby:create') {
-      let code = generateCode();
-      while (lobbies.has(code)) {
-        code = generateCode();
+      const lobbyKey = randomUUID();
+      let code;
+      try {
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const candidate = generateCode();
+          if (lobbies.has(candidate) || games.has(candidate)) continue;
+          if (playerPlatform.enabled) {
+            try {
+              await playerPlatform.request('/lobbies', 'POST', { code: candidate, lobby_key: lobbyKey });
+            } catch (error) {
+              if (error.status === 409) continue;
+              throw error;
+            }
+          }
+          code = candidate;
+          break;
+        }
+        if (!code) throw new Error('No room code available');
+      } catch {
+        playerPlatform.diagnostic('lobby_create_failed', { severity: 'error' });
+        send(socket, { type: 'lobby:error', payload: { message: 'Création du salon indisponible' } });
+        return;
       }
-
+      if (!socket.connected) return;
       const lobby = {
         code,
+        lobbyKey,
         hostId: clientId,
         players: new Map(),
         config: payload?.gameConfig || null,
@@ -1906,6 +2051,7 @@ io.on('connection', (socket) => {
       const hostPlayer = lobby.players.get(clientId);
       if (hostPlayer) {
         hostPlayer.cognitoSub = payload?.cognitoSub || null;
+        hostPlayer.userId = identity?.user_id ?? null;
         lobby.players.set(clientId, hostPlayer);
       }
       lobbies.set(code, lobby);
@@ -1915,28 +2061,6 @@ io.on('connection', (socket) => {
       log(`[LOBBY CRÉÉ] Code: ${code}, Host: ${clientId}, Nom: ${payload?.playerName || 'Host'}`);
       incrementLobbySocketMessages(code);
       markStateChanged('lobby:create', { code, hostId: clientId });
-      persistToBdd('/api/games', 'POST', {
-        game_code: code,
-        host_player_id: clientId,
-        config_json: payload?.gameConfig || null
-      });
-      persistToBdd(`/api/games/${code}/players`, 'POST', {
-        player_external_id: clientId,
-        display_name_snapshot: payload?.playerName || 'Host',
-        role: null,
-        team: null,
-        is_host: true,
-        status: 'active'
-      });
-      persistToBdd(`/api/games/${code}/events`, 'POST', {
-        events: [
-          {
-            event_type: 'lobby:created',
-            actor_external_id: clientId,
-            payload_json: { code }
-          }
-        ]
-      });
 
       send(socket, {
         type: 'lobby:created',
@@ -2051,29 +2175,14 @@ io.on('connection', (socket) => {
       const joinedLobbyPlayer = lobby.players.get(clientId);
       if (joinedLobbyPlayer) {
         joinedLobbyPlayer.cognitoSub = payload?.cognitoSub || null;
+        joinedLobbyPlayer.userId = identity?.user_id ?? null;
+        joinedLobbyPlayer.role = lobby.previousRoles?.[identity?.user_id] ?? null;
         lobby.players.set(clientId, joinedLobbyPlayer);
       }
       bindSocketToLobbyPlayer(socket, lobby, clientId);
 
       log(`[LOBBY REJOINT] Code: ${code}, Joueur: ${clientId}, Nom: ${payload?.playerName || 'Joueur'}`);
       markStateChanged('lobby:join', { code, playerId: clientId });
-      persistToBdd(`/api/games/${code}/players`, 'POST', {
-        player_external_id: clientId,
-        display_name_snapshot: payload?.playerName || 'Joueur',
-        role: null,
-        team: null,
-        is_host: false,
-        status: 'active'
-      });
-      persistToBdd(`/api/games/${code}/events`, 'POST', {
-        events: [
-          {
-            event_type: 'lobby:joined',
-            actor_external_id: clientId,
-            payload_json: { code }
-          }
-        ]
-      });
 
       send(socket, {
         type: 'lobby:joined',
@@ -2133,7 +2242,8 @@ io.on('connection', (socket) => {
             isHost: true,
             role: oldPlayer.role ?? null,
             status: oldPlayer.status || 'active',
-            cognitoSub: oldPlayer.cognitoSub || payload?.cognitoSub || null
+            cognitoSub: oldPlayer.cognitoSub || payload?.cognitoSub || null,
+            userId: oldPlayer.userId ?? identity?.user_id ?? null
           });
         } else {
           lobby.players.set(clientId, { 
@@ -2303,7 +2413,7 @@ io.on('connection', (socket) => {
     if (type === 'lobby:start-game-request') {
       const { lobbyCode } = clients.get(socket.id) || {};
       const requestId = payload?.requestId || null;
-      tryStartGameFromLobby({
+      await tryStartGameFromLobby({
         socket,
         clientId,
         code: lobbyCode?.toUpperCase(),
@@ -2315,7 +2425,7 @@ io.on('connection', (socket) => {
 
     if (type === 'game:create') {
       const code = payload?.code?.toUpperCase();
-      tryStartGameFromLobby({
+      await tryStartGameFromLobby({
         socket,
         clientId,
         code,
@@ -2348,7 +2458,7 @@ io.on('connection', (socket) => {
         }
       }
 
-      if (!oldPlayerId) {
+      if (!oldPlayerId && !playerPlatform.enabled) {
         const requestedName = (payload?.playerName || '').toString().trim().toLowerCase();
         if (requestedName) {
           const byNameCandidate = Array.from(game.players.values()).find((player) => {
@@ -2372,7 +2482,10 @@ io.on('connection', (socket) => {
           isHost: existingPlayer?.isHost || false,
           status: 'active',
           role: existingPlayer?.role ?? undefined,
-          cognitoSub: existingPlayer?.cognitoSub || cognitoSub
+          cognitoSub: existingPlayer?.cognitoSub || cognitoSub,
+          userId: existingPlayer?.userId ?? identity?.user_id ?? null,
+          bonuses: existingPlayer?.bonuses ?? [],
+          abandoned: Boolean(existingPlayer?.abandoned)
         });
 
         if (game.hostId === oldPlayerId) {
@@ -2466,7 +2579,7 @@ io.on('connection', (socket) => {
       // On remplace l'entrée du host au lieu d'ajouter un doublon.
       const hostSocket = socketsById.get(game.hostId);
       const hostDisconnected = game.hostId && !hostSocket;
-      if (hostDisconnected && disconnectedGameHosts.has(code)) {
+      if (!playerPlatform.enabled && hostDisconnected && disconnectedGameHosts.has(code)) {
         const oldHostPlayer = game.players.get(game.hostId);
         if (oldHostPlayer) {
           const oldHostId = game.hostId;
@@ -2511,6 +2624,10 @@ io.on('connection', (socket) => {
         }
       }
 
+      if (playerPlatform.enabled) {
+        send(socket, { type: 'game:error', payload: { message: 'La manche est réservée à ses participants' } });
+        return;
+      }
       game.players.set(clientId, {
         id: clientId,
         name: payload?.playerName || 'Joueur',
@@ -2574,7 +2691,11 @@ io.on('connection', (socket) => {
             name: payload?.playerName || oldPlayer.name || 'Host',
             isHost: true,
             status: oldPlayer.status || 'active',
-            role: oldPlayer.role ?? undefined
+            role: oldPlayer.role ?? undefined,
+            cognitoSub: oldPlayer.cognitoSub ?? identity?.cognito_sub,
+            userId: oldPlayer.userId ?? identity?.user_id,
+            bonuses: oldPlayer.bonuses ?? [],
+            abandoned: Boolean(oldPlayer.abandoned)
           });
         } else {
           game.players.set(clientId, {
@@ -2805,25 +2926,7 @@ io.on('connection', (socket) => {
       if (!gameCode || !state) return;
       const game = games.get(gameCode);
       if (!game || game.hostId !== clientId) return;
-      const gd = state.gameDetails || {};
-      persistToBdd('/api/game-sessions', 'POST', {
-        game_code: gameCode,
-        config_json: gd.id_game ? {
-          map_center_latitude: gd.map_center_latitude,
-          map_center_longitude: gd.map_center_longitude,
-          map_radius: gd.map_radius,
-          start_zone_latitude: gd.start_zone_latitude,
-          start_zone_longitude: gd.start_zone_longitude,
-          start_zone_rogue_latitude: gd.start_zone_rogue_latitude,
-          start_zone_rogue_longitude: gd.start_zone_rogue_longitude,
-          duration: gd.duration,
-          victory_condition_nb_objectivs: gd.victory_condition_nb_objectivs,
-          objectiv_zone_radius: gd.objectiv_zone_radius,
-          rogue_range: gd.rogue_range,
-          agent_range: gd.agent_range
-        } : null
-      });
-      // No recurrent /api/game-replay/snapshot call.
+      schedulePersist('game:snapshot-requested');
       return;
     }
 
@@ -2841,20 +2944,6 @@ io.on('connection', (socket) => {
             targetId: targetId || null
           });
           markStateChanged('game:state-sync', { code: gameCode, stateVersion });
-          persistToBdd(`/api/games/${gameCode}/events`, 'POST', {
-            events: [
-              {
-                event_type: 'game:state-sync',
-                actor_external_id: clientInfo.clientId,
-                payload_json: {
-                  stateVersion,
-                  targetId: targetId || null,
-                  winner_type: inner?.gameDetails?.winner_type || null,
-                  remaining_time: inner?.gameDetails?.remaining_time ?? null
-                }
-              }
-            ]
-          });
         }
       }
       if (targetId && !socketsById.get(targetId)) {
@@ -3005,6 +3094,30 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (type === 'game:return-to-lobby') {
+      const code = String(payload?.gameCode ?? '').toUpperCase();
+      const pendingLobby = lobbies.get(code);
+      const game = games.get(code);
+      const player = game?.players.get(clientId);
+      if (!game?.finishedAt || !player || player.abandoned) {
+        send(socket, { type: 'game:lobby-unavailable', payload: { requestId: payload?.requestId } });
+        return;
+      }
+      if (!pendingLobby) {
+        const roles = Object.fromEntries([...game.players.values()]
+          .filter((member) => member.userId).map((member) => [member.userId, member.role]));
+        lobbies.set(code, {
+          code, lobbyKey: game.lobbyKey, config: game.config, hostId: clientId,
+          players: new Map([[clientId, { ...player, isHost: true, status: 'disconnected' }]]),
+          previousRoles: roles, chatMessages: [], stateVersion: 1, createdAt: Date.now(),
+          lastActivityAt: Date.now(), expiresAt: Date.now() + LOBBY_TTL_MS
+        });
+        schedulePersist('lobby:next-round');
+      }
+      send(socket, { type: 'game:lobby-ready', payload: { code, requestId: payload?.requestId } });
+      return;
+    }
+
     if (type === 'game:leave') {
       const code = payload?.gameCode;
       const playerId = payload?.playerId || clientId;
@@ -3017,6 +3130,7 @@ io.on('connection', (socket) => {
       if (!game.players.has(playerId)) {
         return;
       }
+      if (!game.finishedAt) game.players.get(playerId).abandoned = true;
 
       if (game.hostId === playerId) {
         const leavingHost = game.players.get(playerId);
@@ -3583,9 +3697,9 @@ setInterval(() => {
   }
 }, 30000).unref();
 
-if (!MEMORY_ONLY_MODE) {
+if (!MEMORY_ONLY_MODE || playerPlatform.enabled) {
   setInterval(() => {
-    schedulePersist('periodic');
+    if (!playerPlatform.enabled || games.size || lobbies.size || pendingRoundResults.size) schedulePersist('periodic');
   }, 15000).unref();
 }
 
@@ -3597,7 +3711,8 @@ const gracefulPersistAndExit = async (signal) => {
     }
     await flushRuntimeEvents();
   }
-  if (!MEMORY_ONLY_MODE) {
+  if (!MEMORY_ONLY_MODE || playerPlatform.enabled) {
+    if (playerPlatform.enabled) await playerPlatform.pending;
     log(`[PERSIST] Signal ${signal} reçu, sauvegarde de l'état runtime...`);
     await persistRuntimeStateNow(`signal:${signal}`);
   }

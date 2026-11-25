@@ -56,6 +56,7 @@ class GameController extends ChangeNotifier {
   GameController({GameSocketService? socketService})
     : _socketService = socketService ?? GameSocketService() {
     _voiceChatService = VoiceChatService(
+      phase: 'game',
       signalSender: (targetId, signal) {
         return _socketService.sendGameSignal(
           targetId: targetId,
@@ -1379,6 +1380,9 @@ class GameController extends ChangeNotifier {
         final id = raw['id_player']?.toString();
         if (id == null || id.isEmpty) continue;
         final idx = players.indexWhere((p) => p.id == id);
+        // Membership comes from the join roster and peer events. A delayed
+        // host snapshot can still contain an old socket id after a reconnect.
+        if (idx == -1 && _hasJoinedGame) continue;
         final point = GeoPoint.tryParse(raw['latitude'], raw['longitude']);
         final lat = point?.latitude;
         final lng = point?.longitude;
@@ -1991,6 +1995,11 @@ class GameController extends ChangeNotifier {
       return;
     }
     sendRoleChat(trimmed);
+  }
+
+  Future<String?> prepareNextLobby() async {
+    final code = gameCode;
+    return code == null ? null : _socketService.prepareNextLobby(code);
   }
 
   void leaveGame() {

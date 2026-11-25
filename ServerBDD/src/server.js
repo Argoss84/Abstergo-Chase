@@ -6,7 +6,7 @@ import { closePool } from './db/pool.js';
 async function bootstrap() {
   await runMigrations();
 
-  const server = app.listen(env.port, () => {
+  const server = app.listen(env.passenger ? 'passenger' : env.port, () => {
     console.log(`ServerBDD started on port ${env.port}`);
   });
 

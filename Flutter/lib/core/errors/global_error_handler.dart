@@ -11,6 +11,7 @@ class GlobalErrorHandler {
         'Flutter framework error',
         error: details.exception,
         stackTrace: details.stack,
+        source: 'flutter.framework',
       );
     };
 
@@ -19,6 +20,7 @@ class GlobalErrorHandler {
         'Unhandled platform error',
         error: error,
         stackTrace: stackTrace,
+        source: 'platform.unhandled',
       );
       return true;
     };
@@ -29,6 +31,7 @@ class GlobalErrorHandler {
       'Unhandled zone error',
       error: error,
       stackTrace: stackTrace,
+      source: 'zone.unhandled',
     );
   }
 }

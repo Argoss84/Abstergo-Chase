@@ -1,5 +1,8 @@
 import 'package:flutter_tts/flutter_tts.dart';
+import 'dart:async';
+
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:broken_veil_protocol/features/account/application/account_settings_sync.dart';
 
 class TtsService {
   TtsService._();
@@ -17,6 +20,7 @@ class TtsService {
   Future<void> setEnabled(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_enabledKey, value);
+    unawaited(AccountSettingsSync.instance.record('ttsEnabled', value));
   }
 
   Future<void> speakIfEnabled(String text) async {

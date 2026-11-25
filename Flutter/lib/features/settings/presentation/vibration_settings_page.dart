@@ -5,6 +5,9 @@ import 'package:broken_veil_protocol/shared/services/screen_awake_service.dart';
 import 'package:broken_veil_protocol/shared/services/tts_service.dart';
 import 'package:broken_veil_protocol/shared/services/voice_settings_service.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:broken_veil_protocol/features/account/presentation/player_platform_page.dart';
+import 'package:broken_veil_protocol/features/diagnostics/presentation/error_journal_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -125,7 +128,22 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) {
     final settings = _settings;
     return Scaffold(
-      appBar: AppBar(title: const Text('Paramètres')),
+      appBar: AppBar(
+        title: const Text('Paramètres'),
+        actions: [
+          IconButton(
+            tooltip: 'Progression et bonus',
+            icon: const Icon(Icons.military_tech_outlined),
+            onPressed: () =>
+                context.push('${PlayerPlatformPage.routePath}/bonuses'),
+          ),
+          IconButton(
+            tooltip: 'Journal des erreurs',
+            icon: const Icon(Icons.bug_report_outlined),
+            onPressed: () => context.push(ErrorJournalPage.routePath),
+          ),
+        ],
+      ),
       body: AppPageBody(
         child: settings == null
             ? const Center(child: CircularProgressIndicator())

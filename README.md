@@ -5,7 +5,8 @@ Ce dépôt est organisé en plusieurs sous-projets complémentaires :
 - `Flutter/` : application mobile principale.
 - `Lab/` : interface web (Ionic/React) pour prototypes et tests d’interaction.
 - `Server/` : serveur de signalisation temps réel.
-- `ServerBDD/` : API Node/Express connectée à PostgreSQL.
+- `ErrorCollector/` collecte les erreurs et mesure les chemins du vocal WebRTC.
+- `ServerBDD/` : API Node/Express connectée à MySQL.
 - `Docker/` : conteneurs et scripts d’exécution locale.
 - `infra/` : infrastructure OpenTofu.
 - `BDDTester/` : mini-outil local de test visuel.

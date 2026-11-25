@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  const productionApi = 'https://serverbdd.example.test';
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   test('fresh release environment selects production', () async {
@@ -38,6 +39,7 @@ void main() {
       () async {
         final profile = await AccountApiService(
           useProduction: true,
+          baseUrl: productionApi,
         ).getMyProfile('test-token');
         expect(profile.username, 'Agent');
       },
@@ -46,18 +48,18 @@ void main() {
         return http.Response('{"user":{"username":"Agent"}}', 200);
       }),
     );
-    expect(
-      requests.single.toString(),
-      '${AppRuntimeConfig.serverBddProductionUrl}/api/users/me',
-    );
+    expect(requests.single.toString(), '$productionApi/api/users/me');
   });
 
   test('a production outage never falls back to localhost', () async {
     final requests = <Uri>[];
     await http.runWithClient(
       () => expectLater(
-        AccountApiService(useProduction: true).getMyProfile('test-token'),
-        throwsA(isA<http.ClientException>()),
+        AccountApiService(
+          useProduction: true,
+          baseUrl: productionApi,
+        ).getMyProfile('test-token'),
+        throwsA(isA<BackendUnavailableException>()),
       ),
       () => MockClient((request) async {
         requests.add(request.url);
@@ -65,9 +67,18 @@ void main() {
       }),
     );
     expect(requests, hasLength(1));
-    expect(
-      requests.single.origin,
-      Uri.parse(AppRuntimeConfig.serverBddProductionUrl).origin,
+    expect(requests.single.origin, productionApi);
+  });
+
+  test('release never sends credentials to an HTTP API', () async {
+    final api = AccountApiService(
+      useProduction: true,
+      baseUrl: 'http://serverbdd.example.test',
+      client: MockClient((_) async => throw StateError('Unexpected request')),
+    );
+    await expectLater(
+      api.getMyProfile('test-token'),
+      throwsA(isA<BackendUnavailableException>()),
     );
   });
 

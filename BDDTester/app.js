@@ -162,8 +162,13 @@ async function callApi(endpoint, method = "GET") {
   resultEl.textContent = `HTTP ${response.status}\n\n${text}`;
 }
 
+function adminHeaders() {
+  const token = document.getElementById("platformAdminToken").value.trim();
+  return token ? { Authorization: "Bearer " + token } : {};
+}
+
 async function loadConnectedUsers() {
-  const response = await fetch(`${config.apiBaseUrl}/api/admin/connected-users`);
+  const response = await fetch(`${config.apiBaseUrl}/api/admin/connected-users`, { headers: adminHeaders() });
   const text = await response.text();
   if (!response.ok) {
     sessionsContainerEl.innerHTML = `<p>Erreur chargement sessions: ${text}</p>`;
@@ -192,7 +197,7 @@ async function loadConnectedUsers() {
       try {
         const disconnectResponse = await fetch(
           `${config.apiBaseUrl}/api/admin/connected-users/${user.id}`,
-          { method: "DELETE" }
+          { method: "DELETE", headers: adminHeaders() }
         );
         const body = await disconnectResponse.text();
         if (!disconnectResponse.ok) {
@@ -221,7 +226,7 @@ function pretty(data) {
 }
 
 async function fetchJson(path) {
-  const response = await fetch(`${config.apiBaseUrl}${path}`);
+  const response = await fetch(`${config.apiBaseUrl}${path}`, { headers: adminHeaders() });
   const text = await response.text();
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} - ${text}`);

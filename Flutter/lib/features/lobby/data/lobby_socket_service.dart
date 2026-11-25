@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:broken_veil_protocol/shared/services/signaling_wake_service.dart';
+import 'package:broken_veil_protocol/shared/services/signaling_session.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 class LobbySocketService {
@@ -62,6 +63,9 @@ class LobbySocketService {
         io.OptionBuilder()
             .setPath(socketPath)
             .setTransports(<String>['websocket'])
+            .setAuthFn(
+              (callback) => SignalingSession.authenticate(serverUrl, callback),
+            )
             .enableForceNew()
             .disableMultiplex()
             .disableAutoConnect()

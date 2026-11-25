@@ -1,0 +1,54 @@
+CREATE TABLE IF NOT EXISTS player_stats (
+  user_id BIGINT UNSIGNED PRIMARY KEY,
+  level INT UNSIGNED NOT NULL DEFAULT 1,
+  xp BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  rank_tier VARCHAR(32) NOT NULL DEFAULT 'unranked',
+  wins INT UNSIGNED NOT NULL DEFAULT 0,
+  losses INT UNSIGNED NOT NULL DEFAULT 0,
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS level_thresholds (
+  level INT UNSIGNED PRIMARY KEY,
+  required_xp BIGINT UNSIGNED NOT NULL UNIQUE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO level_thresholds (level, required_xp)
+VALUES (1, 0), (2, 150), (3, 450), (4, 900), (5, 1500);
+
+CREATE TABLE IF NOT EXISTS bonuses (
+  id VARCHAR(48) PRIMARY KEY,
+  label VARCHAR(80) NOT NULL,
+  description VARCHAR(500) NULL,
+  minimum_level INT UNSIGNED NOT NULL,
+  allowed_role ENUM('AGENT', 'ROGUE') NULL,
+  use_type ENUM('reusable', 'consumable') NOT NULL,
+  initial_charges INT UNSIGNED NULL,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  FOREIGN KEY (minimum_level) REFERENCES level_thresholds(level)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS player_bonus_unlocks (
+  user_id BIGINT UNSIGNED NOT NULL,
+  bonus_id VARCHAR(48) NOT NULL,
+  remaining_charges INT UNSIGNED NULL,
+  equipped BOOLEAN NOT NULL DEFAULT FALSE,
+  unlocked_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (user_id, bonus_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (bonus_id) REFERENCES bonuses(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS xp_events (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT UNSIGNED NOT NULL,
+  game_player_id BIGINT UNSIGNED NULL,
+  source_key VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  source_type VARCHAR(40) NOT NULL,
+  points INT NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY user_xp_source (user_id, source_key),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (game_player_id) REFERENCES game_players(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

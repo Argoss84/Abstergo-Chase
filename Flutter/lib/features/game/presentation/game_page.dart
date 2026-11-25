@@ -235,6 +235,21 @@ class _GamePageState extends State<GamePage>
     if (mounted) context.go('/');
   }
 
+  Future<void> _returnToLobby() async {
+    final code = await _controller.prepareNextLobby();
+    if (!mounted) return;
+    if (code == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Salon indisponible. Réessaie dans un instant.'),
+        ),
+      );
+      return;
+    }
+    final route = Uri(path: '/join-lobby', queryParameters: {'code': code});
+    context.go(route.toString());
+  }
+
   Future<void> _confirmFinishedGameExit() async {
     if (_leaveConfirmationVisible) return;
     _leaveConfirmationVisible = true;
@@ -2100,6 +2115,11 @@ class _GamePageState extends State<GamePage>
                     tooltip: 'Centrer sur le rendez-vous',
                     icon: const Icon(Icons.location_searching),
                   ),
+          ),
+          TextButton.icon(
+            onPressed: _returnToLobby,
+            icon: const Icon(Icons.replay),
+            label: const Text('Retour au salon'),
           ),
           Padding(
             padding: const EdgeInsetsDirectional.only(end: 12, bottom: 4),

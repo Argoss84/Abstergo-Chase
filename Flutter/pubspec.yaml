@@ -53,6 +53,13 @@ dependencies:
   amazon_cognito_identity_dart_2: ^4.0.0
   flutter_appauth: ^12.0.1
   keep_screen_on: ^6.0.0
+  package_info_plus: ^9.0.1
+  path: ^1.9.1
+  sqflite: ^2.4.2
+  share_plus: ^11.1.0
+  in_app_purchase: ^3.3.1
+  in_app_purchase_android: ^0.5.5
+  google_mobile_ads: ^9.2.0
 
 dependency_overrides:
   # Keep 5.0.2 with the targeted Android NMEA ANR fix (upstream issue #1795).

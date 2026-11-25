@@ -1,0 +1,7 @@
+node_modules/
+.env
+tmp/
+__pycache__/
+.deployment-*.json
+.deployment-backups/
+deployment-public.json

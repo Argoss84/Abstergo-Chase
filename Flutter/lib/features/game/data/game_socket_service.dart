@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:broken_veil_protocol/shared/services/signaling_wake_service.dart';
+import 'package:broken_veil_protocol/shared/services/signaling_session.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 class GameSocketService {
@@ -51,6 +52,9 @@ class GameSocketService {
         io.OptionBuilder()
             .setPath(socketPath)
             .setTransports(<String>['websocket'])
+            .setAuthFn(
+              (callback) => SignalingSession.authenticate(serverUrl, callback),
+            )
             .enableForceNew()
             .disableMultiplex()
             .disableAutoConnect()
@@ -274,6 +278,36 @@ class GameSocketService {
         'clientVersion': _clientVersion,
       },
     });
+  }
+
+  Future<String?> prepareNextLobby(String code) async {
+    if (!isConnected) return null;
+    final requestId = _requestId();
+    final wait = Completer<String?>();
+    final sub = messages.listen((event) {
+      final payload = event['payload'];
+      if (payload is! Map ||
+          payload['requestId'] != requestId ||
+          wait.isCompleted) {
+        return;
+      }
+      if (event['type'] == 'game:lobby-ready') {
+        wait.complete(payload['code'] as String?);
+      }
+      if (event['type'] == 'game:lobby-unavailable') wait.complete(null);
+    });
+    _emit({
+      'type': 'game:return-to-lobby',
+      'payload': {'gameCode': code, 'requestId': requestId},
+    });
+    try {
+      return await wait.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => null,
+      );
+    } finally {
+      await sub.cancel();
+    }
   }
 
   String _requestId() => DateTime.now().microsecondsSinceEpoch.toString();

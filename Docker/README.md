@@ -1,7 +1,7 @@
 # Déploiement Docker
 
-Ce dossier décrit la stack **MariaDB**, **ServerBDD** (API), **signaling** (Socket.IO) et le **frontend** (build statique + nginx).
-Pour la refonte actuelle de `ServerBDD` (PostgreSQL + Cognito, API privée Android), utiliser le compose dédié `docker-compose.serverbdd.yml`.
+Ce dossier décrit la stack **MySQL 8.4**, **ServerBDD** (API), **signaling** (Socket.IO) et le **frontend** (build statique + nginx).
+Pour la refonte actuelle de `ServerBDD` (MySQL et Cognito, API privée Android), utiliser le compose dédié `docker-compose.serverbdd.yml`.
 
 Pour un déploiement **ECR / ECS** (signaling + monitor + application) :  
 - Guide **console** : [AWS-ECS-Console.md](AWS-ECS-Console.md)  
