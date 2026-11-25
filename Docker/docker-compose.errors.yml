@@ -27,4 +27,4 @@ services:
         condition: service_healthy
     command: ["sh", "-c", "npm run migrate && npm start"]
 volumes:
-  errors_db_data:
+  errors_mysql_data:
