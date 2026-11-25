@@ -8,7 +8,8 @@
     "start": "node app.cjs",
     "dev": "node --watch src/server.js",
     "migrate": "node src/db/run-migrations.js",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "admin:password": "node scripts/hash-admin-password.js"
   },
   "keywords": [
     "mysql",
@@ -23,7 +24,8 @@
     "express": "^4.21.0",
     "joi": "^17.13.3",
     "jose": "^5.9.6",
-    "mysql2": "^3.14.0"
+    "mysql2": "^3.14.0",
+    "socket.io-client": "^4.8.1"
   },
   "engines": {
     "node": ">=20"

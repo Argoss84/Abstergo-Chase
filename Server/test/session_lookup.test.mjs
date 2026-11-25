@@ -12,7 +12,7 @@ const transportRequire = createRequire(socketRequire.resolve('engine.io'));
 const WebSocket = transportRequire('ws');
 
 class Client {
-  constructor(url, ticket = null) {
+  constructor(url, ticket = null, adminToken = null) {
     this.socket = new WebSocket(url);
     this.queue = [];
     this.waiters = [];
@@ -20,7 +20,10 @@ class Client {
       this.socket.on('error', reject);
       this.socket.on('message', (raw) => {
         const packet = raw.toString();
-        if (packet.startsWith('0')) this.socket.send('40' + (ticket ? JSON.stringify({ ticket }) : ''));
+        if (packet.startsWith('0')) {
+          const auth = adminToken ? { adminToken } : ticket ? { ticket } : null;
+          this.socket.send('40' + (auth ? JSON.stringify(auth) : ''));
+        }
         if (packet.startsWith('44')) reject(new Error('Namespace connection refused'));
         if (packet.startsWith('40')) resolve();
         if (packet === '2') this.socket.send('3');
@@ -36,6 +39,24 @@ class Client {
 
   send(type, payload) {
     this.socket.send(`42${JSON.stringify(['message', { type, payload }])}`);
+  }
+
+  stats() {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.socket.off('message', receive);
+        reject(new Error('Timeout waiting for administrator statistics'));
+      }, 4000);
+      const receive = (raw) => {
+        const packet = raw.toString();
+        if (!packet.startsWith('431')) return;
+        clearTimeout(timer);
+        this.socket.off('message', receive);
+        resolve(JSON.parse(packet.slice(3))[0]);
+      };
+      this.socket.on('message', receive);
+      this.socket.send('421["admin:getStats"]');
+    });
   }
 
   wait(type, predicate = () => true) {
@@ -222,6 +243,7 @@ test('authenticated players resume a saved round after a signaling restart and r
         DISABLE_BDD: 'false',
         BDD_URL: 'http://127.0.0.1:' + service.address().port,
         SIGNALING_INTERNAL_TOKEN: 'disposable-signaling-key',
+        SIGNALING_ADMIN_TOKEN: 'disposable-administrator-key',
         ENABLE_SERVER_LOGS: 'false',
         ENABLE_COST_METRICS: 'false',
       },
@@ -281,6 +303,16 @@ test('authenticated players resume a saved round after a signaling restart and r
   const resumedGuest = (await rogue.wait('game:joined')).payload;
   assert.notEqual(resumedGuest.hostId, resumedGuest.playerId);
   assert.equal(resumedGuest.game.players.length, 2);
+
+  const monitor = new Client('ws://127.0.0.1:' + port + '/socket.io/?EIO=4&transport=websocket',
+    null, 'disposable-administrator-key');
+  connections.push(monitor);
+  await monitor.ready;
+  const statistics = await monitor.stats();
+  assert.equal(statistics.connectedClients, 2);
+  assert.equal(statistics.clients.length, 2);
+  assert.equal(statistics.monitorConnections, 1);
+  assert.equal((await host.stats()).ok, false);
 
   host.send('state:sync', { payload: { gameDetails: { winner_type: 'AGENT', winner_reason: 'TIMEOUT' } } });
   await host.wait('game:finished');

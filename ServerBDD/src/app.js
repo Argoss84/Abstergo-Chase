@@ -7,9 +7,15 @@ import { socialRouter } from './modules/social/social.routes.js';
 import { progressionRouter } from './modules/progression/progression.routes.js';
 import { billingRouter } from './modules/billing/billing.routes.js';
 import { gamesRouter } from './modules/games/games.routes.js';
+import { env } from './config/env.js';
+import { adminConfig } from './modules/admin/security.js';
+import { AdminRepository } from './modules/admin/repository.js';
+import { AdminServices } from './modules/admin/services.js';
+import { createAdminRouter } from './modules/admin/routes.js';
 
 export const app = express();
 app.disable('x-powered-by');
+app.set('trust proxy', env.trustProxy);
 app.use((req, res, next) => {
   req.traceId = randomUUID();
   res.set({ 'Cache-Control': 'no-store', 'X-Request-Id': req.traceId });
@@ -33,6 +39,13 @@ app.use((req, res, next) => {
 
   return next();
 });
+
+const administrator = adminConfig();
+app.use('/admin', createAdminRouter({
+  config: administrator,
+  repository: new AdminRepository(pool),
+  services: new AdminServices(administrator),
+}));
 
 app.use(express.json({ limit: '4mb' }));
 

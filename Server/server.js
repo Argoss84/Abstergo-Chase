@@ -193,12 +193,16 @@ const buildCostMetricsSample = () => {
 };
 
 // Fonction pour obtenir les statistiques du serveur
+const playerClientEntries = () => Array.from(clients.entries())
+  .filter(([socketId]) => !io.sockets.sockets.get(socketId)?.data.isMonitor);
+
 const getServerStats = () => ({
-  connectedClients: clients.size,
+  connectedClients: playerClientEntries().length,
+  monitorConnections: clients.size - playerClientEntries().length,
   activeLobbies: lobbies.size,
   activeGames: games.size,
   totalSocketMessages,
-  clients: Array.from(clients.entries()).map(([socketId, info]) => {
+  clients: playerClientEntries().map(([socketId, info]) => {
     const socket = io.sockets.sockets.get(socketId);
     return {
       clientId: info.clientId,

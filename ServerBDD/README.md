@@ -1,5 +1,7 @@
 # ServerBDD
 
+Le [back-office administrateur](ADMIN.md) est disponible sur /admin/ après configuration de son compte dédié. Il supervise les joueurs, les manches, les abonnements, les diagnostics et les règles du jeu.
+
 API MySQL pour Broken Veil Protocol. Les migrations InnoDB créent la base métier à partir d’un schéma vide. Le collecteur de diagnostics dispose de son propre schéma.
 
 - users porte l’identité Cognito et l’identifiant public. user_active_sessions représente l’appareil actif. signaling_tickets autorise une connexion WebSocket à usage unique.

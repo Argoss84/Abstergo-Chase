@@ -14,6 +14,7 @@ export const env = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   port: Number(process.env.PORT ?? 5175),
   passenger: process.env.PASSENGER === 'true',
+  trustProxy: Number(process.env.TRUST_PROXY ?? 0),
   database: {
     host: process.env.DATABASE_HOST,
     port: Number(process.env.DATABASE_PORT ?? 3306),
