@@ -1380,6 +1380,9 @@ class GameController extends ChangeNotifier {
         final id = raw['id_player']?.toString();
         if (id == null || id.isEmpty) continue;
         final idx = players.indexWhere((p) => p.id == id);
+        // Membership comes from the join roster and peer events. A delayed
+        // host snapshot can still contain an old socket id after a reconnect.
+        if (idx == -1 && _hasJoinedGame) continue;
         final point = GeoPoint.tryParse(raw['latitude'], raw['longitude']);
         final lat = point?.latitude;
         final lng = point?.longitude;

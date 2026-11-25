@@ -82,7 +82,12 @@ class _PlayerPlatformPageState extends ConsumerState<PlayerPlatformPage> {
     }
   }
 
-  void _reload() => setState(() => _data = _load());
+  void _reload() {
+    final data = _load();
+    setState(() {
+      _data = data;
+    });
+  }
 
   Future<void> _mutate(
     String path,

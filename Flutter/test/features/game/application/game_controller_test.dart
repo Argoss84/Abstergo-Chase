@@ -292,6 +292,82 @@ void main() {
     controller.dispose();
   });
 
+  test(
+    'late snapshots cannot recreate a previous player id after joining',
+    () async {
+      SharedPreferences.setMockInitialValues({'voice.enabled': false});
+      final socket = _NoopGameSocketService();
+      final controller = GameController(socketService: socket);
+      addTearDown(controller.dispose);
+      await controller.initialize(_minimalGameBootstrap());
+      socket.emit({
+        'type': 'game:joined',
+        'payload': {
+          'code': 'ABC123',
+          'playerId': 'rogue-current',
+          'hostId': 'agent',
+          'game': {
+            'players': [
+              {'id': 'rogue-current', 'name': 'Rogue', 'role': 'ROGUE'},
+              {'id': 'rogue-ally', 'name': 'Ally', 'role': 'ROGUE'},
+              {'id': 'agent', 'name': 'Agent', 'role': 'AGENT'},
+            ],
+          },
+        },
+      });
+      await Future<void>.delayed(Duration.zero);
+
+      socket.emit({
+        'type': 'state:sync',
+        'payload': {
+          'players': [
+            {
+              'id_player': 'rogue-previous',
+              'displayName': 'Rogue',
+              'role': 'ROGUE',
+              'latitude': 45.764,
+              'longitude': 4.835,
+            },
+            {
+              'id_player': 'rogue-current',
+              'displayName': 'Rogue',
+              'role': 'ROGUE',
+              'latitude': 45.765,
+              'longitude': 4.836,
+            },
+            {
+              'id_player': 'rogue-ally',
+              'role': 'ROGUE',
+              'latitude': 45.766,
+              'longitude': 4.837,
+            },
+            {
+              'id_player': 'agent',
+              'role': 'AGENT',
+              'latitude': 45.764,
+              'longitude': 4.835,
+            },
+          ],
+        },
+      });
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.players.map((player) => player.id), [
+        'rogue-current',
+        'rogue-ally',
+        'agent',
+      ]);
+      expect(
+        controller.mapMarkerPlayers.where((player) => player.role == 'ROGUE'),
+        hasLength(2),
+      );
+      expect(
+        controller.mapMarkerPlayers.where((player) => player.role == 'AGENT'),
+        hasLength(1),
+      );
+    },
+  );
+
   test('keeps last known markers after a join roster without coordinates', () async {
     final socket = _NoopGameSocketService();
     final controller = GameController(socketService: socket);
